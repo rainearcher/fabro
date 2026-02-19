@@ -22,8 +22,10 @@ futures.workspace = true
 tokio-stream.workspace = true
 async-trait.workspace = true
 rayon.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
+dotenvy.workspace = true
 tokio = { workspace = true, features = ["test-util", "macros"] }
 
 [lints]

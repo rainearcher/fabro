@@ -3,7 +3,10 @@ use crate::error::SdkError;
 use crate::provider::StreamEventStream;
 use crate::retry::retry;
 use crate::tools::{execute_all_tools, Tool};
-use crate::types::{GenerateResult, RetryPolicy, Message, ToolDefinition, StepResult, Usage, Request, ToolChoice, ResponseFormat, ToolCall, FinishReason, Response, StreamEvent, StreamEventType};
+use crate::types::{
+    FinishReason, GenerateResult, Message, Request, Response, ResponseFormat, RetryPolicy,
+    StepResult, StreamEvent, ToolCall, ToolChoice, ToolDefinition, Usage,
+};
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 
@@ -64,13 +67,14 @@ fn build_request(
 }
 
 fn build_generate_result(steps: Vec<StepResult>, total_usage: Usage) -> GenerateResult {
-    let text = steps.last().expect("generate must produce at least one step").text.clone();
-    let reasoning = steps.last().expect("unreachable").reasoning.clone();
-    let tool_calls = steps.last().expect("unreachable").tool_calls.clone();
-    let tool_results = steps.last().expect("unreachable").tool_results.clone();
-    let finish_reason = steps.last().expect("unreachable").finish_reason.clone();
-    let usage = steps.last().expect("unreachable").usage.clone();
-    let response = steps.last().expect("unreachable").response.clone();
+    let last_idx = steps.len() - 1;
+    let text = steps[last_idx].text.clone();
+    let reasoning = steps[last_idx].reasoning.clone();
+    let tool_calls = steps[last_idx].tool_calls.clone();
+    let tool_results = steps[last_idx].tool_results.clone();
+    let finish_reason = steps[last_idx].finish_reason.clone();
+    let usage = steps[last_idx].usage.clone();
+    let response = steps[last_idx].response.clone();
 
     GenerateResult {
         text,
@@ -109,8 +113,10 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
     };
 
     let mut messages = build_initial_messages(&params)?;
-    let tool_definitions: Option<Vec<ToolDefinition>> =
-        params.tools.as_ref().map(|tools| tools.iter().map(|t| t.definition.clone()).collect());
+    let tool_definitions: Option<Vec<ToolDefinition>> = params
+        .tools
+        .as_ref()
+        .map(|tools| tools.iter().map(|t| t.definition.clone()).collect());
 
     let max_tool_rounds = params.max_tool_rounds;
     let mut steps: Vec<StepResult> = Vec::new();
@@ -132,12 +138,13 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
         let mut tool_results = Vec::new();
 
         if !tool_calls.is_empty()
-            && response.finish_reason.reason == "tool_calls"
+            && response.finish_reason == FinishReason::ToolCalls
             && params.tools.is_some()
         {
             let tools = params.tools.as_ref().expect("checked above");
             if tools.iter().any(|t| t.is_active()) {
-                let tool_refs: Vec<&Tool> = tools.iter().map(std::convert::AsRef::as_ref).collect();
+                let tool_refs: Vec<&Tool> =
+                    tools.iter().map(std::convert::AsRef::as_ref).collect();
                 tool_results = execute_all_tools(&tool_refs, &tool_calls).await;
             }
         }
@@ -156,7 +163,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
         total_usage = total_usage + response.usage.clone();
         steps.push(step);
 
-        if tool_calls.is_empty() || response.finish_reason.reason != "tool_calls" {
+        if tool_calls.is_empty() || response.finish_reason != FinishReason::ToolCalls {
             break;
         }
         if round >= max_tool_rounds || tool_results.is_empty() {
@@ -277,7 +284,7 @@ pub struct StreamAccumulator {
 }
 
 impl StreamAccumulator {
-    #[must_use] 
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             text_parts: Vec::new(),
@@ -290,44 +297,40 @@ impl StreamAccumulator {
     }
 
     pub fn process(&mut self, event: &StreamEvent) {
-        match &event.r#type {
-            StreamEventType::TextDelta => {
-                if let Some(delta) = &event.delta {
-                    self.text_parts.push(delta.clone());
-                }
+        match event {
+            StreamEvent::TextDelta { delta, .. } => {
+                self.text_parts.push(delta.clone());
             }
-            StreamEventType::ReasoningDelta => {
-                if let Some(delta) = &event.reasoning_delta {
-                    self.reasoning_parts.push(delta.clone());
-                }
+            StreamEvent::ReasoningDelta { delta } => {
+                self.reasoning_parts.push(delta.clone());
             }
-            StreamEventType::ToolCallEnd => {
-                if let Some(tc) = &event.tool_call {
-                    self.tool_calls.push(tc.clone());
-                }
+            StreamEvent::ToolCallEnd { tool_call } => {
+                self.tool_calls.push(tool_call.clone());
             }
-            StreamEventType::Finish => {
-                self.finish_reason.clone_from(&event.finish_reason);
-                self.usage.clone_from(&event.usage);
-                if let Some(r) = &event.response {
-                    self.response = Some(*r.clone());
-                }
+            StreamEvent::Finish {
+                finish_reason,
+                usage,
+                response,
+            } => {
+                self.finish_reason = Some(finish_reason.clone());
+                self.usage = Some(usage.clone());
+                self.response = Some(*response.clone());
             }
             _ => {}
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn response(&self) -> Option<&Response> {
         self.response.as_ref()
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn text(&self) -> String {
         self.text_parts.join("")
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn reasoning(&self) -> Option<String> {
         if self.reasoning_parts.is_empty() {
             None
@@ -350,13 +353,13 @@ impl Default for StreamAccumulator {
 ///
 /// Returns `SdkError::Configuration` if both `prompt` and `messages` are set,
 /// or any provider error encountered during streaming setup.
-pub async fn stream_generate(
-    params: GenerateParams,
-) -> Result<StreamEventStream, SdkError> {
+pub async fn stream_generate(params: GenerateParams) -> Result<StreamEventStream, SdkError> {
     let client = params.client.clone().unwrap_or_else(get_default_client);
     let messages = build_initial_messages(&params)?;
-    let tool_definitions: Option<Vec<ToolDefinition>> =
-        params.tools.as_ref().map(|tools| tools.iter().map(|t| t.definition.clone()).collect());
+    let tool_definitions: Option<Vec<ToolDefinition>> = params
+        .tools
+        .as_ref()
+        .map(|tools| tools.iter().map(|t| t.definition.clone()).collect());
 
     let request = build_request(&params, &messages, tool_definitions.as_ref());
     client.stream(&request).await
@@ -400,7 +403,7 @@ mod tests {
     use super::*;
     use crate::client::Client;
     use crate::provider::ProviderAdapter;
-    use crate::types::{ContentPart, Role, ToolCallData};
+    use crate::types::{ContentPart, Role};
     use futures::stream;
     use futures::StreamExt;
     use std::collections::HashMap;
@@ -419,6 +422,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::unnecessary_literal_bound)]
     #[async_trait::async_trait]
     impl ProviderAdapter for MockProvider {
         fn name(&self) -> &str {
@@ -431,7 +435,7 @@ mod tests {
                 model: "mock-model".into(),
                 provider: "mock".into(),
                 message: Message::assistant(&self.response_text),
-                finish_reason: FinishReason::stop(),
+                finish_reason: FinishReason::Stop,
                 usage: Usage {
                     input_tokens: 10,
                     output_tokens: 20,
@@ -452,7 +456,7 @@ mod tests {
             let events = vec![
                 Ok(StreamEvent::text_delta(&text, Some("t1".into()))),
                 Ok(StreamEvent::finish(
-                    FinishReason::stop(),
+                    FinishReason::Stop,
                     Usage {
                         input_tokens: 10,
                         output_tokens: 20,
@@ -464,7 +468,7 @@ mod tests {
                         model: "mock-model".into(),
                         provider: "mock".into(),
                         message: Message::assistant(&text),
-                        finish_reason: FinishReason::stop(),
+                        finish_reason: FinishReason::Stop,
                         usage: Usage {
                             input_tokens: 10,
                             output_tokens: 20,
@@ -502,7 +506,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.text, "Hi there!");
-        assert_eq!(result.finish_reason.reason, "stop");
+        assert_eq!(result.finish_reason, FinishReason::Stop);
         assert_eq!(result.usage.input_tokens, 10);
         assert_eq!(result.steps.len(), 1);
     }
@@ -561,6 +565,7 @@ mod tests {
         call_count: Arc<AtomicU32>,
     }
 
+    #[allow(clippy::unnecessary_literal_bound)]
     #[async_trait::async_trait]
     impl ProviderAdapter for ToolCallMockProvider {
         fn name(&self) -> &str {
@@ -578,16 +583,15 @@ mod tests {
                     provider: "mock".into(),
                     message: Message {
                         role: Role::Assistant,
-                        content: vec![ContentPart::tool_call(ToolCallData {
-                            id: "call_1".into(),
-                            name: "get_weather".into(),
-                            arguments: serde_json::json!({"city": "SF"}),
-                            r#type: "function".into(),
-                        })],
+                        content: vec![ContentPart::ToolCall(ToolCall::new(
+                            "call_1",
+                            "get_weather",
+                            serde_json::json!({"city": "SF"}),
+                        ))],
                         name: None,
                         tool_call_id: None,
                     },
-                    finish_reason: FinishReason::tool_calls(),
+                    finish_reason: FinishReason::ToolCalls,
                     usage: Usage {
                         input_tokens: 10,
                         output_tokens: 5,
@@ -605,7 +609,7 @@ mod tests {
                     model: "mock-model".into(),
                     provider: "mock".into(),
                     message: Message::assistant("The weather in SF is 72F"),
-                    finish_reason: FinishReason::stop(),
+                    finish_reason: FinishReason::Stop,
                     usage: Usage {
                         input_tokens: 20,
                         output_tokens: 10,
@@ -671,17 +675,8 @@ mod tests {
     async fn stream_accumulator_collects_events() {
         let mut acc = StreamAccumulator::new();
 
-        acc.process(&StreamEvent {
-            r#type: StreamEventType::TextStart,
-            delta: None,
+        acc.process(&StreamEvent::TextStart {
             text_id: Some("t1".into()),
-            reasoning_delta: None,
-            tool_call: None,
-            finish_reason: None,
-            usage: None,
-            response: None,
-            error: None,
-            raw: None,
         });
 
         acc.process(&StreamEvent::text_delta("Hello", Some("t1".into())));
@@ -692,7 +687,7 @@ mod tests {
             model: "m".into(),
             provider: "p".into(),
             message: Message::assistant("Hello world"),
-            finish_reason: FinishReason::stop(),
+            finish_reason: FinishReason::Stop,
             usage: Usage {
                 input_tokens: 5,
                 output_tokens: 2,
@@ -705,9 +700,9 @@ mod tests {
         };
 
         acc.process(&StreamEvent::finish(
-            FinishReason::stop(),
+            FinishReason::Stop,
             resp.usage.clone(),
-            resp.clone(),
+            resp,
         ));
 
         assert_eq!(acc.text(), "Hello world");
@@ -720,17 +715,8 @@ mod tests {
     async fn stream_accumulator_collects_reasoning() {
         let mut acc = StreamAccumulator::new();
 
-        acc.process(&StreamEvent {
-            r#type: StreamEventType::ReasoningDelta,
-            delta: None,
-            text_id: None,
-            reasoning_delta: Some("Let me think...".into()),
-            tool_call: None,
-            finish_reason: None,
-            usage: None,
-            response: None,
-            error: None,
-            raw: None,
+        acc.process(&StreamEvent::ReasoningDelta {
+            delta: "Let me think...".into(),
         });
 
         assert_eq!(acc.reasoning(), Some("Let me think...".to_string()));
@@ -748,11 +734,13 @@ mod tests {
         .unwrap();
 
         let first = stream.next().await.unwrap().unwrap();
-        assert_eq!(first.r#type, StreamEventType::TextDelta);
-        assert_eq!(first.delta, Some("Hello stream!".to_string()));
+        match &first {
+            StreamEvent::TextDelta { delta, .. } => assert_eq!(delta, "Hello stream!"),
+            other => panic!("Expected TextDelta, got {other:?}"),
+        }
 
         let second = stream.next().await.unwrap().unwrap();
-        assert_eq!(second.r#type, StreamEventType::Finish);
+        assert!(matches!(second, StreamEvent::Finish { .. }));
     }
 
     #[tokio::test]

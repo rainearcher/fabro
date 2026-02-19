@@ -13,23 +13,6 @@ pub enum Role {
     Developer,
 }
 
-// --- 3.4 ContentKind ---
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ContentKind {
-    Text,
-    Image,
-    Audio,
-    Document,
-    ToolCall,
-    ToolResult,
-    Thinking,
-    RedactedThinking,
-    /// Extension for provider-specific content kinds
-    Custom(String),
-}
-
 // --- 3.5 Content Data Structures ---
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,116 +39,89 @@ pub struct DocumentData {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolCallData {
-    pub id: String,
-    pub name: String,
-    pub arguments: serde_json::Value,
-    #[serde(default = "default_tool_type")]
-    pub r#type: String,
-}
-
-fn default_tool_type() -> String {
-    "function".to_string()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolResultData {
-    pub tool_call_id: String,
-    pub content: serde_json::Value,
-    pub is_error: bool,
-    pub image_data: Option<Vec<u8>>,
-    pub image_media_type: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThinkingData {
     pub text: String,
     pub signature: Option<String>,
     pub redacted: bool,
 }
 
+// --- 5.4 ToolCall / ToolResult ---
+
+fn default_tool_type() -> String {
+    "function".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    #[serde(default = "default_tool_type")]
+    pub r#type: String,
+    pub raw_arguments: Option<String>,
+}
+
+impl ToolCall {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: serde_json::Value,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            arguments,
+            r#type: "function".to_string(),
+            raw_arguments: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolResult {
+    pub tool_call_id: String,
+    pub content: serde_json::Value,
+    pub is_error: bool,
+}
+
 // --- 3.3 ContentPart ---
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ContentPart {
-    pub kind: ContentKind,
-    pub text: Option<String>,
-    pub image: Option<ImageData>,
-    pub audio: Option<AudioData>,
-    pub document: Option<DocumentData>,
-    pub tool_call: Option<ToolCallData>,
-    pub tool_result: Option<ToolResultData>,
-    pub thinking: Option<ThinkingData>,
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+pub enum ContentPart {
+    Text(String),
+    Image(ImageData),
+    Audio(AudioData),
+    Document(DocumentData),
+    ToolCall(ToolCall),
+    ToolResult(ToolResult),
+    Thinking(ThinkingData),
+    RedactedThinking(ThinkingData),
 }
 
 impl ContentPart {
     pub fn text(text: impl Into<String>) -> Self {
-        Self {
-            kind: ContentKind::Text,
-            text: Some(text.into()),
-            image: None,
-            audio: None,
-            document: None,
-            tool_call: None,
-            tool_result: None,
-            thinking: None,
-        }
+        Self::Text(text.into())
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn image(image: ImageData) -> Self {
-        Self {
-            kind: ContentKind::Image,
-            text: None,
-            image: Some(image),
-            audio: None,
-            document: None,
-            tool_call: None,
-            tool_result: None,
-            thinking: None,
-        }
+        Self::Image(image)
     }
 
-    #[must_use] 
-    pub const fn tool_call(data: ToolCallData) -> Self {
-        Self {
-            kind: ContentKind::ToolCall,
-            text: None,
-            image: None,
-            audio: None,
-            document: None,
-            tool_call: Some(data),
-            tool_result: None,
-            thinking: None,
-        }
+    #[must_use]
+    pub const fn tool_call(tool_call: ToolCall) -> Self {
+        Self::ToolCall(tool_call)
     }
 
-    #[must_use] 
-    pub const fn tool_result(data: ToolResultData) -> Self {
-        Self {
-            kind: ContentKind::ToolResult,
-            text: None,
-            image: None,
-            audio: None,
-            document: None,
-            tool_call: None,
-            tool_result: Some(data),
-            thinking: None,
-        }
+    #[must_use]
+    pub const fn tool_result(tool_result: ToolResult) -> Self {
+        Self::ToolResult(tool_result)
     }
 
-    #[must_use] 
-    pub const fn thinking(data: ThinkingData) -> Self {
-        Self {
-            kind: ContentKind::Thinking,
-            text: None,
-            image: None,
-            audio: None,
-            document: None,
-            tool_call: None,
-            tool_result: None,
-            thinking: Some(data),
-        }
+    #[must_use]
+    pub const fn thinking(thinking: ThinkingData) -> Self {
+        Self::Thinking(thinking)
     }
 }
 
@@ -215,12 +171,10 @@ impl Message {
         let id = tool_call_id.into();
         Self {
             role: Role::Tool,
-            content: vec![ContentPart::tool_result(ToolResultData {
+            content: vec![ContentPart::ToolResult(ToolResult {
                 tool_call_id: id.clone(),
                 content: serde_json::Value::String(content.into()),
                 is_error,
-                image_data: None,
-                image_media_type: None,
             })],
             name: None,
             tool_call_id: Some(id),
@@ -228,12 +182,14 @@ impl Message {
     }
 
     /// Concatenates text from all text content parts.
-    #[must_use] 
+    #[must_use]
     pub fn text(&self) -> String {
         self.content
             .iter()
-            .filter(|part| part.kind == ContentKind::Text)
-            .filter_map(|part| part.text.as_deref())
+            .filter_map(|part| match part {
+                ContentPart::Text(text) => Some(text.as_str()),
+                _ => None,
+            })
             .collect::<Vec<_>>()
             .join("")
     }
@@ -241,65 +197,47 @@ impl Message {
 
 // --- 3.8 FinishReason ---
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FinishReason {
-    pub reason: String,
-    pub raw: Option<String>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ToolCalls,
+    ContentFilter,
+    Error,
+    Other(String),
 }
 
 impl FinishReason {
-    #[must_use] 
-    pub fn stop() -> Self {
-        Self {
-            reason: "stop".to_string(),
-            raw: None,
-        }
-    }
-
-    #[must_use] 
-    pub fn length() -> Self {
-        Self {
-            reason: "length".to_string(),
-            raw: None,
-        }
-    }
-
-    #[must_use] 
-    pub fn tool_calls() -> Self {
-        Self {
-            reason: "tool_calls".to_string(),
-            raw: None,
-        }
-    }
-
-    #[must_use] 
-    pub fn content_filter() -> Self {
-        Self {
-            reason: "content_filter".to_string(),
-            raw: None,
-        }
-    }
-
-    #[must_use] 
-    pub fn error() -> Self {
-        Self {
-            reason: "error".to_string(),
-            raw: None,
-        }
-    }
-
-    pub fn other(raw: impl Into<String>) -> Self {
-        let r = raw.into();
-        Self {
-            reason: "other".to_string(),
-            raw: Some(r),
-        }
-    }
-
     #[must_use]
-    pub fn with_raw(mut self, raw: impl Into<String>) -> Self {
-        self.raw = Some(raw.into());
-        self
+    pub const fn as_str(&self) -> &str {
+        match self {
+            Self::Stop => "stop",
+            Self::Length => "length",
+            Self::ToolCalls => "tool_calls",
+            Self::ContentFilter => "content_filter",
+            Self::Error => "error",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
+impl Serialize for FinishReason {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for FinishReason {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(match s.as_str() {
+            "stop" => Self::Stop,
+            "length" => Self::Length,
+            "tool_calls" => Self::ToolCalls,
+            "content_filter" => Self::ContentFilter,
+            "error" => Self::Error,
+            _ => Self::Other(s),
+        })
     }
 }
 
@@ -401,59 +339,20 @@ pub struct ToolDefinition {
 // --- 5.3 ToolChoice ---
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolChoice {
-    pub mode: String,
-    pub tool_name: Option<String>,
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum ToolChoice {
+    Auto,
+    None,
+    Required,
+    Named { tool_name: String },
 }
 
 impl ToolChoice {
-    #[must_use] 
-    pub fn auto() -> Self {
-        Self {
-            mode: "auto".to_string(),
-            tool_name: None,
-        }
-    }
-
-    #[must_use] 
-    pub fn none() -> Self {
-        Self {
-            mode: "none".to_string(),
-            tool_name: None,
-        }
-    }
-
-    #[must_use] 
-    pub fn required() -> Self {
-        Self {
-            mode: "required".to_string(),
-            tool_name: None,
-        }
-    }
-
     pub fn named(name: impl Into<String>) -> Self {
-        Self {
-            mode: "named".to_string(),
-            tool_name: Some(name.into()),
+        Self::Named {
+            tool_name: name.into(),
         }
     }
-}
-
-// --- 5.4 ToolCall / ToolResult ---
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments: serde_json::Value,
-    pub raw_arguments: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolResult {
-    pub tool_call_id: String,
-    pub content: serde_json::Value,
-    pub is_error: bool,
 }
 
 // --- 3.7 Response ---
@@ -472,36 +371,33 @@ pub struct Response {
 }
 
 impl Response {
-    #[must_use] 
+    #[must_use]
     pub fn text(&self) -> String {
         self.message.text()
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn tool_calls(&self) -> Vec<ToolCall> {
         self.message
             .content
             .iter()
-            .filter(|part| part.kind == ContentKind::ToolCall)
-            .filter_map(|part| {
-                part.tool_call.as_ref().map(|tc| ToolCall {
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    arguments: tc.arguments.clone(),
-                    raw_arguments: None,
-                })
+            .filter_map(|part| match part {
+                ContentPart::ToolCall(tc) => Some(tc.clone()),
+                _ => None,
             })
             .collect()
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn reasoning(&self) -> Option<String> {
         let texts: Vec<&str> = self
             .message
             .content
             .iter()
-            .filter(|part| part.kind == ContentKind::Thinking)
-            .filter_map(|part| part.thinking.as_ref().map(|t| t.text.as_str()))
+            .filter_map(|part| match part {
+                ContentPart::Thinking(t) => Some(t.text.as_str()),
+                _ => None,
+            })
             .collect();
 
         if texts.is_empty() {
@@ -514,83 +410,68 @@ impl Response {
 
 // --- 3.13 StreamEvent ---
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StreamEventType {
-    StreamStart,
-    TextStart,
-    TextDelta,
-    TextEnd,
-    ReasoningStart,
-    ReasoningDelta,
-    ReasoningEnd,
-    ToolCallStart,
-    ToolCallDelta,
-    ToolCallEnd,
-    Finish,
-    Error,
-    ProviderEvent,
-    /// Extension for custom event types
-    Custom(String),
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamEvent {
-    pub r#type: StreamEventType,
-    pub delta: Option<String>,
-    pub text_id: Option<String>,
-    pub reasoning_delta: Option<String>,
-    pub tool_call: Option<ToolCall>,
-    pub finish_reason: Option<FinishReason>,
-    pub usage: Option<Usage>,
-    pub response: Option<Box<Response>>,
-    pub error: Option<String>,
-    pub raw: Option<serde_json::Value>,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StreamEvent {
+    StreamStart,
+    TextStart {
+        text_id: Option<String>,
+    },
+    TextDelta {
+        delta: String,
+        text_id: Option<String>,
+    },
+    TextEnd {
+        text_id: Option<String>,
+    },
+    ReasoningStart,
+    ReasoningDelta {
+        delta: String,
+    },
+    ReasoningEnd,
+    ToolCallStart {
+        tool_call: ToolCall,
+    },
+    ToolCallDelta {
+        tool_call: ToolCall,
+    },
+    ToolCallEnd {
+        tool_call: ToolCall,
+    },
+    Finish {
+        finish_reason: FinishReason,
+        usage: Usage,
+        response: Box<Response>,
+    },
+    Error {
+        error: String,
+        raw: Option<serde_json::Value>,
+    },
+    ProviderEvent {
+        raw: Option<serde_json::Value>,
+    },
 }
 
 impl StreamEvent {
     pub fn text_delta(delta: impl Into<String>, text_id: Option<String>) -> Self {
-        Self {
-            r#type: StreamEventType::TextDelta,
-            delta: Some(delta.into()),
+        Self::TextDelta {
+            delta: delta.into(),
             text_id,
-            reasoning_delta: None,
-            tool_call: None,
-            finish_reason: None,
-            usage: None,
-            response: None,
-            error: None,
-            raw: None,
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn finish(reason: FinishReason, usage: Usage, response: Response) -> Self {
-        Self {
-            r#type: StreamEventType::Finish,
-            delta: None,
-            text_id: None,
-            reasoning_delta: None,
-            tool_call: None,
-            finish_reason: Some(reason),
-            usage: Some(usage),
-            response: Some(Box::new(response)),
-            error: None,
-            raw: None,
+        Self::Finish {
+            finish_reason: reason,
+            usage,
+            response: Box::new(response),
         }
     }
 
     pub fn error(message: impl Into<String>) -> Self {
-        Self {
-            r#type: StreamEventType::Error,
-            delta: None,
-            text_id: None,
-            reasoning_delta: None,
-            tool_call: None,
-            finish_reason: None,
-            usage: None,
-            response: None,
-            error: Some(message.into()),
+        Self::Error {
+            error: message.into(),
             raw: None,
         }
     }
@@ -662,7 +543,7 @@ impl Default for RetryPolicy {
 }
 
 impl RetryPolicy {
-    #[must_use] 
+    #[must_use]
     pub fn delay_for_attempt(&self, attempt: u32) -> f64 {
         #[allow(clippy::cast_possible_wrap)]
         let delay = self.base_delay * self.backoff_multiplier.powi(attempt as i32);
@@ -735,9 +616,13 @@ mod tests {
         let msg = Message::tool_result("call_123", "72F and sunny", false);
         assert_eq!(msg.role, Role::Tool);
         assert_eq!(msg.tool_call_id, Some("call_123".to_string()));
-        let tr = msg.content[0].tool_result.as_ref().unwrap();
-        assert_eq!(tr.tool_call_id, "call_123");
-        assert!(!tr.is_error);
+        match &msg.content[0] {
+            ContentPart::ToolResult(tr) => {
+                assert_eq!(tr.tool_call_id, "call_123");
+                assert!(!tr.is_error);
+            }
+            other => panic!("Expected ToolResult, got {other:?}"),
+        }
     }
 
     #[test]
@@ -746,12 +631,7 @@ mod tests {
             role: Role::Assistant,
             content: vec![
                 ContentPart::text("Hello "),
-                ContentPart::tool_call(ToolCallData {
-                    id: "c1".into(),
-                    name: "test".into(),
-                    arguments: serde_json::json!({}),
-                    r#type: "function".into(),
-                }),
+                ContentPart::ToolCall(ToolCall::new("c1", "test", serde_json::json!({}))),
                 ContentPart::text("world"),
             ],
             name: None,
@@ -764,12 +644,11 @@ mod tests {
     fn message_text_returns_empty_for_no_text_parts() {
         let msg = Message {
             role: Role::Assistant,
-            content: vec![ContentPart::tool_call(ToolCallData {
-                id: "c1".into(),
-                name: "test".into(),
-                arguments: serde_json::json!({}),
-                r#type: "function".into(),
-            })],
+            content: vec![ContentPart::ToolCall(ToolCall::new(
+                "c1",
+                "test",
+                serde_json::json!({}),
+            ))],
             name: None,
             tool_call_id: None,
         };
@@ -777,22 +656,31 @@ mod tests {
     }
 
     #[test]
-    fn finish_reason_constructors() {
-        assert_eq!(FinishReason::stop().reason, "stop");
-        assert_eq!(FinishReason::length().reason, "length");
-        assert_eq!(FinishReason::tool_calls().reason, "tool_calls");
-        assert_eq!(FinishReason::content_filter().reason, "content_filter");
-        assert_eq!(FinishReason::error().reason, "error");
-        let other = FinishReason::other("custom_reason");
-        assert_eq!(other.reason, "other");
-        assert_eq!(other.raw, Some("custom_reason".to_string()));
+    fn finish_reason_variants() {
+        assert_eq!(FinishReason::Stop.as_str(), "stop");
+        assert_eq!(FinishReason::Length.as_str(), "length");
+        assert_eq!(FinishReason::ToolCalls.as_str(), "tool_calls");
+        assert_eq!(FinishReason::ContentFilter.as_str(), "content_filter");
+        assert_eq!(FinishReason::Error.as_str(), "error");
+        assert_eq!(
+            FinishReason::Other("custom_reason".into()).as_str(),
+            "custom_reason"
+        );
     }
 
     #[test]
-    fn finish_reason_with_raw() {
-        let fr = FinishReason::stop().with_raw("end_turn");
-        assert_eq!(fr.reason, "stop");
-        assert_eq!(fr.raw, Some("end_turn".to_string()));
+    fn finish_reason_serde_roundtrip() {
+        let reasons = vec![
+            FinishReason::Stop,
+            FinishReason::Length,
+            FinishReason::ToolCalls,
+            FinishReason::Other("custom".into()),
+        ];
+        for reason in &reasons {
+            let json = serde_json::to_string(reason).unwrap();
+            let deserialized: FinishReason = serde_json::from_str(&json).unwrap();
+            assert_eq!(&deserialized, reason);
+        }
     }
 
     #[test]
@@ -851,13 +739,17 @@ mod tests {
     }
 
     #[test]
-    fn tool_choice_constructors() {
-        assert_eq!(ToolChoice::auto().mode, "auto");
-        assert_eq!(ToolChoice::none().mode, "none");
-        assert_eq!(ToolChoice::required().mode, "required");
+    fn tool_choice_variants() {
+        assert_eq!(ToolChoice::Auto, ToolChoice::Auto);
+        assert_eq!(ToolChoice::None, ToolChoice::None);
+        assert_eq!(ToolChoice::Required, ToolChoice::Required);
         let named = ToolChoice::named("get_weather");
-        assert_eq!(named.mode, "named");
-        assert_eq!(named.tool_name, Some("get_weather".to_string()));
+        assert_eq!(
+            named,
+            ToolChoice::Named {
+                tool_name: "get_weather".to_string()
+            }
+        );
     }
 
     #[test]
@@ -867,7 +759,7 @@ mod tests {
             model: "test-model".into(),
             provider: "test".into(),
             message: Message::assistant("Hello world"),
-            finish_reason: FinishReason::stop(),
+            finish_reason: FinishReason::Stop,
             usage: Usage::default(),
             raw: None,
             warnings: vec![],
@@ -886,17 +778,16 @@ mod tests {
                 role: Role::Assistant,
                 content: vec![
                     ContentPart::text("Let me check"),
-                    ContentPart::tool_call(ToolCallData {
-                        id: "call_1".into(),
-                        name: "get_weather".into(),
-                        arguments: serde_json::json!({"city": "SF"}),
-                        r#type: "function".into(),
-                    }),
+                    ContentPart::ToolCall(ToolCall::new(
+                        "call_1",
+                        "get_weather",
+                        serde_json::json!({"city": "SF"}),
+                    )),
                 ],
                 name: None,
                 tool_call_id: None,
             },
-            finish_reason: FinishReason::tool_calls(),
+            finish_reason: FinishReason::ToolCalls,
             usage: Usage::default(),
             raw: None,
             warnings: vec![],
@@ -917,7 +808,7 @@ mod tests {
             message: Message {
                 role: Role::Assistant,
                 content: vec![
-                    ContentPart::thinking(ThinkingData {
+                    ContentPart::Thinking(ThinkingData {
                         text: "Let me think...".into(),
                         signature: Some("sig_123".into()),
                         redacted: false,
@@ -927,7 +818,7 @@ mod tests {
                 name: None,
                 tool_call_id: None,
             },
-            finish_reason: FinishReason::stop(),
+            finish_reason: FinishReason::Stop,
             usage: Usage::default(),
             raw: None,
             warnings: vec![],
@@ -944,7 +835,7 @@ mod tests {
             model: "test-model".into(),
             provider: "test".into(),
             message: Message::assistant("Hello"),
-            finish_reason: FinishReason::stop(),
+            finish_reason: FinishReason::Stop,
             usage: Usage::default(),
             raw: None,
             warnings: vec![],
@@ -956,16 +847,24 @@ mod tests {
     #[test]
     fn stream_event_text_delta() {
         let event = StreamEvent::text_delta("hello", Some("t1".into()));
-        assert_eq!(event.r#type, StreamEventType::TextDelta);
-        assert_eq!(event.delta, Some("hello".to_string()));
-        assert_eq!(event.text_id, Some("t1".to_string()));
+        match &event {
+            StreamEvent::TextDelta { delta, text_id } => {
+                assert_eq!(delta, "hello");
+                assert_eq!(text_id, &Some("t1".to_string()));
+            }
+            other => panic!("Expected TextDelta, got {other:?}"),
+        }
     }
 
     #[test]
     fn stream_event_error() {
         let event = StreamEvent::error("something went wrong");
-        assert_eq!(event.r#type, StreamEventType::Error);
-        assert_eq!(event.error, Some("something went wrong".to_string()));
+        match &event {
+            StreamEvent::Error { error, .. } => {
+                assert_eq!(error, "something went wrong");
+            }
+            other => panic!("Expected Error, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1019,17 +918,9 @@ mod tests {
     }
 
     #[test]
-    fn content_kind_custom() {
-        let kind = ContentKind::Custom("provider_specific".into());
-        assert_eq!(kind, ContentKind::Custom("provider_specific".into()));
-    }
-
-    #[test]
     fn content_part_text_constructor() {
         let part = ContentPart::text("hello");
-        assert_eq!(part.kind, ContentKind::Text);
-        assert_eq!(part.text, Some("hello".to_string()));
-        assert!(part.image.is_none());
+        assert_eq!(part, ContentPart::Text("hello".to_string()));
     }
 
     #[test]
@@ -1040,16 +931,22 @@ mod tests {
             media_type: None,
             detail: None,
         });
-        assert_eq!(part.kind, ContentKind::Image);
-        assert!(part.image.is_some());
+        assert!(matches!(part, ContentPart::Image(_)));
     }
 
     #[test]
-    fn tool_call_data_default_type() {
-        let data: ToolCallData = serde_json::from_str(
-            r#"{"id":"c1","name":"test","arguments":{}}"#,
-        )
-        .unwrap();
-        assert_eq!(data.r#type, "function");
+    fn tool_call_default_type() {
+        let tc: ToolCall =
+            serde_json::from_str(r#"{"id":"c1","name":"test","arguments":{}}"#).unwrap();
+        assert_eq!(tc.r#type, "function");
+    }
+
+    #[test]
+    fn tool_call_new_constructor() {
+        let tc = ToolCall::new("c1", "test", serde_json::json!({}));
+        assert_eq!(tc.id, "c1");
+        assert_eq!(tc.name, "test");
+        assert_eq!(tc.r#type, "function");
+        assert_eq!(tc.raw_arguments, None);
     }
 }

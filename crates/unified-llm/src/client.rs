@@ -14,7 +14,7 @@ pub struct Client {
 
 impl Client {
     /// Create a new Client with explicit configuration.
-    #[must_use] 
+    #[must_use]
     pub fn new(
         providers: HashMap<String, Arc<dyn ProviderAdapter>>,
         default_provider: Option<String>,
@@ -30,7 +30,7 @@ impl Client {
     /// Create a Client from environment variables (Section 2.2).
     /// Registers providers whose API keys are present in the environment.
     /// The first registered provider becomes the default.
-    #[must_use] 
+    #[must_use]
     pub fn from_env() -> Self {
         // In a real implementation, this would check for OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
         // and register the appropriate adapters. For now, return an empty client.
@@ -150,13 +150,16 @@ impl Client {
     }
 
     /// Get the list of registered provider names.
-    #[must_use] 
+    #[must_use]
     pub fn provider_names(&self) -> Vec<&str> {
-        self.providers.keys().map(std::string::String::as_str).collect()
+        self.providers
+            .keys()
+            .map(std::string::String::as_str)
+            .collect()
     }
 
     /// Get the default provider name.
-    #[must_use] 
+    #[must_use]
     pub fn default_provider(&self) -> Option<&str> {
         self.default_provider.as_deref()
     }
@@ -195,7 +198,7 @@ mod tests {
                 model: "mock-model".into(),
                 provider: self.provider_name.clone(),
                 message: Message::assistant(&self.response_text),
-                finish_reason: FinishReason::stop(),
+                finish_reason: FinishReason::Stop,
                 usage: Usage {
                     input_tokens: 10,
                     output_tokens: 20,
@@ -217,14 +220,14 @@ mod tests {
             let events = vec![
                 Ok(StreamEvent::text_delta(&text, Some("t1".into()))),
                 Ok(StreamEvent::finish(
-                    FinishReason::stop(),
+                    FinishReason::Stop,
                     Usage::default(),
                     Response {
                         id: "resp_mock".into(),
                         model: "mock-model".into(),
                         provider,
                         message: Message::assistant(&text),
-                        finish_reason: FinishReason::stop(),
+                        finish_reason: FinishReason::Stop,
                         usage: Usage::default(),
                         raw: None,
                         warnings: vec![],
@@ -281,7 +284,10 @@ mod tests {
         let client = Client::new(HashMap::new(), None, vec![]);
         let result = client.complete(&test_request()).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SdkError::Configuration { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            SdkError::Configuration { .. }
+        ));
     }
 
     #[tokio::test]
@@ -293,7 +299,10 @@ mod tests {
         req.provider = Some("nonexistent".into());
         let result = client.complete(&req).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SdkError::Configuration { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            SdkError::Configuration { .. }
+        ));
     }
 
     #[tokio::test]
@@ -317,8 +326,10 @@ mod tests {
 
         let mut stream = client.stream(&test_request()).await.unwrap();
         let first = stream.next().await.unwrap().unwrap();
-        assert_eq!(first.r#type, StreamEventType::TextDelta);
-        assert_eq!(first.delta, Some("streamed".to_string()));
+        match &first {
+            StreamEvent::TextDelta { delta, .. } => assert_eq!(delta, "streamed"),
+            other => panic!("Expected TextDelta, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -327,7 +338,7 @@ mod tests {
         client.register_provider(Arc::new(MockProvider::new("alpha", "")));
         client.register_provider(Arc::new(MockProvider::new("beta", "")));
         let mut names = client.provider_names();
-        names.sort();
+        names.sort_unstable();
         assert_eq!(names, vec!["alpha", "beta"]);
     }
 

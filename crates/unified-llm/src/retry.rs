@@ -90,13 +90,12 @@ mod tests {
             async move {
                 let count = cc.fetch_add(1, Ordering::SeqCst);
                 if count < 2 {
-                    Err(SdkError::Server {
-                        message: "error".into(),
-                        provider: "test".into(),
-                        status_code: Some(500),
-                        error_code: None,
-                        retry_after: None,
-                        raw: None,
+                    Err(SdkError::Provider {
+                        kind: crate::error::ProviderErrorKind::Server,
+                        detail: Box::new(crate::error::ProviderErrorDetail {
+                            status_code: Some(500),
+                            ..crate::error::ProviderErrorDetail::new("error", "test")
+                        }),
                     })
                 } else {
                     Ok(99)
@@ -125,13 +124,12 @@ mod tests {
             let cc = cc.clone();
             async move {
                 cc.fetch_add(1, Ordering::SeqCst);
-                Err::<i32, _>(SdkError::Server {
-                    message: "error".into(),
-                    provider: "test".into(),
-                    status_code: Some(500),
-                    error_code: None,
-                    retry_after: None,
-                    raw: None,
+                Err::<i32, _>(SdkError::Provider {
+                    kind: crate::error::ProviderErrorKind::Server,
+                    detail: Box::new(crate::error::ProviderErrorDetail {
+                        status_code: Some(500),
+                        ..crate::error::ProviderErrorDetail::new("error", "test")
+                    }),
                 })
             }
         })
@@ -157,13 +155,12 @@ mod tests {
             let cc = cc.clone();
             async move {
                 cc.fetch_add(1, Ordering::SeqCst);
-                Err::<i32, _>(SdkError::Authentication {
-                    message: "bad key".into(),
-                    provider: "test".into(),
-                    status_code: Some(401),
-                    error_code: None,
-                    retry_after: None,
-                    raw: None,
+                Err::<i32, _>(SdkError::Provider {
+                    kind: crate::error::ProviderErrorKind::Authentication,
+                    detail: Box::new(crate::error::ProviderErrorDetail {
+                        status_code: Some(401),
+                        ..crate::error::ProviderErrorDetail::new("bad key", "test")
+                    }),
                 })
             }
         })
@@ -190,13 +187,13 @@ mod tests {
             let cc = cc.clone();
             async move {
                 cc.fetch_add(1, Ordering::SeqCst);
-                Err::<i32, _>(SdkError::RateLimit {
-                    message: "rate limited".into(),
-                    provider: "test".into(),
-                    status_code: Some(429),
-                    error_code: None,
-                    retry_after: Some(100.0), // Way beyond max_delay
-                    raw: None,
+                Err::<i32, _>(SdkError::Provider {
+                    kind: crate::error::ProviderErrorKind::RateLimit,
+                    detail: Box::new(crate::error::ProviderErrorDetail {
+                        status_code: Some(429),
+                        retry_after: Some(100.0), // Way beyond max_delay
+                        ..crate::error::ProviderErrorDetail::new("rate limited", "test")
+                    }),
                 })
             }
         })
@@ -225,13 +222,13 @@ mod tests {
             async move {
                 let count = cc.fetch_add(1, Ordering::SeqCst);
                 if count < 1 {
-                    Err(SdkError::RateLimit {
-                        message: "rate limited".into(),
-                        provider: "test".into(),
-                        status_code: Some(429),
-                        error_code: None,
-                        retry_after: Some(0.01),
-                        raw: None,
+                    Err(SdkError::Provider {
+                        kind: crate::error::ProviderErrorKind::RateLimit,
+                        detail: Box::new(crate::error::ProviderErrorDetail {
+                            status_code: Some(429),
+                            retry_after: Some(0.01),
+                            ..crate::error::ProviderErrorDetail::new("rate limited", "test")
+                        }),
                     })
                 } else {
                     Ok(42)

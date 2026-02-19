@@ -7,3 +7,4 @@ pub mod tools;
 pub mod retry;
 pub mod generate;
 pub mod catalog;
+pub mod providers;

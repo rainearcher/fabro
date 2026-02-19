@@ -221,12 +221,11 @@ mod tests {
             },
         )];
 
-        let calls = vec![ToolCall {
-            id: "call_1".into(),
-            name: "greet".into(),
-            arguments: serde_json::json!({"name": "Alice"}),
-            raw_arguments: None,
-        }];
+        let calls = vec![ToolCall::new(
+            "call_1",
+            "greet",
+            serde_json::json!({"name": "Alice"}),
+        )];
 
         let tool_refs: Vec<&Tool> = tools.iter().collect();
         let results = execute_all_tools(&tool_refs, &calls).await;
@@ -240,12 +239,11 @@ mod tests {
     async fn execute_all_tools_with_unknown_tool() {
         let tools = vec![];
 
-        let calls = vec![ToolCall {
-            id: "call_1".into(),
-            name: "nonexistent".into(),
-            arguments: serde_json::json!({}),
-            raw_arguments: None,
-        }];
+        let calls = vec![ToolCall::new(
+            "call_1",
+            "nonexistent",
+            serde_json::json!({}),
+        )];
 
         let tool_refs: Vec<&Tool> = tools.iter().collect();
         let results = execute_all_tools(&tool_refs, &calls).await;
@@ -267,12 +265,11 @@ mod tests {
             |_args| async { Err("something went wrong".to_string()) },
         )];
 
-        let calls = vec![ToolCall {
-            id: "call_1".into(),
-            name: "fail".into(),
-            arguments: serde_json::json!({}),
-            raw_arguments: None,
-        }];
+        let calls = vec![ToolCall::new(
+            "call_1",
+            "fail",
+            serde_json::json!({}),
+        )];
 
         let tool_refs: Vec<&Tool> = tools.iter().collect();
         let results = execute_all_tools(&tool_refs, &calls).await;
@@ -302,18 +299,8 @@ mod tests {
         ];
 
         let calls = vec![
-            ToolCall {
-                id: "call_1".into(),
-                name: "tool_a".into(),
-                arguments: serde_json::json!({}),
-                raw_arguments: None,
-            },
-            ToolCall {
-                id: "call_2".into(),
-                name: "tool_b".into(),
-                arguments: serde_json::json!({}),
-                raw_arguments: None,
-            },
+            ToolCall::new("call_1", "tool_a", serde_json::json!({})),
+            ToolCall::new("call_2", "tool_b", serde_json::json!({})),
         ];
 
         let tool_refs: Vec<&Tool> = tools.iter().collect();
@@ -343,18 +330,8 @@ mod tests {
         ];
 
         let calls = vec![
-            ToolCall {
-                id: "call_1".into(),
-                name: "succeed".into(),
-                arguments: serde_json::json!({}),
-                raw_arguments: None,
-            },
-            ToolCall {
-                id: "call_2".into(),
-                name: "fail".into(),
-                arguments: serde_json::json!({}),
-                raw_arguments: None,
-            },
+            ToolCall::new("call_1", "succeed", serde_json::json!({})),
+            ToolCall::new("call_2", "fail", serde_json::json!({})),
         ];
 
         let tool_refs: Vec<&Tool> = tools.iter().collect();
