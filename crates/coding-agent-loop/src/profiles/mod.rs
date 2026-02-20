@@ -15,6 +15,9 @@ pub struct EnvContext {
     pub is_git_repo: bool,
     pub date: String,
     pub model_name: String,
+    pub knowledge_cutoff: String,
+    pub git_status_short: Option<String>,
+    pub git_recent_commits: Option<String>,
 }
 
 #[must_use]
@@ -25,25 +28,29 @@ pub fn build_env_context_block(env: &dyn ExecutionEnvironment) -> String {
 #[must_use]
 pub fn build_env_context_block_with(env: &dyn ExecutionEnvironment, ctx: &EnvContext) -> String {
     let mut lines = vec![
-        "# Environment".to_string(),
-        format!("- Working directory: {}", env.working_directory()),
-        format!("- Platform: {}", env.platform()),
-        format!("- OS: {}", env.os_version()),
+        "<environment>".to_string(),
+        format!("Working directory: {}", env.working_directory()),
+        format!("Is git repository: {}", ctx.is_git_repo),
     ];
 
-    if ctx.is_git_repo {
-        lines.push(format!("- Is a git repository: {}", ctx.is_git_repo));
-    }
     if let Some(ref branch) = ctx.git_branch {
-        lines.push(format!("- Git branch: {branch}"));
-    }
-    if !ctx.date.is_empty() {
-        lines.push(format!("- Date: {}", ctx.date));
-    }
-    if !ctx.model_name.is_empty() {
-        lines.push(format!("- Model: {}", ctx.model_name));
+        lines.push(format!("Git branch: {branch}"));
     }
 
+    lines.push(format!("Platform: {}", env.platform()));
+    lines.push(format!("OS version: {}", env.os_version()));
+
+    if !ctx.date.is_empty() {
+        lines.push(format!("Today's date: {}", ctx.date));
+    }
+    if !ctx.model_name.is_empty() {
+        lines.push(format!("Model: {}", ctx.model_name));
+    }
+    if !ctx.knowledge_cutoff.is_empty() {
+        lines.push(format!("Knowledge cutoff: {}", ctx.knowledge_cutoff));
+    }
+
+    lines.push("</environment>".to_string());
     lines.join("\n")
 }
 
@@ -57,7 +64,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for TestEnv {
-        async fn read_file(&self, _: &str) -> Result<String, String> {
+        async fn read_file(&self, _: &str, _: Option<usize>, _: Option<usize>) -> Result<String, String> {
             Ok(String::new())
         }
         async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
@@ -66,13 +73,12 @@ mod tests {
         async fn file_exists(&self, _: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
         async fn exec_command(
             &self,
             _: &str,
-            _: &[String],
             _: u64,
             _: Option<&str>,
             _: Option<&std::collections::HashMap<String, String>>,
@@ -93,7 +99,7 @@ mod tests {
         ) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {
@@ -117,7 +123,8 @@ mod tests {
     fn env_context_block_contains_platform() {
         let env = TestEnv;
         let block = build_env_context_block(&env);
-        assert!(block.contains("# Environment"));
+        assert!(block.contains("<environment>"));
+        assert!(block.contains("</environment>"));
         assert!(block.contains("linux"));
         assert!(block.contains("/home/test"));
         assert!(block.contains("Linux 6.1.0"));
@@ -131,11 +138,15 @@ mod tests {
             is_git_repo: true,
             date: "2026-02-20".into(),
             model_name: "claude-opus-4-6".into(),
+            knowledge_cutoff: "May 2025".into(),
+            git_status_short: None,
+            git_recent_commits: None,
         };
         let block = build_env_context_block_with(&env, &ctx);
         assert!(block.contains("Git branch: main"));
-        assert!(block.contains("Is a git repository: true"));
-        assert!(block.contains("Date: 2026-02-20"));
+        assert!(block.contains("Is git repository: true"));
+        assert!(block.contains("Today's date: 2026-02-20"));
         assert!(block.contains("Model: claude-opus-4-6"));
+        assert!(block.contains("Knowledge cutoff: May 2025"));
     }
 }

@@ -15,20 +15,15 @@ impl LocalExecutionEnvironment {
         Self { working_directory }
     }
 
-    fn format_line_numbered(content: &str) -> String {
-        use std::fmt::Write;
-        let lines: Vec<&str> = content.lines().collect();
-        let width = lines.len().to_string().len().max(1);
-        let mut result = String::new();
-        let mut line_num = 1;
-        for line in &lines {
-            let _ = writeln!(result, "{line_num:>width$} | {line}");
-            line_num += 1;
-        }
-        result
-    }
+    const ENV_SAFELIST: &'static [&'static str] = &[
+        "PATH", "HOME", "USER", "SHELL", "LANG", "TERM", "TMPDIR",
+        "GOPATH", "CARGO_HOME", "NVM_DIR",
+    ];
 
     fn should_filter_env_var(key: &str) -> bool {
+        if Self::ENV_SAFELIST.contains(&key) {
+            return false;
+        }
         let lower = key.to_lowercase();
         lower.ends_with("_api_key")
             || lower.ends_with("_secret")
@@ -49,12 +44,25 @@ impl LocalExecutionEnvironment {
 
 #[async_trait]
 impl ExecutionEnvironment for LocalExecutionEnvironment {
-    async fn read_file(&self, path: &str) -> Result<String, String> {
+    async fn read_file(&self, path: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String> {
         let full_path = self.resolve_path(path);
         let content = tokio::fs::read_to_string(&full_path)
             .await
             .map_err(|e| format!("Failed to read {}: {e}", full_path.display()))?;
-        Ok(Self::format_line_numbered(&content))
+
+        let all_lines: Vec<&str> = content.lines().collect();
+        let skip = offset.unwrap_or(0);
+        let take = limit.unwrap_or(all_lines.len());
+        let selected: Vec<&str> = all_lines.into_iter().skip(skip).take(take).collect();
+
+        use std::fmt::Write;
+        let width = (skip + selected.len()).to_string().len().max(1);
+        let mut result = String::new();
+        for (i, line) in selected.iter().enumerate() {
+            let line_num = skip + i + 1;
+            let _ = writeln!(result, "{line_num:>width$} | {line}");
+        }
+        Ok(result)
     }
 
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
@@ -74,40 +82,57 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
         Ok(full_path.exists())
     }
 
-    async fn list_directory(&self, path: &str) -> Result<Vec<DirEntry>, String> {
+    async fn list_directory(&self, path: &str, depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
         let full_path = self.resolve_path(path);
-        let mut entries = Vec::new();
-        let mut read_dir = tokio::fs::read_dir(&full_path)
-            .await
-            .map_err(|e| format!("Failed to read directory {}: {e}", full_path.display()))?;
+        let max_depth = depth.unwrap_or(1);
 
-        while let Some(entry) = read_dir
-            .next_entry()
-            .await
-            .map_err(|e| format!("Failed to read entry: {e}"))?
-        {
-            let metadata = entry
-                .metadata()
-                .await
-                .map_err(|e| format!("Failed to read metadata: {e}"))?;
-            entries.push(DirEntry {
-                name: entry.file_name().to_string_lossy().into_owned(),
-                is_dir: metadata.is_dir(),
-                size: if metadata.is_file() {
-                    Some(metadata.len())
+        fn list_recursive(
+            base: &std::path::Path,
+            prefix: &str,
+            current_depth: usize,
+            max_depth: usize,
+            entries: &mut Vec<DirEntry>,
+        ) -> Result<(), String> {
+            let mut dir_entries: Vec<std::fs::DirEntry> = std::fs::read_dir(base)
+                .map_err(|e| format!("Failed to read directory {}: {e}", base.display()))?
+                .filter_map(|e| e.ok())
+                .collect();
+            dir_entries.sort_by_key(|e| e.file_name());
+
+            for entry in dir_entries {
+                let metadata = entry
+                    .metadata()
+                    .map_err(|e| format!("Failed to read metadata: {e}"))?;
+                let name = if prefix.is_empty() {
+                    entry.file_name().to_string_lossy().into_owned()
                 } else {
-                    None
-                },
-            });
+                    format!("{prefix}/{}", entry.file_name().to_string_lossy())
+                };
+                let is_dir = metadata.is_dir();
+                entries.push(DirEntry {
+                    name: name.clone(),
+                    is_dir,
+                    size: if metadata.is_file() {
+                        Some(metadata.len())
+                    } else {
+                        None
+                    },
+                });
+                if is_dir && current_depth + 1 < max_depth {
+                    list_recursive(&entry.path(), &name, current_depth + 1, max_depth, entries)?;
+                }
+            }
+            Ok(())
         }
-        entries.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut entries = Vec::new();
+        list_recursive(&full_path, "", 0, max_depth, &mut entries)?;
         Ok(entries)
     }
 
     async fn exec_command(
         &self,
         command: &str,
-        args: &[String],
         timeout_ms: u64,
         working_dir: Option<&str>,
         env_vars: Option<&std::collections::HashMap<String, String>>,
@@ -129,17 +154,26 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
             std::path::PathBuf::from,
         );
 
-        let mut cmd = Command::new(command);
-        cmd.args(args)
+        let mut cmd = Command::new("/bin/bash");
+        cmd.arg("-c")
+            .arg(command)
             .current_dir(&effective_dir)
             .env_clear()
             .envs(filtered_env)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
+        #[cfg(unix)]
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setpgid(0, 0);
+                Ok(())
+            });
+        }
+
         let mut child = cmd
             .spawn()
-            .map_err(|e| format!("Failed to spawn {command}: {e}"))?;
+            .map_err(|e| format!("Failed to spawn command: {e}"))?;
 
         let timeout_duration = std::time::Duration::from_millis(timeout_ms);
 
@@ -149,12 +183,13 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
                     status_result.map_err(|e| format!("Failed to wait for process: {e}"))?;
                 (false, status.code().unwrap_or(-1))
             } else {
-                // SIGTERM first, then SIGKILL after 2 seconds
+                // SIGTERM the process group first, then SIGKILL after 2 seconds
                 #[cfg(unix)]
                 if let Some(pid) = child.id() {
                     #[allow(clippy::cast_possible_wrap)]
                     unsafe {
-                        libc::kill(pid as i32, libc::SIGTERM);
+                        // Negative pid sends signal to the entire process group
+                        libc::kill(-(pid as i32), libc::SIGTERM);
                     }
                     // Wait 2 seconds for graceful shutdown
                     if tokio::time::timeout(
@@ -207,37 +242,71 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
     ) -> Result<Vec<String>, String> {
         let full_path = self.resolve_path(path);
 
-        let mut args = vec!["-rn".to_string()];
-        if options.case_insensitive {
-            args.push("-i".into());
-        }
-        if let Some(ref glob_filter) = options.glob_filter {
-            args.push("--include".into());
-            args.push(glob_filter.clone());
-        }
-        if let Some(max) = options.max_results {
-            args.push("-m".into());
-            args.push(max.to_string());
-        }
-        args.push(pattern.into());
-        args.push(full_path.to_string_lossy().into_owned());
+        // Try rg (ripgrep) first, fall back to grep
+        let use_rg = std::process::Command::new("rg")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok();
 
-        let output = std::process::Command::new("grep")
-            .args(&args)
-            .output()
-            .map_err(|e| format!("Failed to run grep: {e}"))?;
+        let output = if use_rg {
+            let mut args = vec!["-n".to_string()];
+            if options.case_insensitive {
+                args.push("-i".into());
+            }
+            if let Some(ref glob_filter) = options.glob_filter {
+                args.push("--glob".into());
+                args.push(glob_filter.clone());
+            }
+            if let Some(max) = options.max_results {
+                args.push("-m".into());
+                args.push(max.to_string());
+            }
+            args.push(pattern.into());
+            args.push(full_path.to_string_lossy().into_owned());
+
+            std::process::Command::new("rg")
+                .args(&args)
+                .output()
+                .map_err(|e| format!("Failed to run rg: {e}"))?
+        } else {
+            let mut args = vec!["-rn".to_string()];
+            if options.case_insensitive {
+                args.push("-i".into());
+            }
+            if let Some(ref glob_filter) = options.glob_filter {
+                args.push("--include".into());
+                args.push(glob_filter.clone());
+            }
+            if let Some(max) = options.max_results {
+                args.push("-m".into());
+                args.push(max.to_string());
+            }
+            args.push(pattern.into());
+            args.push(full_path.to_string_lossy().into_owned());
+
+            std::process::Command::new("grep")
+                .args(&args)
+                .output()
+                .map_err(|e| format!("Failed to run grep: {e}"))?
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let results: Vec<String> = stdout.lines().map(String::from).filter(|l| !l.is_empty()).collect();
         Ok(results)
     }
 
-    async fn glob(&self, pattern: &str) -> Result<Vec<String>, String> {
-        // Use find + fnmatch-style pattern via shell glob expansion
+    async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String> {
+        let base_dir = path.map_or_else(
+            || self.working_directory.clone(),
+            std::path::PathBuf::from,
+        );
+
         let full_pattern = if Path::new(pattern).is_absolute() {
             pattern.to_string()
         } else {
-            format!("{}/{pattern}", self.working_directory.display())
+            format!("{}/{pattern}", base_dir.display())
         };
 
         // Use shell globbing via ls
@@ -327,7 +396,7 @@ mod tests {
         std::fs::write(dir.join("test.txt"), "hello\nworld\nfoo").unwrap();
 
         let env = LocalExecutionEnvironment::new(dir.clone());
-        let result = env.read_file("test.txt").await.unwrap();
+        let result = env.read_file("test.txt", None, None).await.unwrap();
 
         assert_eq!(result, "1 | hello\n2 | world\n3 | foo\n");
         std::fs::remove_dir_all(&dir).unwrap();
@@ -340,7 +409,7 @@ mod tests {
         std::fs::write(dir.join("padded.txt"), content.trim_end()).unwrap();
 
         let env = LocalExecutionEnvironment::new(dir.clone());
-        let result = env.read_file("padded.txt").await.unwrap();
+        let result = env.read_file("padded.txt", None, None).await.unwrap();
 
         assert!(result.starts_with(" 1 | line 1\n"));
         assert!(result.contains("12 | line 12\n"));
@@ -351,7 +420,7 @@ mod tests {
     async fn read_file_not_found() {
         let dir = temp_dir();
         let env = LocalExecutionEnvironment::new(dir.clone());
-        let result = env.read_file("nonexistent.txt").await;
+        let result = env.read_file("nonexistent.txt", None, None).await;
         assert!(result.is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -393,7 +462,7 @@ mod tests {
         std::fs::create_dir(dir.join("c_dir")).unwrap();
 
         let env = LocalExecutionEnvironment::new(dir.clone());
-        let entries = env.list_directory(".").await.unwrap();
+        let entries = env.list_directory(".", None).await.unwrap();
 
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].name, "a.txt");
@@ -411,7 +480,7 @@ mod tests {
         let dir = temp_dir();
         let env = LocalExecutionEnvironment::new(dir.clone());
         let result = env
-            .exec_command("echo", &["hello".into()], 5000, None, None)
+            .exec_command("echo hello", 5000, None, None)
             .await
             .unwrap();
 
@@ -427,7 +496,7 @@ mod tests {
         let dir = temp_dir();
         let env = LocalExecutionEnvironment::new(dir.clone());
         let result = env
-            .exec_command("sh", &["-c".into(), "exit 42".into()], 5000, None, None)
+            .exec_command("exit 42", 5000, None, None)
             .await
             .unwrap();
 
@@ -441,7 +510,7 @@ mod tests {
         let dir = temp_dir();
         let env = LocalExecutionEnvironment::new(dir.clone());
         let result = env
-            .exec_command("sleep", &["10".into()], 200, None, None)
+            .exec_command("sleep 10", 200, None, None)
             .await
             .unwrap();
 
@@ -455,7 +524,7 @@ mod tests {
         let dir = temp_dir();
         let env = LocalExecutionEnvironment::new(dir.clone());
         let result = env
-            .exec_command("sh", &["-c".into(), "echo err >&2".into()], 5000, None, None)
+            .exec_command("echo err >&2", 5000, None, None)
             .await
             .unwrap();
 
@@ -602,21 +671,10 @@ mod tests {
         std::fs::write(dir.join("c.txt"), "").unwrap();
 
         let env = LocalExecutionEnvironment::new(dir.clone());
-        let results = env.glob("*.rs").await.unwrap();
+        let results = env.glob("*.rs", None).await.unwrap();
 
         assert_eq!(results.len(), 2);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    #[test]
-    fn format_line_numbered_empty() {
-        let result = LocalExecutionEnvironment::format_line_numbered("");
-        assert_eq!(result, "");
-    }
-
-    #[test]
-    fn format_line_numbered_single_line() {
-        let result = LocalExecutionEnvironment::format_line_numbered("hello");
-        assert_eq!(result, "1 | hello\n");
-    }
 }

@@ -33,7 +33,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for TestEnv {
-        async fn read_file(&self, _: &str) -> Result<String, String> {
+        async fn read_file(&self, _: &str, _: Option<usize>, _: Option<usize>) -> Result<String, String> {
             Ok(String::new())
         }
         async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
@@ -42,13 +42,12 @@ mod tests {
         async fn file_exists(&self, _: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
         async fn exec_command(
             &self,
             _: &str,
-            _: &[String],
             _: u64,
             _: Option<&str>,
             _: Option<&std::collections::HashMap<String, String>>,
@@ -69,7 +68,7 @@ mod tests {
         ) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {

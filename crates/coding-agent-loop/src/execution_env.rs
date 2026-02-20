@@ -25,14 +25,13 @@ pub struct GrepOptions {
 
 #[async_trait]
 pub trait ExecutionEnvironment: Send + Sync {
-    async fn read_file(&self, path: &str) -> Result<String, String>;
+    async fn read_file(&self, path: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String>;
     async fn write_file(&self, path: &str, content: &str) -> Result<(), String>;
     async fn file_exists(&self, path: &str) -> Result<bool, String>;
-    async fn list_directory(&self, path: &str) -> Result<Vec<DirEntry>, String>;
+    async fn list_directory(&self, path: &str, depth: Option<usize>) -> Result<Vec<DirEntry>, String>;
     async fn exec_command(
         &self,
         command: &str,
-        args: &[String],
         timeout_ms: u64,
         working_dir: Option<&str>,
         env_vars: Option<&std::collections::HashMap<String, String>>,
@@ -43,7 +42,7 @@ pub trait ExecutionEnvironment: Send + Sync {
         path: &str,
         options: &GrepOptions,
     ) -> Result<Vec<String>, String>;
-    async fn glob(&self, pattern: &str) -> Result<Vec<String>, String>;
+    async fn glob(&self, pattern: &str, path: Option<&str>) -> Result<Vec<String>, String>;
     async fn initialize(&self) -> Result<(), String>;
     async fn cleanup(&self) -> Result<(), String>;
     fn working_directory(&self) -> &str;
@@ -60,7 +59,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for MockEnv {
-        async fn read_file(&self, _path: &str) -> Result<String, String> {
+        async fn read_file(&self, _path: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
             Ok("hello".into())
         }
         async fn write_file(&self, _path: &str, _content: &str) -> Result<(), String> {
@@ -69,7 +68,7 @@ mod tests {
         async fn file_exists(&self, _path: &str) -> Result<bool, String> {
             Ok(true)
         }
-        async fn list_directory(&self, _path: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _path: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![DirEntry {
                 name: "test.rs".into(),
                 is_dir: false,
@@ -79,7 +78,6 @@ mod tests {
         async fn exec_command(
             &self,
             _command: &str,
-            _args: &[String],
             _timeout_ms: u64,
             _working_dir: Option<&str>,
             _env_vars: Option<&std::collections::HashMap<String, String>>,
@@ -100,7 +98,7 @@ mod tests {
         ) -> Result<Vec<String>, String> {
             Ok(vec!["match".into()])
         }
-        async fn glob(&self, _pattern: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _pattern: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec!["file.rs".into()])
         }
         async fn initialize(&self) -> Result<(), String> {
@@ -123,14 +121,14 @@ mod tests {
     #[tokio::test]
     async fn mock_env_read_file() {
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockEnv);
-        let result = env.read_file("test.rs").await.unwrap();
+        let result = env.read_file("test.rs", None, None).await.unwrap();
         assert_eq!(result, "hello");
     }
 
     #[tokio::test]
     async fn mock_env_exec_command() {
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockEnv);
-        let result = env.exec_command("echo", &[], 5000, None, None).await.unwrap();
+        let result = env.exec_command("echo", 5000, None, None).await.unwrap();
         assert_eq!(result.exit_code, 0);
         assert!(!result.timed_out);
     }
@@ -138,7 +136,7 @@ mod tests {
     #[tokio::test]
     async fn mock_env_list_directory() {
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockEnv);
-        let entries = env.list_directory("/tmp").await.unwrap();
+        let entries = env.list_directory("/tmp", None).await.unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "test.rs");
         assert!(!entries[0].is_dir);

@@ -96,25 +96,87 @@ impl ProviderProfile for OpenAiProfile {
         };
 
         format!(
-            "You are a coding assistant powered by OpenAI. You help users with software engineering tasks \
-             including solving bugs, adding new functionality, refactoring code, and explaining code.\n\n\
-             {env_block}\n\n\
-             # Tools\n\
-             Use the provided tools to interact with the codebase and environment.\n\n\
-             - read_file: Read files to understand code before modifying. Use offset/limit for large files.\n\
-             - apply_patch: Use the v4a patch format for all file modifications. The format uses \
-             `*** Begin Patch` / `*** End Patch` delimiters with `*** Add File:`, `*** Delete File:`, \
-             `*** Update File:` operations. Update operations use `@@` context hints and +/- prefixes \
-             for changes. Show 3 lines of context around each change.\n\
-             - write_file: Use for creating new files. For modifications, prefer apply_patch.\n\
-             - shell: Execute shell commands. Default timeout is 10 seconds. Use timeout_ms parameter \
-             for longer-running commands.\n\
-             - grep: Search file contents with regex. Use glob_filter to narrow results.\n\
-             - glob: Find files by name pattern.\n\n\
-             # Coding Best Practices\n\
-             Write clean, maintainable code. Handle errors appropriately. Follow existing code conventions in the project.\
-             {docs_section}\
-             {user_section}"
+            "\
+You are a coding agent powered by OpenAI, running in a terminal-based agentic coding assistant. \
+You are expected to be precise, safe, and helpful.
+
+You can receive user prompts and context such as files in the workspace, communicate with the \
+user by streaming thinking and responses, and emit function calls to run terminal commands and \
+apply patches.
+
+# Personality
+
+Be concise, direct, and friendly. Communicate efficiently, keeping the user clearly informed \
+about ongoing actions without unnecessary detail. Prioritize actionable guidance, clearly \
+stating assumptions, environment prerequisites, and next steps.
+
+{env_block}
+
+# AGENTS.md
+
+Repos may contain AGENTS.md files with instructions for the agent. These files can appear \
+anywhere in the repository. Instructions in AGENTS.md files whose scope includes a file you \
+touch must be obeyed. More-deeply-nested AGENTS.md files take precedence in case of conflict. \
+Direct system/developer/user instructions take precedence over AGENTS.md instructions.
+
+# Task Execution
+
+Keep going until the task is completely resolved before ending your turn. Autonomously resolve \
+the query to the best of your ability using the tools available. Do NOT guess or make up an answer.
+
+Working on repos in the current environment is allowed, even if they are proprietary.
+
+If completing the task requires writing or modifying files:
+- Fix the problem at the root cause rather than applying surface-level patches, when possible.
+- Avoid unneeded complexity in your solution.
+- Do not attempt to fix unrelated bugs or broken tests.
+- Keep changes consistent with the style of the existing codebase. Changes should be minimal \
+and focused on the task.
+- Use `git log` and `git blame` to search the history of the codebase if additional context is needed.
+- NEVER add copyright or license headers unless specifically requested.
+- Do not waste tokens re-reading files after calling apply_patch on them. The tool call will \
+fail if it did not work.
+- Do not `git commit` your changes or create new git branches unless explicitly requested.
+
+# Validating Your Work
+
+If the codebase has tests or the ability to build or run, consider using them to verify your \
+work. Start as specific as possible to the code you changed to catch issues efficiently, then \
+make your way to broader tests as you build confidence.
+
+# Tools
+
+Use the provided tools to interact with the codebase and environment.
+
+## read_file
+Read files to understand code before modifying. Use offset/limit for large files.
+
+## apply_patch
+Use the v4a patch format for all file modifications. The format uses `*** Begin Patch` / \
+`*** End Patch` delimiters with `*** Add File:`, `*** Delete File:`, `*** Update File:` \
+operations. Update operations use `@@` context hints and +/- prefixes for changes. Show 3 \
+lines of context around each change. NEVER use `applypatch` or `apply-patch`, only `apply_patch`.
+
+## write_file
+Use for creating new files. For modifications, prefer apply_patch.
+
+## shell
+Execute shell commands. Default timeout is 10 seconds. Use timeout_ms parameter for \
+longer-running commands. When searching for text or files, prefer `rg` (ripgrep) because \
+it is much faster than alternatives like `grep`.
+
+## grep
+Search file contents with regex. Use glob_filter to narrow results.
+
+## glob
+Find files by name pattern.
+
+# Coding Best Practices
+
+Write clean, maintainable code. Handle errors appropriately. Follow existing code conventions \
+in the project.\
+{docs_section}\
+{user_section}"
         )
     }
 
@@ -295,7 +357,7 @@ pub async fn apply_patch_operations(
                 results.push(format!("Deleted file: {path}"));
             }
             PatchOperation::Update { path, hunks } => {
-                let original = env.read_file(path).await?;
+                let original = env.read_file(path, None, None).await?;
                 let updated = apply_hunks(&original, hunks)?;
                 env.write_file(path, &updated).await?;
                 results.push(format!("Updated file: {path}"));
@@ -403,7 +465,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for TestEnv {
-        async fn read_file(&self, _: &str) -> Result<String, String> {
+        async fn read_file(&self, _: &str, _: Option<usize>, _: Option<usize>) -> Result<String, String> {
             Ok(String::new())
         }
         async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
@@ -412,13 +474,12 @@ mod tests {
         async fn file_exists(&self, _: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
         async fn exec_command(
             &self,
             _: &str,
-            _: &[String],
             _: u64,
             _: Option<&str>,
             _: Option<&std::collections::HashMap<String, String>>,
@@ -439,7 +500,7 @@ mod tests {
         ) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {
@@ -473,7 +534,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for MockFileEnv {
-        async fn read_file(&self, path: &str) -> Result<String, String> {
+        async fn read_file(&self, path: &str, _: Option<usize>, _: Option<usize>) -> Result<String, String> {
             self.files
                 .lock()
                 .unwrap()
@@ -491,13 +552,12 @@ mod tests {
         async fn file_exists(&self, path: &str) -> Result<bool, String> {
             Ok(self.files.lock().unwrap().contains_key(path))
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
         async fn exec_command(
             &self,
             _: &str,
-            _: &[String],
             _: u64,
             _: Option<&str>,
             _: Option<&std::collections::HashMap<String, String>>,
@@ -518,7 +578,7 @@ mod tests {
         ) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {
@@ -559,8 +619,8 @@ mod tests {
         let profile = OpenAiProfile::new("o3-mini");
         let env = TestEnv;
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None);
-        assert!(prompt.contains("You are a coding assistant powered by OpenAI"));
-        assert!(prompt.contains("# Environment"));
+        assert!(prompt.contains("You are a coding agent powered by OpenAI"));
+        assert!(prompt.contains("<environment>"));
         assert!(prompt.contains("linux"));
         assert!(prompt.contains("v4a patch format"));
         assert!(prompt.contains("*** Begin Patch"));
@@ -769,7 +829,7 @@ mod tests {
         let result = apply_patch_operations(&ops, &env).await.unwrap();
         assert!(result.contains("Added file: src/new.rs"));
 
-        let content = env.read_file("src/new.rs").await.unwrap();
+        let content = env.read_file("src/new.rs", None, None).await.unwrap();
         assert_eq!(content, "fn new() {}");
     }
 
@@ -796,7 +856,7 @@ mod tests {
         let result = apply_patch_operations(&ops, &env).await.unwrap();
         assert!(result.contains("Updated file: src/lib.rs"));
 
-        let content = env.read_file("src/lib.rs").await.unwrap();
+        let content = env.read_file("src/lib.rs", None, None).await.unwrap();
         assert!(content.contains("println!(\"new\")"));
         assert!(!content.contains("println!(\"old\")"));
     }

@@ -29,22 +29,13 @@ pub fn make_read_file_tool() -> RegisteredTool {
                 let offset = args.get("offset").and_then(serde_json::Value::as_u64);
                 let limit = args.get("limit").and_then(serde_json::Value::as_u64);
 
-                let content = env.read_file(file_path).await?;
-
-                // Default limit of 2000 lines when no limit param provided
-                let effective_limit = limit.unwrap_or(2000);
-
                 #[allow(clippy::cast_possible_truncation)]
-                let offset_val = offset.unwrap_or(1) as usize;
-                let lines: Vec<&str> = content.lines().collect();
-                let start = if offset_val > 0 { offset_val - 1 } else { 0 };
+                let offset_usize = offset.map(|v| v as usize);
                 #[allow(clippy::cast_possible_truncation)]
-                let selected: Vec<&str> = lines
-                    .into_iter()
-                    .skip(start)
-                    .take(effective_limit as usize)
-                    .collect();
-                Ok(selected.join("\n"))
+                let limit_usize = limit.map(|v| v as usize);
+
+                let content = env.read_file(file_path, offset_usize, limit_usize).await?;
+                Ok(content)
             })
         }),
     }
@@ -114,7 +105,7 @@ pub fn make_edit_file_tool() -> RegisteredTool {
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
 
-                let numbered_content = env.read_file(file_path).await?;
+                let numbered_content = env.read_file(file_path, None, None).await?;
 
                 // Strip line numbers: each line looks like "  1 | content" or " 10 | content"
                 let raw_lines: Vec<&str> = numbered_content
@@ -184,13 +175,7 @@ pub fn make_shell_tool_with_config(config: &SessionConfig) -> RegisteredTool {
                     .min(max_timeout);
 
                 let result = env
-                    .exec_command(
-                        "/bin/bash",
-                        &["-c".into(), command.into()],
-                        timeout_ms,
-                        None,
-                        None,
-                    )
+                    .exec_command(command, timeout_ms, None, None)
                     .await?;
 
                 let mut output = String::new();
@@ -283,13 +268,140 @@ pub fn make_glob_tool() -> RegisteredTool {
                     .get("path")
                     .and_then(serde_json::Value::as_str);
 
-                let full_pattern = match path {
-                    Some(dir) => format!("{dir}/{pattern}"),
-                    None => pattern.to_string(),
-                };
-
-                let results = env.glob(&full_pattern).await?;
+                let results = env.glob(pattern, path).await?;
                 Ok(results.join("\n"))
+            })
+        }),
+    }
+}
+
+#[must_use]
+pub fn make_read_many_files_tool() -> RegisteredTool {
+    RegisteredTool {
+        definition: ToolDefinition {
+            name: "read_many_files".into(),
+            description: "Read multiple files at once".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Array of absolute file paths to read"
+                    }
+                },
+                "required": ["paths"]
+            }),
+        },
+        executor: Arc::new(|args, env| {
+            Box::pin(async move {
+                let paths = args["paths"]
+                    .as_array()
+                    .ok_or_else(|| "paths must be an array".to_string())?;
+
+                let mut output = String::new();
+                for path_val in paths {
+                    let path = path_val
+                        .as_str()
+                        .ok_or_else(|| "each path must be a string".to_string())?;
+                    match env.read_file(path, None, None).await {
+                        Ok(content) => {
+                            let _ = write!(output, "=== {path} ===\n{content}\n\n");
+                        }
+                        Err(err) => {
+                            let _ = write!(output, "=== {path} ===\nError: {err}\n\n");
+                        }
+                    }
+                }
+                Ok(output)
+            })
+        }),
+    }
+}
+
+#[must_use]
+pub fn make_list_dir_tool() -> RegisteredTool {
+    RegisteredTool {
+        definition: ToolDefinition {
+            name: "list_dir".into(),
+            description: "List directory contents with depth control".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Directory path to list"},
+                    "depth": {"type": "integer", "description": "Depth of listing (default 1)"}
+                },
+                "required": ["path"]
+            }),
+        },
+        executor: Arc::new(|args, env| {
+            Box::pin(async move {
+                let path = args["path"]
+                    .as_str()
+                    .ok_or_else(|| "path is required".to_string())?;
+                #[allow(clippy::cast_possible_truncation)]
+                let depth = args
+                    .get("depth")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|v| v as usize);
+
+                let entries = env.list_directory(path, depth).await?;
+                let lines: Vec<String> = entries
+                    .iter()
+                    .map(|e| {
+                        if e.is_dir {
+                            format!("{}/", e.name)
+                        } else {
+                            e.name.clone()
+                        }
+                    })
+                    .collect();
+                Ok(lines.join("\n"))
+            })
+        }),
+    }
+}
+
+#[must_use]
+pub fn make_web_search_tool() -> RegisteredTool {
+    RegisteredTool {
+        definition: ToolDefinition {
+            name: "web_search".into(),
+            description: "Search the web".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "max_results": {"type": "integer", "description": "Maximum number of results"}
+                },
+                "required": ["query"]
+            }),
+        },
+        executor: Arc::new(|_args, _env| {
+            Box::pin(async move {
+                Ok("Web search is not configured. This is a placeholder tool.".to_string())
+            })
+        }),
+    }
+}
+
+#[must_use]
+pub fn make_web_fetch_tool() -> RegisteredTool {
+    RegisteredTool {
+        definition: ToolDefinition {
+            name: "web_fetch".into(),
+            description: "Fetch content from a URL".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to fetch"}
+                },
+                "required": ["url"]
+            }),
+        },
+        executor: Arc::new(|_args, _env| {
+            Box::pin(async move {
+                Ok("Web fetch is not configured. This is a placeholder tool.".to_string())
             })
         }),
     }
@@ -308,8 +420,12 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for ReadFileEnv {
-        async fn read_file(&self, _path: &str) -> Result<String, String> {
-            Ok(self.content.clone())
+        async fn read_file(&self, _path: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String> {
+            let lines: Vec<&str> = self.content.lines().collect();
+            let start = offset.unwrap_or(1).saturating_sub(1);
+            let count = limit.unwrap_or(2000);
+            let selected: Vec<&str> = lines.into_iter().skip(start).take(count).collect();
+            Ok(selected.join("\n"))
         }
         async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
             Ok(())
@@ -317,10 +433,10 @@ mod tests {
         async fn file_exists(&self, _: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
-        async fn exec_command(&self, _: &str, _: &[String], _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
+        async fn exec_command(&self, _: &str, _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
             Ok(ExecResult {
                 stdout: String::new(),
                 stderr: String::new(),
@@ -332,7 +448,7 @@ mod tests {
         async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {
@@ -358,7 +474,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for WriteFileEnv {
-        async fn read_file(&self, _path: &str) -> Result<String, String> {
+        async fn read_file(&self, _path: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
             Ok(String::new())
         }
         async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
@@ -368,10 +484,10 @@ mod tests {
         async fn file_exists(&self, _: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
-        async fn exec_command(&self, _: &str, _: &[String], _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
+        async fn exec_command(&self, _: &str, _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
             Ok(ExecResult {
                 stdout: String::new(),
                 stderr: String::new(),
@@ -383,7 +499,7 @@ mod tests {
         async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {
@@ -410,7 +526,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for EditFileEnv {
-        async fn read_file(&self, _path: &str) -> Result<String, String> {
+        async fn read_file(&self, _path: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
             Ok(self.content.clone())
         }
         async fn write_file(&self, _path: &str, content: &str) -> Result<(), String> {
@@ -420,10 +536,10 @@ mod tests {
         async fn file_exists(&self, _: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
-        async fn exec_command(&self, _: &str, _: &[String], _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
+        async fn exec_command(&self, _: &str, _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
             Ok(ExecResult {
                 stdout: String::new(),
                 stderr: String::new(),
@@ -435,7 +551,7 @@ mod tests {
         async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {
@@ -461,7 +577,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for ShellEnv {
-        async fn read_file(&self, _: &str) -> Result<String, String> {
+        async fn read_file(&self, _: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
             Ok(String::new())
         }
         async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
@@ -470,16 +586,16 @@ mod tests {
         async fn file_exists(&self, _: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
-        async fn exec_command(&self, _: &str, _: &[String], _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
+        async fn exec_command(&self, _: &str, _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
             Ok(self.result.clone())
         }
         async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {
@@ -505,7 +621,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for ShellCapturingEnv {
-        async fn read_file(&self, _: &str) -> Result<String, String> {
+        async fn read_file(&self, _: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
             Ok(String::new())
         }
         async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
@@ -514,13 +630,12 @@ mod tests {
         async fn file_exists(&self, _: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
         async fn exec_command(
             &self,
             _: &str,
-            _: &[String],
             timeout_ms: u64,
             _: Option<&str>,
             _: Option<&std::collections::HashMap<String, String>>,
@@ -537,7 +652,7 @@ mod tests {
         async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {
@@ -563,7 +678,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for GrepEnv {
-        async fn read_file(&self, _: &str) -> Result<String, String> {
+        async fn read_file(&self, _: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
             Ok(String::new())
         }
         async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
@@ -572,10 +687,10 @@ mod tests {
         async fn file_exists(&self, _: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
-        async fn exec_command(&self, _: &str, _: &[String], _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
+        async fn exec_command(&self, _: &str, _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
             Ok(ExecResult {
                 stdout: String::new(),
                 stderr: String::new(),
@@ -587,7 +702,7 @@ mod tests {
         async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
             Ok(self.results.clone())
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {
@@ -613,7 +728,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for GlobEnv {
-        async fn read_file(&self, _: &str) -> Result<String, String> {
+        async fn read_file(&self, _: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
             Ok(String::new())
         }
         async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
@@ -622,10 +737,10 @@ mod tests {
         async fn file_exists(&self, _: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
-        async fn exec_command(&self, _: &str, _: &[String], _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
+        async fn exec_command(&self, _: &str, _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
             Ok(ExecResult {
                 stdout: String::new(),
                 stderr: String::new(),
@@ -637,7 +752,7 @@ mod tests {
         async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
             Ok(self.results.clone())
         }
         async fn initialize(&self) -> Result<(), String> {

@@ -62,15 +62,18 @@ impl Session {
     /// Initialize session by discovering project docs and capturing environment context.
     /// Call before `process_input`.
     pub async fn initialize(&mut self) {
-        if let Some(ref git_root) = self.config.git_root {
-            self.project_docs = discover_project_docs(
-                self.execution_env.as_ref(),
-                git_root,
-                self.execution_env.working_directory(),
-                &self.provider_profile.id(),
-            )
-            .await;
-        }
+        let doc_root = self
+            .config
+            .git_root
+            .clone()
+            .unwrap_or_else(|| self.execution_env.working_directory().to_string());
+        self.project_docs = discover_project_docs(
+            self.execution_env.as_ref(),
+            &doc_root,
+            self.execution_env.working_directory(),
+            &self.provider_profile.id(),
+        )
+        .await;
 
         // Populate environment context
         self.env_context = self.build_env_context().await;
@@ -83,7 +86,7 @@ impl Session {
         // Detect git info via execution environment
         let git_branch = self
             .execution_env
-            .exec_command("git", &["rev-parse".into(), "--abbrev-ref".into(), "HEAD".into()], 5000, None, None)
+            .exec_command("git rev-parse --abbrev-ref HEAD", 5000, None, None)
             .await
             .ok()
             .filter(|r| r.exit_code == 0)
@@ -91,11 +94,38 @@ impl Session {
 
         let is_git_repo = git_branch.is_some();
 
+        let git_status_short = if is_git_repo {
+            self.execution_env
+                .exec_command("git status --short", 5000, None, None)
+                .await
+                .ok()
+                .filter(|r| r.exit_code == 0)
+                .map(|r| r.stdout.trim().to_string())
+                .filter(|s| !s.is_empty())
+        } else {
+            None
+        };
+
+        let git_recent_commits = if is_git_repo {
+            self.execution_env
+                .exec_command("git log --oneline -10", 5000, None, None)
+                .await
+                .ok()
+                .filter(|r| r.exit_code == 0)
+                .map(|r| r.stdout.trim().to_string())
+                .filter(|s| !s.is_empty())
+        } else {
+            None
+        };
+
         EnvContext {
             git_branch,
             is_git_repo,
             date: today,
             model_name,
+            knowledge_cutoff: String::new(),
+            git_status_short,
+            git_recent_commits,
         }
     }
 
@@ -139,6 +169,10 @@ impl Session {
 
     pub fn set_reasoning_effort(&mut self, effort: Option<String>) {
         self.config.reasoning_effort = effort;
+    }
+
+    pub fn set_max_turns(&mut self, max_turns: usize) {
+        self.config.max_turns = max_turns;
     }
 
     pub fn history(&self) -> &History {
@@ -233,11 +267,23 @@ impl Session {
             // Check abort flag
             if self.abort_flag.load(Ordering::SeqCst) {
                 self.state = SessionState::Closed;
+                self.event_emitter.emit(
+                    EventKind::SessionEnd,
+                    self.id.clone(),
+                    HashMap::new(),
+                );
                 return Err(AgentError::Aborted);
             }
 
             // Build request
             let request = self.build_request();
+
+            // Emit AssistantTextStart before LLM call
+            self.event_emitter.emit(
+                EventKind::AssistantTextStart,
+                self.id.clone(),
+                HashMap::new(),
+            );
 
             // Call LLM
             let response = match self.llm_client.complete(&request).await {
@@ -818,7 +864,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for MemoryExecutionEnvironment {
-        async fn read_file(&self, path: &str) -> Result<String, String> {
+        async fn read_file(&self, path: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
             self.files
                 .get(path)
                 .cloned()
@@ -833,14 +879,13 @@ mod tests {
             Ok(self.files.contains_key(path))
         }
 
-        async fn list_directory(&self, _path: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _path: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
 
         async fn exec_command(
             &self,
             _command: &str,
-            _args: &[String],
             _timeout_ms: u64,
             _working_dir: Option<&str>,
             _env_vars: Option<&std::collections::HashMap<String, String>>,
@@ -863,7 +908,7 @@ mod tests {
             Ok(vec![])
         }
 
-        async fn glob(&self, _pattern: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _pattern: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
 

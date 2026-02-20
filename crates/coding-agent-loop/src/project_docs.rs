@@ -23,7 +23,7 @@ pub async fn discover_project_docs(
     for dir in &directories {
         for filename in &candidate_filenames {
             let path = format!("{dir}/{filename}");
-            if let Ok(content) = env.read_file(&path).await {
+            if let Ok(content) = env.read_file(&path, None, None).await {
                 if content.is_empty() {
                     continue;
                 }
@@ -97,7 +97,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for DocEnv {
-        async fn read_file(&self, path: &str) -> Result<String, String> {
+        async fn read_file(&self, path: &str, _: Option<usize>, _: Option<usize>) -> Result<String, String> {
             self.files
                 .get(path)
                 .cloned()
@@ -109,10 +109,10 @@ mod tests {
         async fn file_exists(&self, path: &str) -> Result<bool, String> {
             Ok(self.files.contains_key(path))
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
-        async fn exec_command(&self, _: &str, _: &[String], _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
+        async fn exec_command(&self, _: &str, _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
             Ok(ExecResult {
                 stdout: String::new(),
                 stderr: String::new(),
@@ -124,7 +124,7 @@ mod tests {
         async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {

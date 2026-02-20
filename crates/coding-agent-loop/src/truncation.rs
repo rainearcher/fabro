@@ -51,16 +51,16 @@ pub fn truncate_output(output: &str, max_chars: usize, mode: TruncationMode) -> 
             let head = &output[..half];
             let tail = &output[output.len() - half..];
             format!(
-                "{head}\n\n[WARNING: Output truncated. {removed} characters removed. \
-                 Full output available in event stream. Retry with smaller scope if needed.]\n\n{tail}"
+                "{head}\n\n[WARNING: Tool output was truncated. {removed} characters were removed from the middle. \
+                 The full output is available in the event stream. \
+                 If you need to see specific parts, re-run the tool with more targeted parameters.]\n\n{tail}"
             )
         }
         TruncationMode::Tail => {
             let tail = &output[output.len() - max_chars..];
             format!(
-                "\n\n[WARNING: Output truncated. {removed} characters removed. \
-                 Showing last portion only. Full output available in event stream. \
-                 Retry with smaller scope if needed.]\n\n{tail}"
+                "[WARNING: Tool output was truncated. First {removed} characters were removed. \
+                 The full output is available in the event stream.]\n\n{tail}"
             )
         }
     }
@@ -78,8 +78,7 @@ pub fn truncate_lines(output: &str, max_lines: usize) -> String {
     let omitted = lines.len() - max_lines;
 
     format!(
-        "{}\n\n[WARNING: Output truncated by line count. {omitted} lines omitted. \
-         Showing first and last lines.]\n\n{}",
+        "{}\n\n[... {omitted} lines omitted ...]\n\n{}",
         head.join("\n"),
         tail.join("\n")
     )
@@ -144,16 +143,16 @@ mod tests {
         let output = "a".repeat(100);
         let result = truncate_output(&output, 40, TruncationMode::HeadTail);
         assert!(result.contains(&"a".repeat(20)));
-        assert!(result.contains("Output truncated"));
-        assert!(result.contains("60 characters removed"));
+        assert!(result.contains("Tool output was truncated"));
+        assert!(result.contains("60 characters were removed from the middle"));
     }
 
     #[test]
     fn tail_mode() {
         let output = format!("{}BBB", "A".repeat(100));
         let result = truncate_output(&output, 10, TruncationMode::Tail);
-        assert!(result.contains("Output truncated"));
-        assert!(result.contains("Showing last portion only"));
+        assert!(result.contains("Tool output was truncated"));
+        assert!(result.contains("First 93 characters were removed"));
         assert!(result.ends_with("AAAAAAABBB"));
     }
 
@@ -166,7 +165,7 @@ mod tests {
         assert!(result.contains("line 3"));
         assert!(result.contains("line 18"));
         assert!(result.contains("line 20"));
-        assert!(result.contains("14 lines omitted"));
+        assert!(result.contains("... 14 lines omitted ..."));
     }
 
     #[test]
@@ -182,14 +181,14 @@ mod tests {
 
     #[test]
     fn config_override_char_limit() {
-        let output = "x".repeat(200);
+        let output = "x".repeat(5000);
         let mut config = SessionConfig::default();
         config
             .tool_output_limits
-            .insert("my_tool".into(), 50);
+            .insert("my_tool".into(), 100);
         let result = truncate_tool_output(&output, "my_tool", &config);
         assert!(result.len() < output.len());
-        assert!(result.contains("Output truncated"));
+        assert!(result.contains("Tool output was truncated"));
     }
 
     #[test]

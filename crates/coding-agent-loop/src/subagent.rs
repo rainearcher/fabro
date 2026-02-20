@@ -191,7 +191,18 @@ pub fn make_spawn_agent_tool(
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| "Missing required parameter: task".to_string())?;
 
-                let session = session_factory();
+                // Extract optional max_turns parameter
+                #[allow(clippy::cast_possible_truncation)]
+                let max_turns = args
+                    .get("max_turns")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
+
+                // Note: working_dir and model require session factory changes to wire through
+                let mut session = session_factory();
+                if let Some(turns) = max_turns {
+                    session.set_max_turns(turns);
+                }
                 let mut mgr = manager.lock().await;
                 mgr.spawn(session, task.to_string(), current_depth)
             })
@@ -376,7 +387,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for MemoryExecutionEnvironment {
-        async fn read_file(&self, _path: &str) -> Result<String, String> {
+        async fn read_file(&self, _path: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
             Ok(String::new())
         }
         async fn write_file(&self, _path: &str, _content: &str) -> Result<(), String> {
@@ -385,13 +396,12 @@ mod tests {
         async fn file_exists(&self, _path: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _path: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _path: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
         async fn exec_command(
             &self,
             _command: &str,
-            _args: &[String],
             _timeout_ms: u64,
             _working_dir: Option<&str>,
             _env_vars: Option<&std::collections::HashMap<String, String>>,
@@ -412,7 +422,7 @@ mod tests {
         ) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _pattern: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _pattern: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {

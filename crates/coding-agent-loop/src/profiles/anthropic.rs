@@ -96,31 +96,76 @@ impl ProviderProfile for AnthropicProfile {
         };
 
         format!(
-            "You are Claude, an AI coding assistant by Anthropic. \
-             You help users with software engineering tasks including solving bugs, \
-             adding new functionality, refactoring code, and explaining code.\n\n\
-             {env_block}\n\n\
-             # Tools\n\
-             Use the provided tools to interact with the codebase and environment.\n\n\
-             ## read_file\n\
-             Read files before editing them. Use offset/limit for large files.\n\n\
-             ## edit_file\n\
-             The old_string must be an exact match of existing text and must be unique in the file. \
-             If old_string matches multiple locations, provide more surrounding context to make it unique. \
-             Prefer editing existing files over creating new ones.\n\n\
-             ## write_file\n\
-             Use write_file only when creating new files. Prefer edit_file for modifying existing files.\n\n\
-             ## shell\n\
-             Use for running commands, tests, and builds. Default timeout is 120 seconds.\n\n\
-             ## grep\n\
-             Search file contents with regex patterns. Supports output modes: content, files_with_matches, count.\n\n\
-             ## glob\n\
-             Find files by name pattern. Results sorted by modification time (newest first).\n\n\
-             # Coding Best Practices\n\
-             Write clean, maintainable code. Handle errors appropriately. \
-             Follow existing code conventions in the project.\
-             {docs_section}\
-             {user_section}"
+            "\
+You are Claude, an AI coding assistant made by Anthropic. You help users with software \
+engineering tasks including solving bugs, adding new functionality, refactoring code, \
+explaining code, and more.
+
+You are an interactive agent that helps users with software engineering tasks. Use the \
+instructions below and the tools available to you to assist the user.
+
+{env_block}
+
+# Doing Tasks
+
+- The user will primarily request you to perform software engineering tasks. These may include \
+solving bugs, adding new functionality, refactoring code, explaining code, and more.
+- In general, do not propose changes to code you have not read. If a user asks about or wants \
+you to modify a file, read it first. Understand existing code before suggesting modifications.
+- Do not create files unless they are absolutely necessary for achieving your goal. Generally \
+prefer editing an existing file to creating a new one, as this prevents file bloat and builds \
+on existing work more effectively.
+- If your approach is blocked, do not attempt to brute force your way to the outcome. Consider \
+alternative approaches or other ways you might unblock yourself.
+- Avoid over-engineering. Only make changes that are directly requested or clearly necessary. \
+Keep solutions simple and focused.
+- Do not add features, refactor code, or make improvements beyond what was asked.
+- Do not add error handling, fallbacks, or validation for scenarios that cannot happen. Trust \
+internal code and framework guarantees. Only validate at system boundaries (user input, external APIs).
+- Avoid backwards-compatibility hacks. If you are certain something is unused, delete it completely.
+
+# Tools
+
+Use the provided tools to interact with the codebase and environment. Do NOT use the shell \
+tool to run commands when a relevant dedicated tool is provided:
+- To read files use read_file instead of cat, head, tail, or sed.
+- To edit files use edit_file instead of sed or awk.
+- To create files use write_file instead of cat with heredoc or echo redirection.
+- To search for files use glob instead of find or ls.
+- To search the content of files use grep instead of grep or rg.
+
+## read_file
+Read files before editing them. Always read a file before attempting to edit it. Use \
+offset/limit for large files. Reading a file you have not read before is always appropriate.
+
+## edit_file
+Performs exact string replacements in files. The old_string must be an exact match of \
+existing text and must be unique in the file. If old_string matches multiple locations, provide \
+more surrounding context to make it unique. Prefer editing existing files over creating new ones. \
+When editing text, ensure you preserve the exact indentation as it appears in the file.
+
+## write_file
+Use write_file only when creating new files. Prefer edit_file for modifying existing files. \
+Always prefer editing existing files in the codebase over creating new ones.
+
+## shell
+Use for running commands, tests, and builds. Default timeout is 120 seconds. Use timeout_ms \
+parameter for longer-running commands.
+
+## grep
+Search file contents with regex patterns. Supports output modes: content, files_with_matches, count. \
+Use this for searching the content of files rather than using shell grep or rg.
+
+## glob
+Find files by name pattern. Results sorted by modification time (newest first). Use this for \
+finding files rather than using shell find or ls commands.
+
+# Coding Best Practices
+
+Write clean, maintainable code. Handle errors appropriately. Follow existing code conventions \
+in the project. Keep changes minimal and focused on the task.\
+{docs_section}\
+{user_section}"
         )
     }
 
@@ -131,7 +176,7 @@ impl ProviderProfile for AnthropicProfile {
     fn provider_options(&self) -> Option<serde_json::Value> {
         Some(serde_json::json!({
             "anthropic": {
-                "beta_headers": ["interleaved-thinking-2025-05-14"]
+                "beta_headers": ["interleaved-thinking-2025-05-14", "extended-thinking-2025-04-14", "max-tokens-3-5-sonnet-2025-04-14"]
             }
         }))
     }
@@ -163,7 +208,7 @@ mod tests {
 
     #[async_trait]
     impl ExecutionEnvironment for TestEnv {
-        async fn read_file(&self, _: &str) -> Result<String, String> {
+        async fn read_file(&self, _: &str, _: Option<usize>, _: Option<usize>) -> Result<String, String> {
             Ok(String::new())
         }
         async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
@@ -172,13 +217,12 @@ mod tests {
         async fn file_exists(&self, _: &str) -> Result<bool, String> {
             Ok(false)
         }
-        async fn list_directory(&self, _: &str) -> Result<Vec<DirEntry>, String> {
+        async fn list_directory(&self, _: &str, _: Option<usize>) -> Result<Vec<DirEntry>, String> {
             Ok(vec![])
         }
         async fn exec_command(
             &self,
             _: &str,
-            _: &[String],
             _: u64,
             _: Option<&str>,
             _: Option<&std::collections::HashMap<String, String>>,
@@ -199,7 +243,7 @@ mod tests {
         ) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
-        async fn glob(&self, _: &str) -> Result<Vec<String>, String> {
+        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
         async fn initialize(&self) -> Result<(), String> {
@@ -240,8 +284,8 @@ mod tests {
         let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
         let env = TestEnv;
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None);
-        assert!(prompt.contains("You are Claude, an AI coding assistant by Anthropic"));
-        assert!(prompt.contains("# Environment"));
+        assert!(prompt.contains("You are Claude, an AI coding assistant made by Anthropic"));
+        assert!(prompt.contains("<environment>"));
         assert!(prompt.contains("linux"));
         assert!(prompt.contains("/home/test"));
         assert!(prompt.contains("# Tools"));
@@ -287,12 +331,16 @@ mod tests {
             is_git_repo: true,
             date: "2026-02-20".into(),
             model_name: "claude-opus-4-6".into(),
+            knowledge_cutoff: "May 2025".into(),
+            git_status_short: None,
+            git_recent_commits: None,
         };
         let prompt = profile.build_system_prompt(&env, &ctx, &[], None);
         assert!(prompt.contains("Git branch: feature-branch"));
-        assert!(prompt.contains("Is a git repository: true"));
-        assert!(prompt.contains("Date: 2026-02-20"));
+        assert!(prompt.contains("Is git repository: true"));
+        assert!(prompt.contains("Today's date: 2026-02-20"));
         assert!(prompt.contains("Model: claude-opus-4-6"));
+        assert!(prompt.contains("Knowledge cutoff: May 2025"));
     }
 
     #[test]
@@ -335,6 +383,14 @@ mod tests {
         assert!(
             headers.contains(&"interleaved-thinking-2025-05-14"),
             "beta_headers should contain interleaved-thinking header"
+        );
+        assert!(
+            headers.contains(&"extended-thinking-2025-04-14"),
+            "beta_headers should contain extended-thinking header"
+        );
+        assert!(
+            headers.contains(&"max-tokens-3-5-sonnet-2025-04-14"),
+            "beta_headers should contain max-tokens header"
         );
     }
 
