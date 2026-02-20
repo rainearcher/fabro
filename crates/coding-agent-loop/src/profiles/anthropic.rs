@@ -1,14 +1,19 @@
 use crate::config::SessionConfig;
 use crate::execution_env::ExecutionEnvironment;
 use crate::provider_profile::ProviderProfile;
+use crate::subagent::{
+    make_close_agent_tool, make_send_input_tool, make_spawn_agent_tool, make_wait_tool,
+    SessionFactory, SubAgentManager,
+};
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{
     make_edit_file_tool, make_glob_tool, make_grep_tool, make_read_file_tool,
     make_shell_tool_with_config, make_write_file_tool,
 };
+use std::sync::Arc;
 use unified_llm::types::ToolDefinition;
 
-use super::build_env_context_block;
+use super::{build_env_context_block_with, EnvContext};
 
 pub struct AnthropicProfile {
     model: String,
@@ -36,6 +41,23 @@ impl AnthropicProfile {
             registry,
         }
     }
+
+    pub fn register_subagent_tools(
+        &mut self,
+        manager: Arc<tokio::sync::Mutex<SubAgentManager>>,
+        session_factory: SessionFactory,
+        current_depth: usize,
+    ) {
+        self.registry.register(make_spawn_agent_tool(
+            manager.clone(),
+            session_factory,
+            current_depth,
+        ));
+        self.registry
+            .register(make_send_input_tool(manager.clone()));
+        self.registry.register(make_wait_tool(manager.clone()));
+        self.registry.register(make_close_agent_tool(manager));
+    }
 }
 
 impl ProviderProfile for AnthropicProfile {
@@ -58,21 +80,47 @@ impl ProviderProfile for AnthropicProfile {
     fn build_system_prompt(
         &self,
         env: &dyn ExecutionEnvironment,
+        env_context: &EnvContext,
         project_docs: &[String],
+        user_instructions: Option<&str>,
     ) -> String {
-        let env_block = build_env_context_block(env);
+        let env_block = build_env_context_block_with(env, env_context);
         let docs_section = if project_docs.is_empty() {
             String::new()
         } else {
             format!("\n\n{}", project_docs.join("\n\n"))
         };
+        let user_section = match user_instructions {
+            Some(instructions) => format!("\n\n# User Instructions\n{instructions}"),
+            None => String::new(),
+        };
 
         format!(
-            "You are Claude, an AI assistant by Anthropic. You help users with software engineering tasks.\n\n\
+            "You are Claude, an AI coding assistant by Anthropic. \
+             You help users with software engineering tasks including solving bugs, \
+             adding new functionality, refactoring code, and explaining code.\n\n\
              {env_block}\n\n\
              # Tools\n\
-             Use the provided tools to interact with the codebase and environment.\
-             {docs_section}"
+             Use the provided tools to interact with the codebase and environment.\n\n\
+             ## read_file\n\
+             Read files before editing them. Use offset/limit for large files.\n\n\
+             ## edit_file\n\
+             The old_string must be an exact match of existing text and must be unique in the file. \
+             If old_string matches multiple locations, provide more surrounding context to make it unique. \
+             Prefer editing existing files over creating new ones.\n\n\
+             ## write_file\n\
+             Use write_file only when creating new files. Prefer edit_file for modifying existing files.\n\n\
+             ## shell\n\
+             Use for running commands, tests, and builds. Default timeout is 120 seconds.\n\n\
+             ## grep\n\
+             Search file contents with regex patterns. Supports output modes: content, files_with_matches, count.\n\n\
+             ## glob\n\
+             Find files by name pattern. Results sorted by modification time (newest first).\n\n\
+             # Coding Best Practices\n\
+             Write clean, maintainable code. Handle errors appropriately. \
+             Follow existing code conventions in the project.\
+             {docs_section}\
+             {user_section}"
         )
     }
 
@@ -81,7 +129,11 @@ impl ProviderProfile for AnthropicProfile {
     }
 
     fn provider_options(&self) -> Option<serde_json::Value> {
-        None
+        Some(serde_json::json!({
+            "anthropic": {
+                "beta_headers": ["interleaved-thinking-2025-05-14"]
+            }
+        }))
     }
 
     fn supports_reasoning(&self) -> bool {
@@ -187,12 +239,33 @@ mod tests {
     fn anthropic_system_prompt_contains_env_context() {
         let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
         let env = TestEnv;
-        let prompt = profile.build_system_prompt(&env, &[]);
-        assert!(prompt.contains("You are Claude, an AI assistant by Anthropic"));
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None);
+        assert!(prompt.contains("You are Claude, an AI coding assistant by Anthropic"));
         assert!(prompt.contains("# Environment"));
         assert!(prompt.contains("linux"));
         assert!(prompt.contains("/home/test"));
         assert!(prompt.contains("# Tools"));
+        // Verify expanded tool guidance
+        assert!(
+            prompt.contains("old_string must be"),
+            "prompt should contain edit_file guidance about old_string"
+        );
+        assert!(
+            prompt.contains("exact match"),
+            "prompt should contain edit_file guidance about exact match"
+        );
+        assert!(
+            prompt.contains("Read files before editing"),
+            "prompt should contain read_file guidance"
+        );
+        assert!(
+            prompt.contains("Default timeout is 120 seconds"),
+            "prompt should contain shell timeout guidance"
+        );
+        assert!(
+            prompt.contains("Write clean, maintainable code"),
+            "prompt should contain coding best practices"
+        );
     }
 
     #[test]
@@ -200,9 +273,36 @@ mod tests {
         let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
         let env = TestEnv;
         let docs = vec!["# Project README".into(), "# CONTRIBUTING guide".into()];
-        let prompt = profile.build_system_prompt(&env, &docs);
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &docs, None);
         assert!(prompt.contains("# Project README"));
         assert!(prompt.contains("# CONTRIBUTING guide"));
+    }
+
+    #[test]
+    fn anthropic_system_prompt_includes_env_context() {
+        let profile = AnthropicProfile::new("claude-opus-4-6");
+        let env = TestEnv;
+        let ctx = EnvContext {
+            git_branch: Some("feature-branch".into()),
+            is_git_repo: true,
+            date: "2026-02-20".into(),
+            model_name: "claude-opus-4-6".into(),
+        };
+        let prompt = profile.build_system_prompt(&env, &ctx, &[], None);
+        assert!(prompt.contains("Git branch: feature-branch"));
+        assert!(prompt.contains("Is a git repository: true"));
+        assert!(prompt.contains("Date: 2026-02-20"));
+        assert!(prompt.contains("Model: claude-opus-4-6"));
+    }
+
+    #[test]
+    fn anthropic_system_prompt_includes_user_instructions() {
+        let profile = AnthropicProfile::new("claude-opus-4-6");
+        let env = TestEnv;
+        let ctx = EnvContext::default();
+        let prompt = profile.build_system_prompt(&env, &ctx, &[], Some("Always write tests first"));
+        assert!(prompt.contains("Always write tests first"));
+        assert!(prompt.contains("# User Instructions"));
     }
 
     #[test]
@@ -216,5 +316,48 @@ mod tests {
         assert!(names.contains(&"shell".to_string()));
         assert!(names.contains(&"grep".to_string()));
         assert!(names.contains(&"glob".to_string()));
+    }
+
+    #[test]
+    fn anthropic_provider_options_include_beta_headers() {
+        let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
+        let options = profile.provider_options();
+        assert!(options.is_some(), "provider_options should return Some");
+        let options = options.unwrap();
+        let beta_headers = &options["anthropic"]["beta_headers"];
+        assert!(beta_headers.is_array(), "beta_headers should be an array");
+        let headers: Vec<&str> = beta_headers
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(
+            headers.contains(&"interleaved-thinking-2025-05-14"),
+            "beta_headers should contain interleaved-thinking header"
+        );
+    }
+
+    #[test]
+    fn anthropic_register_subagent_tools() {
+        use crate::subagent::{SessionFactory, SubAgentManager};
+        use std::sync::Arc;
+
+        let mut profile = AnthropicProfile::new("claude-sonnet-4-20250514");
+        assert_eq!(profile.tool_registry().names().len(), 6);
+
+        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
+        let factory: SessionFactory = Arc::new(|| {
+            panic!("should not be called in test");
+        });
+
+        profile.register_subagent_tools(manager, factory, 0);
+
+        let names = profile.tool_registry().names();
+        assert_eq!(names.len(), 10, "should have 6 base + 4 subagent tools");
+        assert!(names.contains(&"spawn_agent".to_string()));
+        assert!(names.contains(&"send_input".to_string()));
+        assert!(names.contains(&"wait".to_string()));
+        assert!(names.contains(&"close_agent".to_string()));
     }
 }

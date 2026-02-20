@@ -1,5 +1,9 @@
 use crate::execution_env::ExecutionEnvironment;
 use crate::provider_profile::ProviderProfile;
+use crate::subagent::{
+    make_close_agent_tool, make_send_input_tool, make_spawn_agent_tool, make_wait_tool,
+    SessionFactory, SubAgentManager,
+};
 use crate::tool_registry::{RegisteredTool, ToolRegistry};
 use crate::tools::{
     make_glob_tool, make_grep_tool, make_read_file_tool, make_shell_tool, make_write_file_tool,
@@ -7,11 +11,12 @@ use crate::tools::{
 use std::sync::Arc;
 use unified_llm::types::ToolDefinition;
 
-use super::build_env_context_block;
+use super::{build_env_context_block_with, EnvContext};
 
 pub struct OpenAiProfile {
     model: String,
     registry: ToolRegistry,
+    reasoning_effort: Option<String>,
 }
 
 impl OpenAiProfile {
@@ -29,7 +34,29 @@ impl OpenAiProfile {
         Self {
             model: model.into(),
             registry,
+            reasoning_effort: None,
         }
+    }
+
+    pub fn set_reasoning_effort(&mut self, effort: Option<String>) {
+        self.reasoning_effort = effort;
+    }
+
+    pub fn register_subagent_tools(
+        &mut self,
+        manager: Arc<tokio::sync::Mutex<SubAgentManager>>,
+        session_factory: SessionFactory,
+        current_depth: usize,
+    ) {
+        self.registry.register(make_spawn_agent_tool(
+            manager.clone(),
+            session_factory,
+            current_depth,
+        ));
+        self.registry
+            .register(make_send_input_tool(manager.clone()));
+        self.registry.register(make_wait_tool(manager.clone()));
+        self.registry.register(make_close_agent_tool(manager));
     }
 }
 
@@ -53,22 +80,41 @@ impl ProviderProfile for OpenAiProfile {
     fn build_system_prompt(
         &self,
         env: &dyn ExecutionEnvironment,
+        env_context: &EnvContext,
         project_docs: &[String],
+        user_instructions: Option<&str>,
     ) -> String {
-        let env_block = build_env_context_block(env);
+        let env_block = build_env_context_block_with(env, env_context);
         let docs_section = if project_docs.is_empty() {
             String::new()
         } else {
             format!("\n\n{}", project_docs.join("\n\n"))
         };
+        let user_section = match user_instructions {
+            Some(instructions) => format!("\n\n# User Instructions\n{instructions}"),
+            None => String::new(),
+        };
 
         format!(
-            "You are a coding assistant. You help users with software engineering tasks.\n\n\
+            "You are a coding assistant powered by OpenAI. You help users with software engineering tasks \
+             including solving bugs, adding new functionality, refactoring code, and explaining code.\n\n\
              {env_block}\n\n\
              # Tools\n\
-             Use the provided tools to interact with the codebase and environment.\n\
-             Use apply_patch for file edits when possible.\
-             {docs_section}"
+             Use the provided tools to interact with the codebase and environment.\n\n\
+             - read_file: Read files to understand code before modifying. Use offset/limit for large files.\n\
+             - apply_patch: Use the v4a patch format for all file modifications. The format uses \
+             `*** Begin Patch` / `*** End Patch` delimiters with `*** Add File:`, `*** Delete File:`, \
+             `*** Update File:` operations. Update operations use `@@` context hints and +/- prefixes \
+             for changes. Show 3 lines of context around each change.\n\
+             - write_file: Use for creating new files. For modifications, prefer apply_patch.\n\
+             - shell: Execute shell commands. Default timeout is 10 seconds. Use timeout_ms parameter \
+             for longer-running commands.\n\
+             - grep: Search file contents with regex. Use glob_filter to narrow results.\n\
+             - glob: Find files by name pattern.\n\n\
+             # Coding Best Practices\n\
+             Write clean, maintainable code. Handle errors appropriately. Follow existing code conventions in the project.\
+             {docs_section}\
+             {user_section}"
         )
     }
 
@@ -77,7 +123,15 @@ impl ProviderProfile for OpenAiProfile {
     }
 
     fn provider_options(&self) -> Option<serde_json::Value> {
-        None
+        self.reasoning_effort.as_ref().map(|effort| {
+            serde_json::json!({
+                "openai": {
+                    "reasoning": {
+                        "effort": effort
+                    }
+                }
+            })
+        })
     }
 
     fn supports_reasoning(&self) -> bool {
@@ -504,11 +558,102 @@ mod tests {
     fn openai_system_prompt_contains_env_context() {
         let profile = OpenAiProfile::new("o3-mini");
         let env = TestEnv;
-        let prompt = profile.build_system_prompt(&env, &[]);
-        assert!(prompt.contains("You are a coding assistant"));
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None);
+        assert!(prompt.contains("You are a coding assistant powered by OpenAI"));
         assert!(prompt.contains("# Environment"));
         assert!(prompt.contains("linux"));
+        assert!(prompt.contains("v4a patch format"));
+        assert!(prompt.contains("*** Begin Patch"));
+    }
+
+    #[test]
+    fn openai_system_prompt_contains_tool_guidance() {
+        let profile = OpenAiProfile::new("o3-mini");
+        let env = TestEnv;
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None);
+        assert!(prompt.contains("read_file"));
         assert!(prompt.contains("apply_patch"));
+        assert!(prompt.contains("write_file"));
+        assert!(prompt.contains("shell"));
+        assert!(prompt.contains("grep"));
+        assert!(prompt.contains("glob"));
+        assert!(prompt.contains("timeout_ms"));
+    }
+
+    #[test]
+    fn openai_system_prompt_contains_coding_best_practices() {
+        let profile = OpenAiProfile::new("o3-mini");
+        let env = TestEnv;
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None);
+        assert!(prompt.contains("clean, maintainable code"));
+        assert!(prompt.contains("existing code conventions"));
+    }
+
+    #[test]
+    fn openai_system_prompt_includes_project_docs() {
+        let profile = OpenAiProfile::new("o3-mini");
+        let env = TestEnv;
+        let docs = vec!["# Project README".into(), "# CONTRIBUTING guide".into()];
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &docs, None);
+        assert!(prompt.contains("# Project README"));
+        assert!(prompt.contains("# CONTRIBUTING guide"));
+    }
+
+    #[test]
+    fn openai_system_prompt_includes_user_instructions() {
+        let profile = OpenAiProfile::new("o3-mini");
+        let env = TestEnv;
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], Some("Always write tests first"));
+        assert!(prompt.contains("Always write tests first"));
+        assert!(prompt.contains("# User Instructions"));
+    }
+
+    #[test]
+    fn openai_provider_options_default_none() {
+        let profile = OpenAiProfile::new("o3-mini");
+        assert!(profile.provider_options().is_none());
+    }
+
+    #[test]
+    fn openai_provider_options_with_reasoning_effort() {
+        let mut profile = OpenAiProfile::new("o3-mini");
+        profile.set_reasoning_effort(Some("high".to_string()));
+        let options = profile.provider_options().unwrap();
+        assert_eq!(
+            options,
+            serde_json::json!({
+                "openai": {
+                    "reasoning": {
+                        "effort": "high"
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn openai_provider_options_cleared() {
+        let mut profile = OpenAiProfile::new("o3-mini");
+        profile.set_reasoning_effort(Some("high".to_string()));
+        assert!(profile.provider_options().is_some());
+        profile.set_reasoning_effort(None);
+        assert!(profile.provider_options().is_none());
+    }
+
+    #[test]
+    fn openai_subagent_tools_registered() {
+        use crate::subagent::SubAgentManager;
+        use crate::subagent::SessionFactory;
+
+        let mut profile = OpenAiProfile::new("o3-mini");
+        assert_eq!(profile.tool_registry().names().len(), 6);
+
+        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
+        let factory: SessionFactory = Arc::new(|| {
+            panic!("should not be called in test")
+        });
+        profile.register_subagent_tools(manager, factory, 0);
+        assert_eq!(profile.tool_registry().names().len(), 10);
     }
 
     #[test]

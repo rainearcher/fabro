@@ -13,6 +13,7 @@ pub struct SessionConfig {
     pub loop_detection_window: usize,
     pub max_subagent_depth: usize,
     pub git_root: Option<String>,
+    pub user_instructions: Option<String>,
 }
 
 impl Default for SessionConfig {
@@ -29,6 +30,7 @@ impl Default for SessionConfig {
             loop_detection_window: 10,
             max_subagent_depth: 1,
             git_root: None,
+            user_instructions: None,
         }
     }
 }
@@ -50,6 +52,7 @@ mod tests {
         assert!(config.enable_loop_detection);
         assert_eq!(config.loop_detection_window, 10);
         assert_eq!(config.max_subagent_depth, 1);
+        assert!(config.user_instructions.is_none());
     }
 
     #[test]

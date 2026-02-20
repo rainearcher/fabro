@@ -462,7 +462,9 @@ mod tests {
         fn build_system_prompt(
             &self,
             _env: &dyn ExecutionEnvironment,
+            _env_context: &crate::profiles::EnvContext,
             _project_docs: &[String],
+            _user_instructions: Option<&str>,
         ) -> String {
             "You are a test assistant.".into()
         }

@@ -1,4 +1,5 @@
 use crate::execution_env::ExecutionEnvironment;
+use crate::profiles::EnvContext;
 use crate::tool_registry::ToolRegistry;
 use unified_llm::types::ToolDefinition;
 
@@ -10,7 +11,9 @@ pub trait ProviderProfile: Send + Sync {
     fn build_system_prompt(
         &self,
         env: &dyn ExecutionEnvironment,
+        env_context: &EnvContext,
         project_docs: &[String],
+        user_instructions: Option<&str>,
     ) -> String;
     fn tools(&self) -> Vec<ToolDefinition>;
     fn provider_options(&self) -> Option<serde_json::Value>;
@@ -114,13 +117,19 @@ mod tests {
         fn build_system_prompt(
             &self,
             env: &dyn ExecutionEnvironment,
+            _env_context: &EnvContext,
             project_docs: &[String],
+            user_instructions: Option<&str>,
         ) -> String {
-            format!(
+            let base = format!(
                 "You are working on {}. Docs: {}",
                 env.platform(),
                 project_docs.len()
-            )
+            );
+            match user_instructions {
+                Some(instructions) => format!("{base}\n\n{instructions}"),
+                None => base,
+            }
         }
         fn tools(&self) -> Vec<ToolDefinition> {
             self.registry.definitions()
@@ -162,10 +171,20 @@ mod tests {
     fn profile_build_system_prompt() {
         let profile = TestProfile::new();
         let env = TestEnv;
+        let ctx = EnvContext::default();
         let docs = vec!["README.md contents".into()];
-        let prompt = profile.build_system_prompt(&env, &docs);
+        let prompt = profile.build_system_prompt(&env, &ctx, &docs, None);
         assert!(prompt.contains("linux"));
         assert!(prompt.contains("1"));
+    }
+
+    #[test]
+    fn profile_build_system_prompt_with_user_instructions() {
+        let profile = TestProfile::new();
+        let env = TestEnv;
+        let ctx = EnvContext::default();
+        let prompt = profile.build_system_prompt(&env, &ctx, &[], Some("Always use TDD"));
+        assert!(prompt.contains("Always use TDD"));
     }
 
     #[test]
