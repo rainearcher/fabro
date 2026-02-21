@@ -1,0 +1,147 @@
+pub mod ast;
+pub mod grammar;
+pub mod lexer;
+pub mod semantic;
+
+use crate::error::AttractorError;
+use crate::graph::types::Graph;
+
+/// Parse a DOT source string into a semantic `Graph`.
+///
+/// Strips comments, parses the grammar, and performs semantic transformation
+/// (expanding chained edges, applying defaults, flattening subgraphs).
+///
+/// # Errors
+///
+/// Returns an error if the input is not valid DOT syntax or contains
+/// trailing content after the graph definition.
+pub fn parse(input: &str) -> Result<Graph, AttractorError> {
+    let stripped = lexer::strip_comments(input);
+    let (rest, dot_graph) = grammar::parse_dot_graph(&stripped)
+        .map_err(|e| AttractorError::Parse(format!("grammar error: {e}")))?;
+
+    let remaining = rest.trim();
+    if !remaining.is_empty() {
+        return Err(AttractorError::Parse(format!(
+            "unexpected trailing content: {:?}",
+            &remaining[..remaining.len().min(50)]
+        )));
+    }
+
+    semantic::ast_to_graph(&dot_graph)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_simple_linear() {
+        let input = r#"digraph Simple {
+            graph [goal="Run tests and report"]
+            rankdir=LR
+
+            start [shape=Mdiamond, label="Start"]
+            exit  [shape=Msquare, label="Exit"]
+
+            run_tests [label="Run Tests", prompt="Run the test suite and report results"]
+            report    [label="Report", prompt="Summarize the test results"]
+
+            start -> run_tests -> report -> exit
+        }"#;
+        let graph = parse(input).unwrap();
+        assert_eq!(graph.name, "Simple");
+        assert_eq!(graph.goal(), "Run tests and report");
+        assert_eq!(graph.nodes.len(), 4);
+        // start->run_tests, run_tests->report, report->exit
+        assert_eq!(graph.edges.len(), 3);
+        assert!(graph.find_start_node().is_some());
+        assert!(graph.find_exit_node().is_some());
+    }
+
+    #[test]
+    fn parse_branching_with_conditions() {
+        let input = r#"digraph Branch {
+            graph [goal="Implement and validate a feature"]
+            rankdir=LR
+            node [shape=box, timeout="900s"]
+
+            start     [shape=Mdiamond, label="Start"]
+            exit      [shape=Msquare, label="Exit"]
+            plan      [label="Plan", prompt="Plan the implementation"]
+            implement [label="Implement", prompt="Implement the plan"]
+            validate  [label="Validate", prompt="Run tests"]
+            gate      [shape=diamond, label="Tests passing?"]
+
+            start -> plan -> implement -> validate -> gate
+            gate -> exit      [label="Yes", condition="outcome=success"]
+            gate -> implement [label="No", condition="outcome!=success"]
+        }"#;
+        let graph = parse(input).unwrap();
+        assert_eq!(graph.name, "Branch");
+        assert_eq!(graph.nodes.len(), 6);
+        // chain: 4 edges + 2 conditional = 6
+        assert_eq!(graph.edges.len(), 6);
+
+        // Check condition on gate -> exit edge
+        let gate_exit = graph
+            .edges
+            .iter()
+            .find(|e| e.from == "gate" && e.to == "exit")
+            .unwrap();
+        assert_eq!(gate_exit.condition(), Some("outcome=success"));
+    }
+
+    #[test]
+    fn parse_human_gate() {
+        let input = r#"digraph Review {
+            rankdir=LR
+
+            start [shape=Mdiamond, label="Start"]
+            exit  [shape=Msquare, label="Exit"]
+
+            review_gate [
+                shape=hexagon,
+                label="Review Changes",
+                type="wait.human"
+            ]
+
+            start -> review_gate
+            review_gate -> ship_it [label="[A] Approve"]
+            review_gate -> fixes   [label="[F] Fix"]
+            ship_it -> exit
+            fixes -> review_gate
+        }"#;
+        let graph = parse(input).unwrap();
+        assert_eq!(graph.name, "Review");
+        let gate = &graph.nodes["review_gate"];
+        assert_eq!(gate.node_type(), Some("wait.human"));
+        assert_eq!(gate.shape(), "hexagon");
+    }
+
+    #[test]
+    fn parse_with_comments() {
+        let input = r#"// This is a comment
+        digraph Test {
+            /* block comment */
+            start [shape=Mdiamond] // inline comment
+            exit [shape=Msquare]
+            start -> exit
+        }"#;
+        let graph = parse(input).unwrap();
+        assert_eq!(graph.nodes.len(), 2);
+    }
+
+    #[test]
+    fn parse_error_on_invalid_input() {
+        let result = parse("not a graph");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_error_on_trailing_content() {
+        let input = "digraph A { } extra stuff";
+        let result = parse(input);
+        assert!(result.is_err());
+    }
+}

@@ -135,6 +135,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "coding-agent-loop",
+ "futures",
  "nom",
  "rand",
  "serde",

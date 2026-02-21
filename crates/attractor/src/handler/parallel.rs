@@ -1,0 +1,462 @@
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Instant;
+
+use async_trait::async_trait;
+use tokio::sync::Semaphore;
+
+use crate::context::Context;
+use crate::error::AttractorError;
+use crate::event::{EventEmitter, PipelineEvent};
+use crate::graph::{Graph, Node};
+use crate::outcome::{Outcome, StageStatus};
+
+use super::{Handler, HandlerRegistry};
+
+/// Convert a Duration's milliseconds to u64, saturating on overflow.
+fn millis_u64(d: std::time::Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Fans out execution to multiple branches concurrently.
+/// Each branch gets an isolated context clone and runs independently.
+pub struct ParallelHandler {
+    registry: Arc<HandlerRegistry>,
+    emitter: Arc<EventEmitter>,
+}
+
+impl ParallelHandler {
+    #[must_use]
+    pub fn new(registry: Arc<HandlerRegistry>, emitter: Arc<EventEmitter>) -> Self {
+        Self { registry, emitter }
+    }
+}
+
+/// Parse join policy from node attributes.
+#[derive(Debug, Clone)]
+enum JoinPolicy {
+    WaitAll,
+    FirstSuccess,
+    KOfN(usize),
+    Quorum(f64),
+}
+
+fn parse_join_policy(raw: &str) -> JoinPolicy {
+    if raw == "first_success" {
+        return JoinPolicy::FirstSuccess;
+    }
+    if let Some(inner) = raw.strip_prefix("k_of_n(").and_then(|s| s.strip_suffix(')')) {
+        if let Ok(k) = inner.trim().parse::<usize>() {
+            return JoinPolicy::KOfN(k);
+        }
+    }
+    if let Some(inner) = raw.strip_prefix("quorum(").and_then(|s| s.strip_suffix(')')) {
+        if let Ok(frac) = inner.trim().parse::<f64>() {
+            return JoinPolicy::Quorum(frac);
+        }
+    }
+    JoinPolicy::WaitAll
+}
+
+/// Parse error policy from node attributes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ErrorPolicy {
+    Continue,
+    FailFast,
+    Ignore,
+}
+
+fn parse_error_policy(raw: &str) -> ErrorPolicy {
+    match raw {
+        "fail_fast" => ErrorPolicy::FailFast,
+        "ignore" => ErrorPolicy::Ignore,
+        _ => ErrorPolicy::Continue,
+    }
+}
+
+struct BranchResult {
+    id: String,
+    outcome: Outcome,
+}
+
+#[async_trait]
+impl Handler for ParallelHandler {
+    async fn execute(
+        &self,
+        node: &Node,
+        context: &Context,
+        graph: &Graph,
+        logs_root: &Path,
+    ) -> Result<Outcome, AttractorError> {
+        let parallel_start = Instant::now();
+        let branches = graph.outgoing_edges(&node.id);
+        if branches.is_empty() {
+            return Ok(Outcome::fail("No branches for parallel node"));
+        }
+
+        self.emitter.emit(&PipelineEvent::ParallelStarted {
+            branch_count: branches.len(),
+        });
+
+        let join_policy = parse_join_policy(
+            node.attrs
+                .get("join_policy")
+                .and_then(|v| v.as_str())
+                .unwrap_or("wait_all"),
+        );
+        let error_policy = parse_error_policy(
+            node.attrs
+                .get("error_policy")
+                .and_then(|v| v.as_str())
+                .unwrap_or("continue"),
+        );
+        let max_parallel = node
+            .attrs
+            .get("max_parallel")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(4);
+        let max_parallel = usize::try_from(max_parallel).unwrap_or(4).max(1);
+
+        let semaphore = Arc::new(Semaphore::new(max_parallel));
+
+        // Build branch tasks
+        let mut handles = Vec::new();
+        for (branch_index, edge) in branches.iter().enumerate() {
+            let target_id = edge.to.clone();
+            let branch_context = context.clone_context();
+            let registry = Arc::clone(&self.registry);
+            let emitter = Arc::clone(&self.emitter);
+            let graph = graph.clone();
+            let logs_root = logs_root.to_path_buf();
+            let sem = Arc::clone(&semaphore);
+
+            let handle = tokio::spawn(async move {
+                let _permit = sem.acquire().await.map_err(|e| {
+                    AttractorError::Handler(format!("semaphore error: {e}"))
+                })?;
+
+                emitter.emit(&PipelineEvent::ParallelBranchStarted {
+                    branch: target_id.clone(),
+                    index: branch_index,
+                });
+                let branch_start = Instant::now();
+
+                let Some(target_node) = graph.nodes.get(&target_id) else {
+                    let outcome = Outcome::fail(format!("branch target node not found: {target_id}"));
+                    emitter.emit(&PipelineEvent::ParallelBranchCompleted {
+                        branch: target_id.clone(),
+                        index: branch_index,
+                        duration_ms: millis_u64(branch_start.elapsed()),
+                        success: false,
+                    });
+                    return Ok(BranchResult {
+                        id: target_id.clone(),
+                        outcome,
+                    });
+                };
+
+                let handler = registry.resolve(target_node);
+                let outcome = handler
+                    .execute(target_node, &branch_context, &graph, &logs_root)
+                    .await?;
+
+                let success = outcome.status == StageStatus::Success
+                    || outcome.status == StageStatus::PartialSuccess;
+                emitter.emit(&PipelineEvent::ParallelBranchCompleted {
+                    branch: target_id.clone(),
+                    index: branch_index,
+                    duration_ms: millis_u64(branch_start.elapsed()),
+                    success,
+                });
+
+                Ok::<BranchResult, AttractorError>(BranchResult {
+                    id: target_id,
+                    outcome,
+                })
+            });
+            handles.push(handle);
+        }
+
+        // Collect results
+        let mut results: Vec<BranchResult> = Vec::new();
+        for handle in handles {
+            match handle.await {
+                Ok(Ok(result)) => {
+                    if error_policy == ErrorPolicy::FailFast
+                        && result.outcome.status == StageStatus::Fail
+                    {
+                        results.push(result);
+                        break;
+                    }
+                    results.push(result);
+                }
+                Ok(Err(e)) => {
+                    let result = BranchResult {
+                        id: String::new(),
+                        outcome: Outcome::fail(e.to_string()),
+                    };
+                    if error_policy == ErrorPolicy::FailFast {
+                        results.push(result);
+                        break;
+                    }
+                    results.push(result);
+                }
+                Err(join_err) => {
+                    let result = BranchResult {
+                        id: String::new(),
+                        outcome: Outcome::fail(format!("task join error: {join_err}")),
+                    };
+                    if error_policy == ErrorPolicy::FailFast {
+                        results.push(result);
+                        break;
+                    }
+                    results.push(result);
+                }
+            }
+        }
+
+        // Count successes and failures
+        let success_count = results
+            .iter()
+            .filter(|r| r.outcome.status == StageStatus::Success)
+            .count();
+        let fail_count = results
+            .iter()
+            .filter(|r| r.outcome.status == StageStatus::Fail)
+            .count();
+        let total = results.len();
+
+        // Store results as JSON in context for downstream fan-in
+        let results_json: Vec<serde_json::Value> = results
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.id,
+                    "status": r.outcome.status.to_string(),
+                })
+            })
+            .collect();
+        context.set("parallel.results", serde_json::json!(results_json));
+        context.set("parallel.branch_count", serde_json::json!(total));
+
+        self.emitter.emit(&PipelineEvent::ParallelCompleted {
+            duration_ms: millis_u64(parallel_start.elapsed()),
+            success_count,
+            failure_count: fail_count,
+        });
+
+        // Evaluate join policy
+        let status = match join_policy {
+            JoinPolicy::WaitAll => {
+                if fail_count == 0 {
+                    StageStatus::Success
+                } else if error_policy == ErrorPolicy::Ignore {
+                    StageStatus::Success
+                } else {
+                    StageStatus::PartialSuccess
+                }
+            }
+            JoinPolicy::FirstSuccess => {
+                if success_count > 0 {
+                    StageStatus::Success
+                } else {
+                    StageStatus::Fail
+                }
+            }
+            JoinPolicy::KOfN(k) => {
+                if success_count >= k {
+                    StageStatus::Success
+                } else {
+                    StageStatus::Fail
+                }
+            }
+            JoinPolicy::Quorum(fraction) => {
+                #[allow(clippy::cast_precision_loss)]
+                let total_f64 = total as f64;
+                let threshold_f64 = (fraction * total_f64).ceil();
+                // Safe: threshold_f64 is non-negative and bounded by total
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                let threshold = threshold_f64 as usize;
+                if success_count >= threshold {
+                    StageStatus::Success
+                } else {
+                    StageStatus::Fail
+                }
+            }
+        };
+
+        // Build suggested_next_ids from successful branch targets
+        let branch_ids: Vec<String> = results.iter().map(|r| r.id.clone()).collect();
+
+        let is_fail = status == StageStatus::Fail;
+        let mut outcome = Outcome {
+            status,
+            preferred_label: None,
+            suggested_next_ids: branch_ids,
+            context_updates: std::collections::HashMap::new(),
+            notes: Some(format!(
+                "Parallel node dispatched {total} branches ({success_count} succeeded, {fail_count} failed)"
+            )),
+            failure_reason: if is_fail {
+                Some(format!("Join policy not satisfied: {success_count}/{total} succeeded"))
+            } else {
+                None
+            },
+        };
+
+        if is_fail {
+            outcome.suggested_next_ids.clear();
+        }
+
+        Ok(outcome)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{AttrValue, Edge};
+    use crate::handler::start::StartHandler;
+
+    fn make_registry() -> Arc<HandlerRegistry> {
+        let registry = HandlerRegistry::new(Box::new(StartHandler));
+        Arc::new(registry)
+    }
+
+    fn make_emitter() -> Arc<EventEmitter> {
+        Arc::new(EventEmitter::new())
+    }
+
+    #[tokio::test]
+    async fn parallel_handler_no_branches() {
+        let registry = make_registry();
+        let handler = ParallelHandler::new(registry, make_emitter());
+        let node = Node::new("par");
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let logs_root = Path::new("/tmp/test");
+
+        let outcome = handler
+            .execute(&node, &context, &graph, logs_root)
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Fail);
+    }
+
+    #[tokio::test]
+    async fn parallel_handler_with_branches() {
+        let registry = make_registry();
+        let handler = ParallelHandler::new(registry, make_emitter());
+        let mut node = Node::new("par");
+        node.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("component".to_string()),
+        );
+        let context = Context::new();
+        let mut graph = Graph::new("test");
+        graph.nodes.insert("par".to_string(), node.clone());
+        graph
+            .nodes
+            .insert("branch_a".to_string(), Node::new("branch_a"));
+        graph
+            .nodes
+            .insert("branch_b".to_string(), Node::new("branch_b"));
+        graph.edges.push(Edge::new("par", "branch_a"));
+        graph.edges.push(Edge::new("par", "branch_b"));
+
+        let logs_root = Path::new("/tmp/test");
+        let outcome = handler
+            .execute(&node, &context, &graph, logs_root)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, StageStatus::Success);
+        assert!(outcome.notes.as_deref().unwrap().contains("2 branches"));
+
+        // Check context was set
+        let results = context.get("parallel.results");
+        assert!(results.is_some());
+    }
+
+    #[tokio::test]
+    async fn parallel_handler_first_success_policy() {
+        let registry = make_registry();
+        let handler = ParallelHandler::new(registry, make_emitter());
+        let mut node = Node::new("par");
+        node.attrs.insert(
+            "join_policy".to_string(),
+            AttrValue::String("first_success".to_string()),
+        );
+        let context = Context::new();
+        let mut graph = Graph::new("test");
+        graph.nodes.insert("par".to_string(), node.clone());
+        graph
+            .nodes
+            .insert("branch_a".to_string(), Node::new("branch_a"));
+        graph.edges.push(Edge::new("par", "branch_a"));
+
+        let logs_root = Path::new("/tmp/test");
+        let outcome = handler
+            .execute(&node, &context, &graph, logs_root)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, StageStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn parallel_handler_k_of_n_policy() {
+        let registry = make_registry();
+        let handler = ParallelHandler::new(registry, make_emitter());
+        let mut node = Node::new("par");
+        node.attrs.insert(
+            "join_policy".to_string(),
+            AttrValue::String("k_of_n(2)".to_string()),
+        );
+        let context = Context::new();
+        let mut graph = Graph::new("test");
+        graph.nodes.insert("par".to_string(), node.clone());
+        graph
+            .nodes
+            .insert("branch_a".to_string(), Node::new("branch_a"));
+        graph
+            .nodes
+            .insert("branch_b".to_string(), Node::new("branch_b"));
+        graph
+            .nodes
+            .insert("branch_c".to_string(), Node::new("branch_c"));
+        graph.edges.push(Edge::new("par", "branch_a"));
+        graph.edges.push(Edge::new("par", "branch_b"));
+        graph.edges.push(Edge::new("par", "branch_c"));
+
+        let logs_root = Path::new("/tmp/test");
+        let outcome = handler
+            .execute(&node, &context, &graph, logs_root)
+            .await
+            .unwrap();
+
+        // All 3 succeed (default StartHandler returns success), need 2
+        assert_eq!(outcome.status, StageStatus::Success);
+    }
+
+    #[test]
+    fn parse_join_policy_variants() {
+        assert!(matches!(parse_join_policy("wait_all"), JoinPolicy::WaitAll));
+        assert!(matches!(
+            parse_join_policy("first_success"),
+            JoinPolicy::FirstSuccess
+        ));
+        assert!(matches!(parse_join_policy("k_of_n(3)"), JoinPolicy::KOfN(3)));
+        assert!(matches!(parse_join_policy("quorum(0.5)"), JoinPolicy::Quorum(_)));
+        // Invalid falls back to WaitAll
+        assert!(matches!(parse_join_policy("invalid"), JoinPolicy::WaitAll));
+    }
+
+    #[test]
+    fn parse_error_policy_variants() {
+        assert_eq!(parse_error_policy("continue"), ErrorPolicy::Continue);
+        assert_eq!(parse_error_policy("fail_fast"), ErrorPolicy::FailFast);
+        assert_eq!(parse_error_policy("ignore"), ErrorPolicy::Ignore);
+        assert_eq!(parse_error_policy("unknown"), ErrorPolicy::Continue);
+    }
+}

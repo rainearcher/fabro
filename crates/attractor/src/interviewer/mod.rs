@@ -1,0 +1,297 @@
+pub mod auto_approve;
+pub mod callback;
+pub mod console;
+pub mod queue;
+pub mod recording;
+
+use std::collections::HashMap;
+
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+
+/// The type of question being asked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QuestionType {
+    YesNo,
+    MultipleChoice,
+    Freeform,
+    Confirmation,
+}
+
+/// An option presented to the user for multiple-choice questions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestionOption {
+    pub key: String,
+    pub label: String,
+}
+
+/// A question presented to the user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Question {
+    pub text: String,
+    pub question_type: QuestionType,
+    pub options: Vec<QuestionOption>,
+    pub allow_freeform: bool,
+    pub default: Option<Answer>,
+    pub timeout_seconds: Option<f64>,
+    pub stage: String,
+    pub metadata: HashMap<String, serde_json::Value>,
+}
+
+impl Question {
+    pub fn new(text: impl Into<String>, question_type: QuestionType) -> Self {
+        Self {
+            text: text.into(),
+            question_type,
+            options: Vec::new(),
+            allow_freeform: false,
+            default: None,
+            timeout_seconds: None,
+            stage: String::new(),
+            metadata: HashMap::new(),
+        }
+    }
+}
+
+/// The value of an answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AnswerValue {
+    Yes,
+    No,
+    Skipped,
+    Timeout,
+    Selected(String),
+    Text(String),
+}
+
+/// An answer from the user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Answer {
+    pub value: AnswerValue,
+    pub selected_option: Option<QuestionOption>,
+    pub text: Option<String>,
+}
+
+impl Answer {
+    #[must_use] 
+    pub const fn yes() -> Self {
+        Self {
+            value: AnswerValue::Yes,
+            selected_option: None,
+            text: None,
+        }
+    }
+
+    #[must_use] 
+    pub const fn no() -> Self {
+        Self {
+            value: AnswerValue::No,
+            selected_option: None,
+            text: None,
+        }
+    }
+
+    #[must_use] 
+    pub const fn skipped() -> Self {
+        Self {
+            value: AnswerValue::Skipped,
+            selected_option: None,
+            text: None,
+        }
+    }
+
+    #[must_use] 
+    pub const fn timeout() -> Self {
+        Self {
+            value: AnswerValue::Timeout,
+            selected_option: None,
+            text: None,
+        }
+    }
+
+    pub fn selected(key: impl Into<String>, option: QuestionOption) -> Self {
+        let key = key.into();
+        Self {
+            value: AnswerValue::Selected(key),
+            selected_option: Some(option),
+            text: None,
+        }
+    }
+
+    pub fn text(text: impl Into<String>) -> Self {
+        let t = text.into();
+        Self {
+            value: AnswerValue::Text(t.clone()),
+            selected_option: None,
+            text: Some(t),
+        }
+    }
+}
+
+/// Apply timeout enforcement to an interviewer ask call.
+/// Per spec 6.5: if `timeout_seconds` is set, returns default answer or `Answer::timeout()`.
+pub async fn ask_with_timeout(
+    interviewer: &dyn Interviewer,
+    question: Question,
+) -> Answer {
+    let timeout_secs = question.timeout_seconds;
+    let default_answer = question.default.clone();
+
+    if let Some(secs) = timeout_secs {
+        let duration = std::time::Duration::from_secs_f64(secs);
+        match tokio::time::timeout(duration, interviewer.ask(question)).await {
+            Ok(answer) => answer,
+            Err(_elapsed) => default_answer.unwrap_or_else(Answer::timeout),
+        }
+    } else {
+        interviewer.ask(question).await
+    }
+}
+
+/// The interviewer trait for human-in-the-loop interactions.
+#[async_trait]
+pub trait Interviewer: Send + Sync {
+    async fn ask(&self, question: Question) -> Answer;
+
+    async fn ask_multiple(&self, questions: Vec<Question>) -> Vec<Answer> {
+        let mut answers = Vec::with_capacity(questions.len());
+        for q in questions {
+            answers.push(self.ask(q).await);
+        }
+        answers
+    }
+
+    async fn inform(&self, _message: &str, _stage: &str) {
+        // Default no-op
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn question_new() {
+        let q = Question::new("Do you approve?", QuestionType::YesNo);
+        assert_eq!(q.text, "Do you approve?");
+        assert_eq!(q.question_type, QuestionType::YesNo);
+        assert!(q.options.is_empty());
+        assert!(!q.allow_freeform);
+        assert!(q.default.is_none());
+        assert!(q.timeout_seconds.is_none());
+        assert!(q.stage.is_empty());
+        assert!(q.metadata.is_empty());
+    }
+
+    #[test]
+    fn answer_yes() {
+        let a = Answer::yes();
+        assert_eq!(a.value, AnswerValue::Yes);
+        assert!(a.selected_option.is_none());
+        assert!(a.text.is_none());
+    }
+
+    #[test]
+    fn answer_no() {
+        let a = Answer::no();
+        assert_eq!(a.value, AnswerValue::No);
+    }
+
+    #[test]
+    fn answer_skipped() {
+        let a = Answer::skipped();
+        assert_eq!(a.value, AnswerValue::Skipped);
+    }
+
+    #[test]
+    fn answer_timeout() {
+        let a = Answer::timeout();
+        assert_eq!(a.value, AnswerValue::Timeout);
+    }
+
+    #[test]
+    fn answer_selected() {
+        let opt = QuestionOption {
+            key: "A".to_string(),
+            label: "Approve".to_string(),
+        };
+        let a = Answer::selected("A", opt.clone());
+        assert_eq!(a.value, AnswerValue::Selected("A".to_string()));
+        assert_eq!(a.selected_option, Some(opt));
+    }
+
+    #[test]
+    fn answer_text() {
+        let a = Answer::text("free input");
+        assert_eq!(a.value, AnswerValue::Text("free input".to_string()));
+        assert_eq!(a.text, Some("free input".to_string()));
+    }
+
+    #[test]
+    fn question_option_eq() {
+        let a = QuestionOption {
+            key: "Y".to_string(),
+            label: "Yes".to_string(),
+        };
+        let b = QuestionOption {
+            key: "Y".to_string(),
+            label: "Yes".to_string(),
+        };
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn answer_value_variants() {
+        assert_ne!(AnswerValue::Yes, AnswerValue::No);
+        assert_ne!(AnswerValue::Skipped, AnswerValue::Timeout);
+        assert_eq!(
+            AnswerValue::Selected("x".to_string()),
+            AnswerValue::Selected("x".to_string())
+        );
+        assert_eq!(
+            AnswerValue::Text("hello".to_string()),
+            AnswerValue::Text("hello".to_string())
+        );
+    }
+
+    /// A slow interviewer that waits before answering -- for testing timeouts.
+    struct SlowInterviewer;
+
+    #[async_trait]
+    impl Interviewer for SlowInterviewer {
+        async fn ask(&self, _question: Question) -> Answer {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            Answer::yes()
+        }
+    }
+
+    #[tokio::test]
+    async fn ask_with_timeout_returns_timeout_when_expired() {
+        let interviewer = SlowInterviewer;
+        let mut q = Question::new("approve?", QuestionType::YesNo);
+        q.timeout_seconds = Some(0.01);
+
+        let answer = ask_with_timeout(&interviewer, q).await;
+        assert_eq!(answer.value, AnswerValue::Timeout);
+    }
+
+    #[tokio::test]
+    async fn ask_with_timeout_returns_default_when_set() {
+        let interviewer = SlowInterviewer;
+        let mut q = Question::new("approve?", QuestionType::YesNo);
+        q.timeout_seconds = Some(0.01);
+        q.default = Some(Answer::no());
+
+        let answer = ask_with_timeout(&interviewer, q).await;
+        assert_eq!(answer.value, AnswerValue::No);
+    }
+
+    #[tokio::test]
+    async fn ask_with_timeout_no_timeout_returns_normally() {
+        let interviewer = crate::interviewer::auto_approve::AutoApproveInterviewer;
+        let q = Question::new("approve?", QuestionType::YesNo);
+
+        let answer = ask_with_timeout(&interviewer, q).await;
+        assert_eq!(answer.value, AnswerValue::Yes);
+    }
+}
