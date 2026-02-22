@@ -1,6 +1,7 @@
 use crate::error::AgentError;
 use crate::session::Session;
 use crate::tool_registry::RegisteredTool;
+use crate::tools::required_str;
 use crate::types::Turn;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,18 +18,17 @@ pub struct SubAgentResult {
 }
 
 pub struct SubAgent {
+    #[allow(dead_code)]
     id: String,
+    #[allow(dead_code)]
     depth: usize,
     task: Option<tokio::task::JoinHandle<Result<SubAgentResult, AgentError>>>,
     followup_queue: Arc<Mutex<VecDeque<String>>>,
     abort_flag: Arc<AtomicBool>,
 }
 
+#[cfg(test)]
 impl SubAgent {
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
     pub fn depth(&self) -> usize {
         self.depth
     }
@@ -67,12 +67,9 @@ impl SubAgentManager {
         let task = tokio::spawn(async move {
             session.process_input(&task_prompt).await?;
             let turns = session.history().turns();
-            let last_text = turns.iter().rev().find_map(|t| {
-                if let Turn::Assistant { content, .. } = t {
-                    Some(content.clone())
-                } else {
-                    None
-                }
+            let last_text = turns.iter().rev().find_map(|t| match t {
+                Turn::Assistant { content, .. } => Some(content.clone()),
+                _ => None,
             });
             Ok(SubAgentResult {
                 output: last_text.unwrap_or_default(),
@@ -150,6 +147,7 @@ impl SubAgentManager {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn get(&self, agent_id: &str) -> Option<&SubAgent> {
         self.agents.get(agent_id)
     }
@@ -191,10 +189,7 @@ pub fn make_spawn_agent_tool(
             let manager = manager.clone();
             let session_factory = session_factory.clone();
             Box::pin(async move {
-                let task = args
-                    .get("task")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| "Missing required parameter: task".to_string())?;
+                let task = required_str(&args, "task")?;
 
                 // Extract optional max_turns parameter
                 #[allow(clippy::cast_possible_truncation)]
@@ -240,14 +235,8 @@ pub fn make_send_input_tool(
         executor: Arc::new(move |args, _env| {
             let manager = manager.clone();
             Box::pin(async move {
-                let agent_id = args
-                    .get("agent_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| "Missing required parameter: agent_id".to_string())?;
-                let message = args
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| "Missing required parameter: message".to_string())?;
+                let agent_id = required_str(&args, "agent_id")?;
+                let message = required_str(&args, "message")?;
 
                 let mgr = manager.lock().await;
                 mgr.send_input(agent_id, message)
@@ -279,10 +268,7 @@ pub fn make_wait_tool(
         executor: Arc::new(move |args, _env| {
             let manager = manager.clone();
             Box::pin(async move {
-                let agent_id = args
-                    .get("agent_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| "Missing required parameter: agent_id".to_string())?;
+                let agent_id = required_str(&args, "agent_id")?;
 
                 let mut mgr = manager.lock().await;
                 let result = mgr.wait(agent_id).await
@@ -317,10 +303,7 @@ pub fn make_close_agent_tool(
         executor: Arc::new(move |args, _env| {
             let manager = manager.clone();
             Box::pin(async move {
-                let agent_id = args
-                    .get("agent_id")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| "Missing required parameter: agent_id".to_string())?;
+                let agent_id = required_str(&args, "agent_id")?;
 
                 let mut mgr = manager.lock().await;
                 mgr.close(agent_id)

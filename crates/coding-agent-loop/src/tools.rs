@@ -5,6 +5,12 @@ use std::fmt::Write;
 use std::sync::Arc;
 use unified_llm::types::ToolDefinition;
 
+pub(crate) fn required_str<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing required parameter: {key}"))
+}
+
 #[must_use]
 pub fn make_read_file_tool() -> RegisteredTool {
     RegisteredTool {
@@ -23,9 +29,7 @@ pub fn make_read_file_tool() -> RegisteredTool {
         },
         executor: Arc::new(|args, env| {
             Box::pin(async move {
-                let file_path = args["file_path"]
-                    .as_str()
-                    .ok_or_else(|| "file_path is required".to_string())?;
+                let file_path = required_str(&args, "file_path")?;
                 let offset = args.get("offset").and_then(serde_json::Value::as_u64);
                 let limit = args.get("limit").and_then(serde_json::Value::as_u64);
 
@@ -58,12 +62,8 @@ pub fn make_write_file_tool() -> RegisteredTool {
         },
         executor: Arc::new(|args, env| {
             Box::pin(async move {
-                let file_path = args["file_path"]
-                    .as_str()
-                    .ok_or_else(|| "file_path is required".to_string())?;
-                let content = args["content"]
-                    .as_str()
-                    .ok_or_else(|| "content is required".to_string())?;
+                let file_path = required_str(&args, "file_path")?;
+                let content = required_str(&args, "content")?;
 
                 env.write_file(file_path, content).await?;
                 Ok(format!("Successfully wrote to {file_path}"))
@@ -91,15 +91,9 @@ pub fn make_edit_file_tool() -> RegisteredTool {
         },
         executor: Arc::new(|args, env| {
             Box::pin(async move {
-                let file_path = args["file_path"]
-                    .as_str()
-                    .ok_or_else(|| "file_path is required".to_string())?;
-                let old_string = args["old_string"]
-                    .as_str()
-                    .ok_or_else(|| "old_string is required".to_string())?;
-                let new_string = args["new_string"]
-                    .as_str()
-                    .ok_or_else(|| "new_string is required".to_string())?;
+                let file_path = required_str(&args, "file_path")?;
+                let old_string = required_str(&args, "old_string")?;
+                let new_string = required_str(&args, "new_string")?;
                 let replace_all = args
                     .get("replace_all")
                     .and_then(serde_json::Value::as_bool)
@@ -165,9 +159,7 @@ pub fn make_shell_tool_with_config(config: &SessionConfig) -> RegisteredTool {
         },
         executor: Arc::new(move |args, env| {
             Box::pin(async move {
-                let command = args["command"]
-                    .as_str()
-                    .ok_or_else(|| "command is required".to_string())?;
+                let command = required_str(&args, "command")?;
                 let timeout_ms = args
                     .get("timeout_ms")
                     .and_then(serde_json::Value::as_u64)
@@ -213,9 +205,7 @@ pub fn make_grep_tool() -> RegisteredTool {
         },
         executor: Arc::new(|args, env| {
             Box::pin(async move {
-                let pattern = args["pattern"]
-                    .as_str()
-                    .ok_or_else(|| "pattern is required".to_string())?;
+                let pattern = required_str(&args, "pattern")?;
                 let path = args
                     .get("path")
                     .and_then(serde_json::Value::as_str)
@@ -261,9 +251,7 @@ pub fn make_glob_tool() -> RegisteredTool {
         },
         executor: Arc::new(|args, env| {
             Box::pin(async move {
-                let pattern = args["pattern"]
-                    .as_str()
-                    .ok_or_else(|| "pattern is required".to_string())?;
+                let pattern = required_str(&args, "pattern")?;
                 let path = args
                     .get("path")
                     .and_then(serde_json::Value::as_str);
@@ -336,9 +324,7 @@ pub(crate) fn make_list_dir_tool() -> RegisteredTool {
         },
         executor: Arc::new(|args, env| {
             Box::pin(async move {
-                let path = args["path"]
-                    .as_str()
-                    .ok_or_else(|| "path is required".to_string())?;
+                let path = required_str(&args, "path")?;
                 #[allow(clippy::cast_possible_truncation)]
                 let depth = args
                     .get("depth")
