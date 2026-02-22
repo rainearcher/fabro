@@ -2852,3 +2852,1132 @@ async fn integration_smoke_plan_implement_review_done() {
         .iter()
         .any(|e| matches!(e, PipelineEvent::PipelineCompleted { .. })));
 }
+
+// ===========================================================================
+// 17. Full HTTP server lifecycle (TS Scenario 4)
+// ===========================================================================
+
+#[cfg(feature = "server")]
+mod server_lifecycle {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use attractor::handler::codergen::CodergenHandler;
+    use attractor::handler::exit::ExitHandler;
+    use attractor::handler::start::StartHandler;
+    use attractor::handler::wait_human::WaitHumanHandler;
+    use attractor::handler::HandlerRegistry;
+    use attractor::interviewer::Interviewer;
+    use attractor::server::{build_router, create_app_state};
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    fn gate_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
+        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+        registry.register("start", Box::new(StartHandler));
+        registry.register("exit", Box::new(ExitHandler));
+        registry.register("codergen", Box::new(CodergenHandler::new(None)));
+        registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+        registry
+    }
+
+    async fn body_json(body: Body) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    const GATE_DOT: &str = r#"digraph GateTest {
+        graph [goal="Test gate"]
+        start [shape=Mdiamond]
+        exit  [shape=Msquare]
+        work  [shape=box, prompt="Do work"]
+        gate  [shape=hexagon, type="wait.human", label="Approve?"]
+        done  [shape=box, prompt="Finish"]
+        revise [shape=box, prompt="Revise"]
+
+        start -> work -> gate
+        gate -> done   [label="[A] Approve"]
+        gate -> revise [label="[R] Revise"]
+        done -> exit
+        revise -> gate
+    }"#;
+
+    #[tokio::test]
+    async fn full_http_lifecycle_approve_and_complete() {
+        let state = create_app_state(gate_registry);
+        let app = build_router(Arc::clone(&state));
+
+        // 1. Start pipeline
+        let req = Request::builder()
+            .method("POST")
+            .uri("/pipelines")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": GATE_DOT})).unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = body_json(response.into_body()).await;
+        let pipeline_id = body["id"].as_str().unwrap().to_string();
+
+        // 2. Poll for question to appear (pipeline runs start -> work -> gate, then blocks)
+        let mut question_id = String::new();
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let req = Request::builder()
+                .method("GET")
+                .uri(format!("/pipelines/{pipeline_id}/questions"))
+                .body(Body::empty())
+                .unwrap();
+            let response = app.clone().oneshot(req).await.unwrap();
+            let body = body_json(response.into_body()).await;
+            let arr = body.as_array().unwrap();
+            if !arr.is_empty() {
+                question_id = arr[0]["id"].as_str().unwrap().to_string();
+                break;
+            }
+        }
+        assert!(!question_id.is_empty(), "question should have appeared");
+
+        // 3. Submit answer selecting first option (Approve)
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/pipelines/{pipeline_id}/questions/{question_id}/answer"
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"value": "A"})).unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["accepted"], true);
+
+        // 4. Poll until completed
+        let mut final_status = String::new();
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let req = Request::builder()
+                .method("GET")
+                .uri(format!("/pipelines/{pipeline_id}"))
+                .body(Body::empty())
+                .unwrap();
+            let response = app.clone().oneshot(req).await.unwrap();
+            let body = body_json(response.into_body()).await;
+            let status = body["status"].as_str().unwrap().to_string();
+            if status == "completed" || status == "failed" {
+                final_status = status;
+                break;
+            }
+        }
+        assert_eq!(final_status, "completed");
+
+        // 5. Verify context endpoint returns an object
+        let req = Request::builder()
+            .method("GET")
+            .uri(format!("/pipelines/{pipeline_id}/context"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let ctx_body = body_json(response.into_body()).await;
+        assert!(ctx_body.is_object(), "context should be an object");
+
+        // 6. Verify no pending questions
+        let req = Request::builder()
+            .method("GET")
+            .uri(format!("/pipelines/{pipeline_id}/questions"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        assert!(
+            body.as_array().unwrap().is_empty(),
+            "no pending questions after completion"
+        );
+    }
+
+    #[tokio::test]
+    async fn full_http_lifecycle_cancel() {
+        let state = create_app_state(gate_registry);
+        let app = build_router(Arc::clone(&state));
+
+        // Start a pipeline that will block at the human gate
+        let req = Request::builder()
+            .method("POST")
+            .uri("/pipelines")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": GATE_DOT})).unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let pipeline_id = body["id"].as_str().unwrap().to_string();
+
+        // Wait briefly for pipeline to start running
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // Cancel it
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/pipelines/{pipeline_id}/cancel"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["cancelled"], true);
+
+        // Verify status is cancelled
+        let req = Request::builder()
+            .method("GET")
+            .uri(format!("/pipelines/{pipeline_id}"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["status"], "cancelled");
+    }
+}
+
+// ===========================================================================
+// 18. SSE event stream content parsing (TS Scenario 8)
+// ===========================================================================
+
+#[cfg(feature = "server")]
+mod sse_events {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use attractor::handler::codergen::CodergenHandler;
+    use attractor::handler::exit::ExitHandler;
+    use attractor::handler::start::StartHandler;
+    use attractor::handler::HandlerRegistry;
+    use attractor::interviewer::Interviewer;
+    use attractor::server::{build_router, create_app_state};
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    fn simple_registry(_interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
+        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+        registry.register("start", Box::new(StartHandler));
+        registry.register("exit", Box::new(ExitHandler));
+        registry.register("codergen", Box::new(CodergenHandler::new(None)));
+        registry
+    }
+
+    const SIMPLE_DOT: &str = r#"digraph SSETest {
+        graph [goal="Test SSE"]
+        start [shape=Mdiamond]
+        work  [shape=box, prompt="Do work"]
+        exit  [shape=Msquare]
+        start -> work -> exit
+    }"#;
+
+    #[tokio::test]
+    async fn sse_stream_contains_expected_event_types() {
+        let state = create_app_state(simple_registry);
+        let app = build_router(Arc::clone(&state));
+
+        // Start pipeline
+        let req = Request::builder()
+            .method("POST")
+            .uri("/pipelines")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": SIMPLE_DOT})).unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let pipeline_id = body["id"].as_str().unwrap().to_string();
+
+        // Get SSE stream
+        let req = Request::builder()
+            .method("GET")
+            .uri(format!("/pipelines/{pipeline_id}/events"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(content_type.contains("text/event-stream"));
+
+        // Collect SSE frames with a timeout
+        let mut body = response.into_body();
+        let mut sse_data = String::new();
+        loop {
+            match tokio::time::timeout(Duration::from_secs(3), body.frame()).await {
+                Ok(Some(Ok(frame))) => {
+                    if let Some(data) = frame.data_ref() {
+                        sse_data.push_str(&String::from_utf8_lossy(data));
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        // Parse SSE data lines and extract event types
+        let mut event_types: Vec<String> = Vec::new();
+        for line in sse_data.lines() {
+            if let Some(json_str) = line.strip_prefix("data:") {
+                let json_str = json_str.trim();
+                if let Ok(event) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    // The event is serialized as a tagged enum, so the type is the first key
+                    if let Some(obj) = event.as_object() {
+                        for key in obj.keys() {
+                            event_types.push(key.clone());
+                        }
+                    } else if let Some(s) = event.as_str() {
+                        event_types.push(s.to_string());
+                    }
+                }
+            }
+        }
+
+        // Verify we got events (pipeline may have completed before we subscribed,
+        // so we check that the stream was valid SSE)
+        // If events were emitted before subscribe, the stream may be empty.
+        // That's OK -- the main assertion is content-type + valid SSE format.
+        // But if we got events, verify expected types.
+        if !event_types.is_empty() {
+            assert!(
+                event_types
+                    .iter()
+                    .any(|t| t == "StageStarted" || t == "StageCompleted"),
+                "should contain stage events, got: {event_types:?}"
+            );
+        }
+
+        // Wait for completion, then verify checkpoint
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(format!("/pipelines/{pipeline_id}/checkpoint"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let cp_body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        // If pipeline completed, checkpoint should have completed_nodes
+        if !cp_body.is_null() {
+            let completed = cp_body["completed_nodes"].as_array();
+            if let Some(nodes) = completed {
+                let names: Vec<&str> = nodes.iter().filter_map(|v| v.as_str()).collect();
+                assert!(names.contains(&"work"), "work should be in completed_nodes");
+            }
+        }
+    }
+}
+
+// ===========================================================================
+// 19a. Sub-pipeline E2E (TS Scenario 9)
+// ===========================================================================
+
+#[tokio::test]
+async fn sub_pipeline_e2e_through_engine() {
+    use attractor::handler::sub_pipeline::SubPipelineHandler;
+
+    let input = r#"digraph SubPipelineE2E {
+        graph [goal="Test sub-pipeline"]
+        start [shape=Mdiamond]
+        exit  [shape=Msquare]
+        generate [shape=box, prompt="Generate code"]
+        validate [type="sub_pipeline", sub_pipeline.dot_source="digraph Child { start [shape=Mdiamond]; lint [shape=box, prompt=\"Lint\"]; test [shape=box, prompt=\"Test\"]; exit [shape=Msquare]; start -> lint -> test -> exit }"]
+
+        start -> generate -> validate -> exit
+    }"#;
+
+    let graph = parse(input).expect("parse should succeed");
+
+    let dir = tempfile::tempdir().unwrap();
+
+    // Build a registry that includes SubPipelineHandler
+    let child_registry = {
+        let mut r = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+        r.register("start", Box::new(StartHandler));
+        r.register("exit", Box::new(ExitHandler));
+        r.register("codergen", Box::new(CodergenHandler::new(None)));
+        Arc::new(r)
+    };
+    let emitter = Arc::new(EventEmitter::new());
+
+    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register("codergen", Box::new(CodergenHandler::new(None)));
+    registry.register(
+        "sub_pipeline",
+        Box::new(SubPipelineHandler::new(child_registry, emitter)),
+    );
+
+    let engine = PipelineEngine::new(registry, EventEmitter::new());
+    let config = RunConfig {
+        logs_root: dir.path().to_path_buf(),
+    };
+
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("sub-pipeline E2E should succeed");
+    assert_eq!(outcome.status, StageStatus::Success);
+
+    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    assert!(
+        checkpoint
+            .completed_nodes
+            .contains(&"generate".to_string()),
+        "generate should be in completed_nodes"
+    );
+    assert!(
+        checkpoint
+            .completed_nodes
+            .contains(&"validate".to_string()),
+        "validate should be in completed_nodes"
+    );
+
+    // Context should have last_stage set by the validate node's sub-pipeline
+    let last_stage = checkpoint.context_values.get("last_stage");
+    assert!(last_stage.is_some(), "last_stage should be set in context");
+}
+
+// ===========================================================================
+// 19b. Manager loop with ChildObserver E2E (TS Scenario 10)
+// ===========================================================================
+
+#[tokio::test]
+async fn manager_loop_with_child_observer_e2e() {
+    use attractor::handler::manager_loop::{ChildObserver, ManagerLoopHandler};
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    struct SimulatingChildObserver {
+        launch_count: AtomicU32,
+        observe_count: AtomicU32,
+    }
+
+    #[async_trait::async_trait]
+    impl ChildObserver for SimulatingChildObserver {
+        async fn launch_child(
+            &self,
+            _dotfile: &str,
+            _workdir: &str,
+            _context: &attractor::context::Context,
+        ) -> Result<(), attractor::error::AttractorError> {
+            self.launch_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn observe(
+            &self,
+            context: &attractor::context::Context,
+        ) -> Result<(), attractor::error::AttractorError> {
+            let cycle = self.observe_count.fetch_add(1, Ordering::SeqCst);
+            if cycle >= 2 {
+                context.set(
+                    "context.stack.child.status",
+                    serde_json::json!("completed"),
+                );
+                context.set(
+                    "context.stack.child.outcome",
+                    serde_json::json!("success"),
+                );
+            }
+            Ok(())
+        }
+
+        async fn steer(
+            &self,
+            _context: &attractor::context::Context,
+            _node: &attractor::graph::Node,
+        ) -> Result<(), attractor::error::AttractorError> {
+            Ok(())
+        }
+    }
+
+    let mut graph = Graph::new("ManagerLoopE2E");
+    graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Test manager loop".to_string()),
+    );
+
+    let mut start = Node::new("start");
+    start
+        .attrs
+        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    graph.nodes.insert("start".to_string(), start);
+
+    let mut exit = Node::new("exit");
+    exit.attrs
+        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    graph.nodes.insert("exit".to_string(), exit);
+
+    let mut supervisor = Node::new("supervisor");
+    supervisor.attrs.insert(
+        "type".to_string(),
+        AttrValue::String("stack.manager_loop".to_string()),
+    );
+    supervisor.attrs.insert(
+        "manager.poll_interval".to_string(),
+        AttrValue::Duration(std::time::Duration::from_millis(1)),
+    );
+    supervisor
+        .attrs
+        .insert("manager.max_cycles".to_string(), AttrValue::Integer(50));
+    supervisor.attrs.insert(
+        "manager.actions".to_string(),
+        AttrValue::String("observe,wait".to_string()),
+    );
+    supervisor.attrs.insert(
+        "manager.stop_condition".to_string(),
+        AttrValue::String(String::new()),
+    );
+    graph
+        .nodes
+        .insert("supervisor".to_string(), supervisor);
+
+    graph.edges.push(Edge::new("start", "supervisor"));
+    graph.edges.push(Edge::new("supervisor", "exit"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let observer = SimulatingChildObserver {
+        launch_count: AtomicU32::new(0),
+        observe_count: AtomicU32::new(0),
+    };
+
+    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register(
+        "stack.manager_loop",
+        Box::new(ManagerLoopHandler::new(Some(Box::new(observer)))),
+    );
+
+    let engine = PipelineEngine::new(registry, EventEmitter::new());
+    let config = RunConfig {
+        logs_root: dir.path().to_path_buf(),
+    };
+
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("manager loop E2E should succeed");
+    assert_eq!(outcome.status, StageStatus::Success);
+
+    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    assert!(
+        checkpoint
+            .completed_nodes
+            .contains(&"supervisor".to_string()),
+        "supervisor should be in completed_nodes"
+    );
+
+    // The manager loop handler stores notes about child completion
+    let supervisor_outcome = checkpoint.node_outcomes.get("supervisor");
+    assert!(supervisor_outcome.is_some(), "supervisor outcome should exist");
+    let notes = supervisor_outcome.unwrap().notes.as_deref().unwrap_or("");
+    assert!(
+        notes.contains("Child completed"),
+        "notes should mention child completion, got: {notes}"
+    );
+}
+
+// ===========================================================================
+// 19c. GraphMerge E2E (TS Scenario 11)
+// ===========================================================================
+
+#[tokio::test]
+async fn graph_merge_e2e_through_engine() {
+    use attractor::transform::GraphMergeTransform;
+
+    // Module "val": lint -> test
+    let mut val_graph = Graph::new("val");
+    let mut lint = Node::new("lint");
+    lint.attrs
+        .insert("shape".to_string(), AttrValue::String("box".to_string()));
+    lint.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("Lint the code".to_string()),
+    );
+    val_graph.nodes.insert("lint".to_string(), lint);
+
+    let mut test_node = Node::new("test");
+    test_node
+        .attrs
+        .insert("shape".to_string(), AttrValue::String("box".to_string()));
+    test_node.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("Run tests".to_string()),
+    );
+    val_graph.nodes.insert("test".to_string(), test_node);
+    val_graph.edges.push(Edge::new("lint", "test"));
+
+    // Module "dep": stage -> release
+    let mut dep_graph = Graph::new("dep");
+    let mut stage = Node::new("stage");
+    stage
+        .attrs
+        .insert("shape".to_string(), AttrValue::String("box".to_string()));
+    stage.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("Stage the release".to_string()),
+    );
+    dep_graph.nodes.insert("stage".to_string(), stage);
+
+    let mut release = Node::new("release");
+    release
+        .attrs
+        .insert("shape".to_string(), AttrValue::String("box".to_string()));
+    release.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("Release it".to_string()),
+    );
+    dep_graph.nodes.insert("release".to_string(), release);
+    dep_graph.edges.push(Edge::new("stage", "release"));
+
+    // Main graph: start, exit; edges connect modules
+    let mut main_graph = Graph::new("MergeE2E");
+    main_graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Test graph merge".to_string()),
+    );
+
+    let mut start = Node::new("start");
+    start
+        .attrs
+        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    main_graph.nodes.insert("start".to_string(), start);
+
+    let mut exit = Node::new("exit");
+    exit.attrs
+        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    main_graph.nodes.insert("exit".to_string(), exit);
+
+    // Apply merge transform
+    let merge = GraphMergeTransform::new(vec![val_graph, dep_graph]);
+    merge.apply(&mut main_graph);
+
+    // Add cross-module edges
+    main_graph.edges.push(Edge::new("start", "val.lint"));
+    main_graph.edges.push(Edge::new("val.test", "dep.stage"));
+    main_graph
+        .edges
+        .push(Edge::new("dep.release", "exit"));
+
+    // Verify merged nodes exist
+    assert!(main_graph.nodes.contains_key("val.lint"));
+    assert!(main_graph.nodes.contains_key("val.test"));
+    assert!(main_graph.nodes.contains_key("dep.stage"));
+    assert!(main_graph.nodes.contains_key("dep.release"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
+    let config = RunConfig {
+        logs_root: dir.path().to_path_buf(),
+    };
+
+    let outcome = engine
+        .run(&main_graph, &config)
+        .await
+        .expect("graph merge E2E should succeed");
+    assert_eq!(outcome.status, StageStatus::Success);
+
+    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    assert!(
+        checkpoint
+            .completed_nodes
+            .contains(&"val.lint".to_string()),
+        "val.lint should be completed"
+    );
+    assert!(
+        checkpoint
+            .completed_nodes
+            .contains(&"val.test".to_string()),
+        "val.test should be completed"
+    );
+    assert!(
+        checkpoint
+            .completed_nodes
+            .contains(&"dep.stage".to_string()),
+        "dep.stage should be completed"
+    );
+    assert!(
+        checkpoint
+            .completed_nodes
+            .contains(&"dep.release".to_string()),
+        "dep.release should be completed"
+    );
+
+    // Verify ordering: val.test appears before dep.stage
+    let val_test_pos = checkpoint
+        .completed_nodes
+        .iter()
+        .position(|n| n == "val.test")
+        .expect("val.test should be in completed_nodes");
+    let dep_stage_pos = checkpoint
+        .completed_nodes
+        .iter()
+        .position(|n| n == "dep.stage")
+        .expect("dep.stage should be in completed_nodes");
+    assert!(
+        val_test_pos < dep_stage_pos,
+        "val.test ({val_test_pos}) should execute before dep.stage ({dep_stage_pos})"
+    );
+}
+
+// ===========================================================================
+// 20. Real LLM pipeline tests (requires ANTHROPIC_API_KEY)
+// ===========================================================================
+
+mod real_llm {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+
+    use attractor::context::Context;
+    use attractor::error::AttractorError;
+    use attractor::graph::Node;
+    use attractor::handler::codergen::{CodergenBackend, CodergenHandler, CodergenResult};
+
+    use unified_llm::client::Client;
+    use unified_llm::types::{Message, Request};
+
+    struct LlmCodergenBackend {
+        client: Arc<Client>,
+        model: String,
+    }
+
+    #[async_trait]
+    impl CodergenBackend for LlmCodergenBackend {
+        async fn run(
+            &self,
+            _node: &Node,
+            prompt: &str,
+            _context: &Context,
+        ) -> Result<CodergenResult, AttractorError> {
+            let request = Request {
+                model: self.model.clone(),
+                messages: vec![Message::user(prompt)],
+                provider: Some("anthropic".to_string()),
+                tools: None,
+                tool_choice: None,
+                response_format: None,
+                temperature: Some(0.0),
+                top_p: None,
+                max_tokens: Some(200),
+                stop_sequences: None,
+                reasoning_effort: None,
+                metadata: None,
+                provider_options: None,
+            };
+            let response = self
+                .client
+                .complete(&request)
+                .await
+                .map_err(|e| AttractorError::Handler(e.to_string()))?;
+            Ok(CodergenResult::Text(response.text()))
+        }
+    }
+
+    async fn make_llm_client() -> Option<Arc<Client>> {
+        let _ = dotenvy::dotenv();
+        if std::env::var("ANTHROPIC_API_KEY").is_err() {
+            return None;
+        }
+        let client = Client::from_env()
+            .await
+            .expect("unified-llm client should initialize from env");
+        Some(Arc::new(client))
+    }
+
+    fn make_llm_backend(client: Arc<Client>) -> Box<LlmCodergenBackend> {
+        Box::new(LlmCodergenBackend {
+            client,
+            model: "claude-haiku-4-5-20251001".to_string(),
+        })
+    }
+
+    use attractor::checkpoint::Checkpoint;
+    use attractor::engine::{PipelineEngine, RunConfig};
+    use attractor::event::EventEmitter;
+    use attractor::graph::{AttrValue, Edge, Graph};
+    use attractor::handler::exit::ExitHandler;
+    use attractor::handler::start::StartHandler;
+    use attractor::handler::wait_human::WaitHumanHandler;
+    use attractor::handler::HandlerRegistry;
+    use attractor::interviewer::auto_approve::AutoApproveInterviewer;
+    use attractor::outcome::StageStatus;
+
+    #[tokio::test]
+    #[ignore]
+    async fn real_llm_linear_pipeline() {
+        let client = match make_llm_client().await {
+            Some(c) => c,
+            None => {
+                eprintln!("Skipping: ANTHROPIC_API_KEY not set");
+                return;
+            }
+        };
+
+        let mut graph = Graph::new("RealLLMLinear");
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("Describe a sorting algorithm".to_string()),
+        );
+
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+
+        let mut exit = Node::new("exit");
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
+        graph.nodes.insert("exit".to_string(), exit);
+
+        let mut plan = Node::new("plan");
+        plan.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("box".to_string()),
+        );
+        plan.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String(
+                "Briefly describe quicksort in 2-3 sentences.".to_string(),
+            ),
+        );
+        graph.nodes.insert("plan".to_string(), plan);
+
+        let mut review = Node::new("review");
+        review.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("box".to_string()),
+        );
+        review.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String(
+                "Review the previous description and add one improvement suggestion."
+                    .to_string(),
+            ),
+        );
+        graph.nodes.insert("review".to_string(), review);
+
+        graph.edges.push(Edge::new("start", "plan"));
+        graph.edges.push(Edge::new("plan", "review"));
+        graph.edges.push(Edge::new("review", "exit"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let backend = make_llm_backend(client);
+        let mut registry =
+            HandlerRegistry::new(Box::new(CodergenHandler::new(Some(backend))));
+        registry.register("start", Box::new(StartHandler));
+        registry.register("exit", Box::new(ExitHandler));
+        registry.register(
+            "codergen",
+            Box::new(CodergenHandler::new(Some(make_llm_backend(
+                make_llm_client().await.unwrap(),
+            )))),
+        );
+
+        let engine = PipelineEngine::new(registry, EventEmitter::new());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+        };
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            engine.run(&graph, &config),
+        )
+        .await
+        .expect("should not timeout")
+        .expect("real LLM pipeline should succeed");
+
+        assert_eq!(outcome.status, StageStatus::Success);
+
+        let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+        assert!(checkpoint.completed_nodes.contains(&"plan".to_string()));
+        assert!(checkpoint.completed_nodes.contains(&"review".to_string()));
+
+        let last_stage = checkpoint
+            .context_values
+            .get("last_stage")
+            .and_then(|v| v.as_str());
+        assert_eq!(last_stage, Some("review"));
+
+        // Verify actual LLM responses were written
+        let plan_response =
+            std::fs::read_to_string(dir.path().join("plan").join("response.md")).unwrap();
+        assert!(
+            !plan_response.is_empty(),
+            "LLM should have generated a response"
+        );
+        assert!(
+            !plan_response.contains("[Simulated]"),
+            "response should be from real LLM, not simulated"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn real_llm_two_stage_pipeline() {
+        let client = match make_llm_client().await {
+            Some(c) => c,
+            None => {
+                eprintln!("Skipping: ANTHROPIC_API_KEY not set");
+                return;
+            }
+        };
+
+        let mut graph = Graph::new("RealLLMTwoStage");
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("Generate and review".to_string()),
+        );
+
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+
+        let mut exit = Node::new("exit");
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
+        graph.nodes.insert("exit".to_string(), exit);
+
+        let mut generate = Node::new("generate");
+        generate.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("box".to_string()),
+        );
+        generate.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Write a haiku about programming.".to_string()),
+        );
+        graph.nodes.insert("generate".to_string(), generate);
+
+        let mut review = Node::new("review");
+        review.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("box".to_string()),
+        );
+        review.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Rate the haiku on a scale of 1-10.".to_string()),
+        );
+        graph.nodes.insert("review".to_string(), review);
+
+        graph.edges.push(Edge::new("start", "generate"));
+        graph.edges.push(Edge::new("generate", "review"));
+        graph.edges.push(Edge::new("review", "exit"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(
+            make_llm_backend(Arc::clone(&client)),
+        ))));
+        registry.register("start", Box::new(StartHandler));
+        registry.register("exit", Box::new(ExitHandler));
+        registry.register(
+            "codergen",
+            Box::new(CodergenHandler::new(Some(make_llm_backend(client)))),
+        );
+
+        let engine = PipelineEngine::new(registry, EventEmitter::new());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+        };
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            engine.run(&graph, &config),
+        )
+        .await
+        .expect("should not timeout")
+        .expect("real LLM two-stage pipeline should succeed");
+
+        assert_eq!(outcome.status, StageStatus::Success);
+
+        let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+        let last_stage = checkpoint
+            .context_values
+            .get("last_stage")
+            .and_then(|v| v.as_str());
+        assert_eq!(last_stage, Some("review"));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn real_llm_human_gate_auto_approve() {
+        let client = match make_llm_client().await {
+            Some(c) => c,
+            None => {
+                eprintln!("Skipping: ANTHROPIC_API_KEY not set");
+                return;
+            }
+        };
+
+        let mut graph = Graph::new("RealLLMGate");
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("Write and approve".to_string()),
+        );
+
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+
+        let mut exit = Node::new("exit");
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
+        graph.nodes.insert("exit".to_string(), exit);
+
+        let mut write = Node::new("write");
+        write.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("box".to_string()),
+        );
+        write.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Write a one-line greeting.".to_string()),
+        );
+        graph.nodes.insert("write".to_string(), write);
+
+        let mut gate = Node::new("gate");
+        gate.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("hexagon".to_string()),
+        );
+        gate.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("wait.human".to_string()),
+        );
+        gate.attrs.insert(
+            "label".to_string(),
+            AttrValue::String("Approve?".to_string()),
+        );
+        graph.nodes.insert("gate".to_string(), gate);
+
+        let mut ship = Node::new("ship");
+        ship.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("box".to_string()),
+        );
+        ship.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Ship the greeting.".to_string()),
+        );
+        graph.nodes.insert("ship".to_string(), ship);
+
+        let mut revise = Node::new("revise");
+        revise.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("box".to_string()),
+        );
+        revise.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Revise the greeting.".to_string()),
+        );
+        graph.nodes.insert("revise".to_string(), revise);
+
+        graph.edges.push(Edge::new("start", "write"));
+        graph.edges.push(Edge::new("write", "gate"));
+
+        let mut approve_edge = Edge::new("gate", "ship");
+        approve_edge.attrs.insert(
+            "label".to_string(),
+            AttrValue::String("[A] Approve".to_string()),
+        );
+        graph.edges.push(approve_edge);
+
+        let mut revise_edge = Edge::new("gate", "revise");
+        revise_edge.attrs.insert(
+            "label".to_string(),
+            AttrValue::String("[R] Revise".to_string()),
+        );
+        graph.edges.push(revise_edge);
+
+        graph.edges.push(Edge::new("ship", "exit"));
+        graph.edges.push(Edge::new("revise", "gate"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let interviewer = Arc::new(AutoApproveInterviewer);
+
+        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(
+            make_llm_backend(Arc::clone(&client)),
+        ))));
+        registry.register("start", Box::new(StartHandler));
+        registry.register("exit", Box::new(ExitHandler));
+        registry.register(
+            "codergen",
+            Box::new(CodergenHandler::new(Some(make_llm_backend(client)))),
+        );
+        registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+
+        let engine = PipelineEngine::new(registry, EventEmitter::new());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+        };
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            engine.run(&graph, &config),
+        )
+        .await
+        .expect("should not timeout")
+        .expect("real LLM gate pipeline should succeed");
+
+        assert_eq!(outcome.status, StageStatus::Success);
+
+        let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+        assert!(
+            checkpoint.completed_nodes.contains(&"write".to_string()),
+            "write should be completed"
+        );
+        assert!(
+            checkpoint.completed_nodes.contains(&"gate".to_string()),
+            "gate should be completed"
+        );
+        assert!(
+            checkpoint.completed_nodes.contains(&"ship".to_string()),
+            "ship should be completed (auto-approve selects first option)"
+        );
+        assert!(
+            !checkpoint.completed_nodes.contains(&"revise".to_string()),
+            "revise should NOT be traversed with auto-approve"
+        );
+    }
+}

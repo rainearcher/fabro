@@ -36,6 +36,8 @@ tempfile = "3"
 axum = "0.8"
 tower = "0.5"
 tokio-stream = { workspace = true, features = ["sync"] }
+http-body-util = "0.1"
+dotenvy.workspace = true
 
 [lints]
 workspace = true

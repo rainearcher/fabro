@@ -18,7 +18,7 @@ use crate::engine::{PipelineEngine, RunConfig};
 use crate::event::{EventEmitter, PipelineEvent};
 use crate::handler::HandlerRegistry;
 use crate::interviewer::web::WebInterviewer;
-use crate::interviewer::{Answer, AnswerValue};
+use crate::interviewer::{Answer, AnswerValue, Interviewer};
 
 /// Status of a managed pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -52,7 +52,7 @@ struct ManagedPipeline {
 /// Shared application state for the server.
 pub struct AppState {
     pipelines: Mutex<HashMap<String, ManagedPipeline>>,
-    registry_factory: Box<dyn Fn() -> HandlerRegistry + Send + Sync>,
+    registry_factory: Box<dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync>,
 }
 
 /// Request body for POST /pipelines.
@@ -106,8 +106,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 }
 
 /// Create an `AppState` with the given registry factory.
+///
+/// The factory receives the pipeline's `WebInterviewer` so it can wire it
+/// into handlers that need human-in-the-loop interaction (e.g., `WaitHumanHandler`).
 pub fn create_app_state(
-    registry_factory: impl Fn() -> HandlerRegistry + Send + Sync + 'static,
+    registry_factory: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     Arc::new(AppState {
         pipelines: Mutex::new(HashMap::new()),
@@ -142,7 +145,7 @@ async fn start_pipeline(
         let _ = tx_clone.send(event.clone());
     });
 
-    let registry = (state.registry_factory)();
+    let registry = (state.registry_factory)(Arc::clone(&interviewer) as Arc<dyn Interviewer>);
     let engine = PipelineEngine::new(registry, emitter);
 
     {
@@ -360,7 +363,7 @@ mod tests {
         start -> exit
     }"#;
 
-    fn test_registry() -> HandlerRegistry {
+    fn test_registry(_interviewer: Arc<dyn crate::interviewer::Interviewer>) -> HandlerRegistry {
         let mut registry = HandlerRegistry::new(Box::new(StartHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
