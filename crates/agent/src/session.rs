@@ -289,12 +289,20 @@ impl Session {
             let text = response.text();
             let tool_calls = response.tool_calls();
             let reasoning = response.reasoning();
+            let provider_parts: Vec<_> = response
+                .message
+                .content
+                .iter()
+                .filter(|p| matches!(p, llm::types::ContentPart::Other { .. }))
+                .cloned()
+                .collect();
             let usage = response.usage.clone();
 
             self.history.push(Turn::Assistant {
                 content: text.clone(),
                 tool_calls: tool_calls.clone(),
                 reasoning,
+                provider_parts,
                 usage,
                 response_id: response.id.clone(),
                 timestamp: SystemTime::now(),

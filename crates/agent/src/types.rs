@@ -1,5 +1,5 @@
 use std::time::SystemTime;
-use llm::types::{ToolCall, ToolResult, Usage};
+use llm::types::{ContentPart, ToolCall, ToolResult, Usage};
 
 #[derive(Debug, Clone)]
 pub enum Turn {
@@ -11,6 +11,9 @@ pub enum Turn {
         content: String,
         tool_calls: Vec<ToolCall>,
         reasoning: Option<String>,
+        /// Opaque provider-specific content parts (e.g. OpenAI reasoning items)
+        /// that must be preserved for round-tripping but don't map to standard fields.
+        provider_parts: Vec<ContentPart>,
         usage: Usage,
         response_id: String,
         timestamp: SystemTime,

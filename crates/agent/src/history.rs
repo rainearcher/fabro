@@ -24,9 +24,13 @@ impl History {
                     content,
                     tool_calls,
                     reasoning,
+                    provider_parts,
                     ..
                 } => {
                     let mut parts: Vec<ContentPart> = Vec::new();
+                    // Provider-specific opaque parts (e.g. OpenAI reasoning items)
+                    // must precede function calls for correct round-tripping.
+                    parts.extend(provider_parts.iter().cloned());
                     if let Some(reasoning_text) = reasoning {
                         parts.push(ContentPart::Thinking(
                             llm::types::ThinkingData {
@@ -108,6 +112,7 @@ mod tests {
             content: "Hi there".into(),
             tool_calls: vec![],
             reasoning: None,
+            provider_parts: vec![],
             usage: Usage::default(),
             response_id: "resp_1".into(),
             timestamp: SystemTime::now(),
@@ -126,6 +131,7 @@ mod tests {
             content: "Let me read that".into(),
             tool_calls: vec![tc],
             reasoning: None,
+            provider_parts: vec![],
             usage: Usage::default(),
             response_id: "resp_2".into(),
             timestamp: SystemTime::now(),
@@ -147,6 +153,7 @@ mod tests {
             content: "The answer is 42".into(),
             tool_calls: vec![],
             reasoning: Some("Let me think about this...".into()),
+            provider_parts: vec![],
             usage: Usage::default(),
             response_id: "resp_3".into(),
             timestamp: SystemTime::now(),
@@ -158,6 +165,30 @@ mod tests {
             .filter(|p| matches!(p, ContentPart::Thinking(_)))
             .collect();
         assert_eq!(thinking_parts.len(), 1);
+    }
+
+    #[test]
+    fn assistant_turn_preserves_provider_parts() {
+        let mut history = History::default();
+        let reasoning_item = ContentPart::Other {
+            kind: "openai_reasoning".to_string(),
+            data: serde_json::json!({"type": "reasoning", "id": "rs_abc"}),
+        };
+        let tc = ToolCall::new("call_1", "search", serde_json::json!({}));
+        history.push(Turn::Assistant {
+            content: String::new(),
+            tool_calls: vec![tc],
+            reasoning: None,
+            provider_parts: vec![reasoning_item],
+            usage: Usage::default(),
+            response_id: "resp_1".into(),
+            timestamp: SystemTime::now(),
+        });
+        let messages = history.convert_to_messages();
+        assert_eq!(messages.len(), 1);
+        // Provider parts come first, then tool calls
+        assert!(matches!(&messages[0].content[0], ContentPart::Other { kind, .. } if kind == "openai_reasoning"));
+        assert!(matches!(&messages[0].content[1], ContentPart::ToolCall(_)));
     }
 
     #[test]
@@ -219,6 +250,7 @@ mod tests {
             content: "Second".into(),
             tool_calls: vec![],
             reasoning: None,
+            provider_parts: vec![],
             usage: Usage::default(),
             response_id: "resp_1".into(),
             timestamp: SystemTime::now(),
@@ -241,6 +273,7 @@ mod tests {
                 serde_json::json!({"cmd": "ls"}),
             )],
             reasoning: Some("thinking...".into()),
+            provider_parts: vec![],
             usage: Usage {
                 input_tokens: 10,
                 output_tokens: 5,
