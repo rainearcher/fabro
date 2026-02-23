@@ -169,7 +169,8 @@ async fn llm_evaluate(
     // Build a synthetic node for the backend call
     let eval_node = Node::new("fan_in_eval");
 
-    match backend.run(&eval_node, &full_prompt, context).await {
+    // Fan-in evaluation runs outside a thread context, so pass None
+    match backend.run(&eval_node, &full_prompt, context, None).await {
         Ok(CodergenResult::Full(outcome)) => {
             // If the backend returned a full Outcome, extract best_id from context_updates
             let best_id = outcome
@@ -354,6 +355,7 @@ mod tests {
                 _node: &Node,
                 _prompt: &str,
                 _context: &Context,
+                _thread_id: Option<&str>,
             ) -> Result<CodergenResult, AttractorError> {
                 // Return text that contains the ID "branch_b"
                 Ok(CodergenResult::Text("The best candidate is branch_b".to_string()))

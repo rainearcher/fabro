@@ -23,6 +23,7 @@ pub trait CodergenBackend: Send + Sync {
         node: &Node,
         prompt: &str,
         context: &Context,
+        thread_id: Option<&str>,
     ) -> Result<CodergenResult, AttractorError>;
 }
 
@@ -105,8 +106,11 @@ impl Handler for CodergenHandler {
         }
 
         // 4. Call LLM backend
+        let thread_id = context
+            .get("internal.thread_id")
+            .and_then(|v| v.as_str().map(String::from));
         let response_text = if let Some(backend) = &self.backend {
-            match backend.run(node, &prompt, context).await {
+            match backend.run(node, &prompt, context, thread_id.as_deref()).await {
                 Ok(CodergenResult::Full(outcome)) => {
                     let status_json = serde_json::to_string_pretty(&outcome)
                         .unwrap_or_else(|_| "{}".to_string());
@@ -381,5 +385,94 @@ mod tests {
         let node = Node::new("step");
         let graph = Graph::new("test");
         assert_eq!(resolve_hook(&node, &graph, "tool_hooks.pre"), None);
+    }
+
+    #[tokio::test]
+    async fn codergen_handler_passes_thread_id_to_backend() {
+        use std::sync::{Arc, Mutex};
+
+        struct ThreadCapturingBackend {
+            captured_thread_id: Arc<Mutex<Option<Option<String>>>>,
+        }
+
+        #[async_trait]
+        impl CodergenBackend for ThreadCapturingBackend {
+            async fn run(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                _context: &Context,
+                thread_id: Option<&str>,
+            ) -> Result<CodergenResult, AttractorError> {
+                *self.captured_thread_id.lock().unwrap() =
+                    Some(thread_id.map(String::from));
+                Ok(CodergenResult::Text("ok".to_string()))
+            }
+        }
+
+        let captured = Arc::new(Mutex::new(None));
+        let backend = ThreadCapturingBackend {
+            captured_thread_id: captured.clone(),
+        };
+        let handler = CodergenHandler::new(Some(Box::new(backend)));
+
+        let node = Node::new("work");
+        let context = Context::new();
+        // Simulate what the engine stores in internal.thread_id
+        context.set("internal.thread_id", serde_json::json!("main"));
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        handler
+            .execute(&node, &context, &graph, tmp.path())
+            .await
+            .unwrap();
+
+        let result = captured.lock().unwrap().clone();
+        assert_eq!(result, Some(Some("main".to_string())));
+    }
+
+    #[tokio::test]
+    async fn codergen_handler_passes_none_thread_id_when_absent() {
+        use std::sync::{Arc, Mutex};
+
+        struct ThreadCapturingBackend {
+            captured_thread_id: Arc<Mutex<Option<Option<String>>>>,
+        }
+
+        #[async_trait]
+        impl CodergenBackend for ThreadCapturingBackend {
+            async fn run(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                _context: &Context,
+                thread_id: Option<&str>,
+            ) -> Result<CodergenResult, AttractorError> {
+                *self.captured_thread_id.lock().unwrap() =
+                    Some(thread_id.map(String::from));
+                Ok(CodergenResult::Text("ok".to_string()))
+            }
+        }
+
+        let captured = Arc::new(Mutex::new(None));
+        let backend = ThreadCapturingBackend {
+            captured_thread_id: captured.clone(),
+        };
+        let handler = CodergenHandler::new(Some(Box::new(backend)));
+
+        let node = Node::new("work");
+        let context = Context::new();
+        // No thread context set
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        handler
+            .execute(&node, &context, &graph, tmp.path())
+            .await
+            .unwrap();
+
+        let result = captured.lock().unwrap().clone();
+        assert_eq!(result, Some(None));
     }
 }

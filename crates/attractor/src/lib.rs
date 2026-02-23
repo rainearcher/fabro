@@ -10,6 +10,7 @@ pub mod handler;
 pub mod interviewer;
 pub mod outcome;
 pub mod parser;
+pub mod preamble;
 pub mod pipeline;
 #[cfg(any(feature = "server", test))]
 pub mod server;

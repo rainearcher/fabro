@@ -3,6 +3,7 @@ pub mod callback;
 pub mod console;
 pub mod queue;
 pub mod recording;
+pub mod replay;
 pub mod web;
 
 use std::collections::HashMap;

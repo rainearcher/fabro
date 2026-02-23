@@ -22,6 +22,9 @@ pub enum AttractorError {
 
     #[error("I/O error: {0}")]
     Io(String),
+
+    #[error("Pipeline cancelled")]
+    Cancelled,
 }
 
 impl AttractorError {
@@ -30,14 +33,16 @@ impl AttractorError {
     /// Retryable: Handler (transient handler failures), Engine (could be transient),
     ///            Io (network/disk issues are often transient).
     /// Terminal:  Parse, Validation, Stylesheet (configuration errors),
-    ///            Checkpoint (storage integrity).
+    ///            Checkpoint (storage integrity), Cancelled (explicit cancellation).
     #[must_use]
     pub const fn is_retryable(&self) -> bool {
         match self {
             Self::Handler(_) | Self::Engine(_) | Self::Io(_) => true,
-            Self::Parse(_) | Self::Validation(_) | Self::Stylesheet(_) | Self::Checkpoint(_) => {
-                false
-            }
+            Self::Parse(_)
+            | Self::Validation(_)
+            | Self::Stylesheet(_)
+            | Self::Checkpoint(_)
+            | Self::Cancelled => false,
         }
     }
 }
@@ -105,6 +110,17 @@ mod tests {
 
         let err: Result<i32> = Err(AttractorError::Parse("bad".to_string()));
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn cancelled_error_display() {
+        let err = AttractorError::Cancelled;
+        assert_eq!(err.to_string(), "Pipeline cancelled");
+    }
+
+    #[test]
+    fn cancelled_is_not_retryable() {
+        assert!(!AttractorError::Cancelled.is_retryable());
     }
 
     #[test]

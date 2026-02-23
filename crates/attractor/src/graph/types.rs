@@ -194,9 +194,14 @@ impl Node {
         self.bool_attr("auto_status").unwrap_or(false)
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn allow_partial(&self) -> bool {
         self.bool_attr("allow_partial").unwrap_or(false)
+    }
+
+    #[must_use]
+    pub fn retry_policy(&self) -> Option<&str> {
+        self.str_attr("retry_policy")
     }
 
     /// Resolve the handler type for this node using explicit type or shape mapping.
@@ -457,6 +462,7 @@ mod tests {
         assert_eq!(node.reasoning_effort(), "high");
         assert!(!node.auto_status());
         assert!(!node.allow_partial());
+        assert_eq!(node.retry_policy(), None);
     }
 
     #[test]

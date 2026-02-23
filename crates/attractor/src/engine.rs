@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
@@ -14,7 +16,9 @@ use crate::error::{AttractorError, Result};
 use crate::event::{EventEmitter, PipelineEvent};
 use crate::graph::{Edge, Graph, Node};
 use crate::handler::HandlerRegistry;
+use crate::interviewer::Interviewer;
 use crate::outcome::{Outcome, StageStatus};
+use crate::preamble::build_preamble;
 
 /// Convert a Duration's milliseconds to u64, saturating on overflow.
 fn millis_u64(d: std::time::Duration) -> u64 {
@@ -175,7 +179,19 @@ impl RetryPolicy {
 }
 
 /// Build a retry policy from node and graph attributes.
+/// If the node has a `retry_policy` attribute naming a preset, use that.
+/// Otherwise, fall back to `max_retries` / graph default.
 fn build_retry_policy(node: &Node, graph: &Graph) -> RetryPolicy {
+    if let Some(preset) = node.retry_policy() {
+        match preset {
+            "none" => return RetryPolicy::none(),
+            "standard" => return RetryPolicy::standard(),
+            "aggressive" => return RetryPolicy::aggressive(),
+            "linear" => return RetryPolicy::linear(),
+            "patient" => return RetryPolicy::patient(),
+            _ => {} // Unknown preset, fall through to max_retries behavior
+        }
+    }
     let max_retries = node
         .max_retries()
         .unwrap_or_else(|| graph.default_max_retry());
@@ -456,18 +472,51 @@ fn is_terminal(node: &Node) -> bool {
 /// Configuration for a pipeline run.
 pub struct RunConfig {
     pub logs_root: PathBuf,
+    pub cancel_token: Option<Arc<AtomicBool>>,
 }
 
 /// The pipeline execution engine.
 pub struct PipelineEngine {
     pub registry: HandlerRegistry,
     pub emitter: EventEmitter,
+    pub interviewer: Option<Arc<dyn Interviewer>>,
 }
 
 impl PipelineEngine {
     #[must_use]
-    pub const fn new(registry: HandlerRegistry, emitter: EventEmitter) -> Self {
-        Self { registry, emitter }
+    pub fn new(registry: HandlerRegistry, emitter: EventEmitter) -> Self {
+        Self {
+            registry,
+            emitter,
+            interviewer: None,
+        }
+    }
+
+    /// Create a new engine with an interviewer for inform() callbacks.
+    #[must_use]
+    pub fn with_interviewer(
+        registry: HandlerRegistry,
+        emitter: EventEmitter,
+        interviewer: Arc<dyn Interviewer>,
+    ) -> Self {
+        Self {
+            registry,
+            emitter,
+            interviewer: Some(interviewer),
+        }
+    }
+
+    /// Call inform on the interviewer, if one is configured.
+    fn inform(&self, message: &str, stage: &str) {
+        if let Some(ref interviewer) = self.interviewer {
+            // inform is async but we fire-and-forget since it's informational
+            let interviewer = Arc::clone(interviewer);
+            let message = message.to_string();
+            let stage = stage.to_string();
+            tokio::spawn(async move {
+                interviewer.inform(&message, &stage).await;
+            });
+        }
     }
 
     /// Mirror graph-level attributes into the context.
@@ -637,6 +686,7 @@ impl PipelineEngine {
             name: graph.name.clone(),
             id: run_id,
         });
+        self.inform(&format!("Pipeline started: {}", graph.name), "pipeline");
 
         // Write manifest.json (spec 5.6)
         write_manifest(&config.logs_root, graph);
@@ -704,6 +754,13 @@ impl PipelineEngine {
         }
 
         loop {
+            // Check for cancellation before processing each node
+            if let Some(ref token) = config.cancel_token {
+                if token.load(Ordering::Relaxed) {
+                    return Err(AttractorError::Cancelled);
+                }
+            }
+
             let node = graph.nodes.get(&current_node_id).ok_or_else(|| {
                 AttractorError::Engine(format!("node not found: {current_node_id}"))
             })?;
@@ -740,28 +797,36 @@ impl PipelineEngine {
             degrade_fidelity_on_resume = false;
             context.set("internal.fidelity", serde_json::json!(&fidelity));
 
-            // Preamble injection at execution time (spec 8.3): if fidelity is not "full",
-            // store a preamble in context for handlers to read
+            // Preamble injection at execution time (spec 5.4 / 8.3): synthesize a
+            // fidelity-appropriate preamble from runtime data for handlers to read
             if fidelity != "full" {
-                context.set(
-                    "current.preamble",
-                    serde_json::json!(format!("[Context mode: {fidelity}]\n\n")),
+                let preamble = build_preamble(
+                    &fidelity,
+                    &context,
+                    graph,
+                    &completed_nodes,
+                    &node_outcomes,
                 );
+                context.set("current.preamble", serde_json::json!(preamble));
             } else {
                 context.set("current.preamble", serde_json::json!(""));
             }
 
-            // Thread context sharing: resolve thread ID and store association
-            if let Some(tid) = resolve_thread_id(
+            // Thread context sharing: resolve thread ID and store in context for handlers
+            let resolved_thread_id = resolve_thread_id(
                 incoming_edge,
                 node,
                 graph,
                 previous_node_id.as_deref(),
-            ) {
+            );
+            if let Some(ref tid) = resolved_thread_id {
                 context.set(
                     format!("thread.{tid}.current_node"),
                     serde_json::json!(&node.id),
                 );
+                context.set("internal.thread_id", serde_json::json!(tid));
+            } else {
+                context.set("internal.thread_id", serde_json::Value::Null);
             }
 
             // Step 2: Execute node handler with retry policy
@@ -772,6 +837,10 @@ impl PipelineEngine {
                 name: node.label().to_string(),
                 index: stage_index,
             });
+            self.inform(
+                &format!("Stage started: {}", node.label()),
+                &node.id,
+            );
             let stage_start = Instant::now();
 
             let (mut outcome, attempts_used) = self
@@ -813,6 +882,10 @@ impl PipelineEngine {
                     index: stage_index,
                     duration_ms: stage_duration_ms,
                 });
+                self.inform(
+                    &format!("Stage completed: {}", node.label()),
+                    &node.id,
+                );
             }
 
             // Write per-node status.json (spec 5.6)
@@ -1096,6 +1169,91 @@ mod tests {
         let graph = Graph::new("test");
         let policy = build_retry_policy(&node, &graph);
         assert_eq!(policy.max_attempts, 51); // default_max_retry=50 + 1
+    }
+
+    #[test]
+    fn build_retry_policy_from_retry_policy_attr() {
+        let mut node = Node::new("n");
+        node.attrs.insert(
+            "retry_policy".to_string(),
+            AttrValue::String("aggressive".to_string()),
+        );
+        let graph = Graph::new("test");
+        let policy = build_retry_policy(&node, &graph);
+        assert_eq!(policy.max_attempts, 5);
+        assert_eq!(policy.backoff.initial_delay_ms, 500);
+    }
+
+    #[test]
+    fn build_retry_policy_fallback_when_no_retry_policy_attr() {
+        let mut node = Node::new("n");
+        node.attrs
+            .insert("max_retries".to_string(), AttrValue::Integer(3));
+        let graph = Graph::new("test");
+        let policy = build_retry_policy(&node, &graph);
+        assert_eq!(policy.max_attempts, 4); // 3 retries + 1 initial
+        // Should use default backoff, not a preset's backoff
+        assert_eq!(policy.backoff.initial_delay_ms, 200);
+    }
+
+    #[test]
+    fn build_retry_policy_all_presets() {
+        let presets = vec![
+            ("none", 1u32),
+            ("standard", 5),
+            ("aggressive", 5),
+            ("linear", 3),
+            ("patient", 3),
+        ];
+        let graph = Graph::new("test");
+        let (name, expected) = presets[0];
+        let mut node = Node::new("n");
+        node.attrs.insert(
+            "retry_policy".to_string(),
+            AttrValue::String(name.to_string()),
+        );
+        assert_eq!(build_retry_policy(&node, &graph).max_attempts, expected);
+
+        let (name, expected) = presets[1];
+        node.attrs.insert(
+            "retry_policy".to_string(),
+            AttrValue::String(name.to_string()),
+        );
+        assert_eq!(build_retry_policy(&node, &graph).max_attempts, expected);
+
+        let (name, expected) = presets[2];
+        node.attrs.insert(
+            "retry_policy".to_string(),
+            AttrValue::String(name.to_string()),
+        );
+        assert_eq!(build_retry_policy(&node, &graph).max_attempts, expected);
+
+        let (name, expected) = presets[3];
+        node.attrs.insert(
+            "retry_policy".to_string(),
+            AttrValue::String(name.to_string()),
+        );
+        assert_eq!(build_retry_policy(&node, &graph).max_attempts, expected);
+
+        let (name, expected) = presets[4];
+        node.attrs.insert(
+            "retry_policy".to_string(),
+            AttrValue::String(name.to_string()),
+        );
+        assert_eq!(build_retry_policy(&node, &graph).max_attempts, expected);
+    }
+
+    #[test]
+    fn build_retry_policy_unknown_preset_falls_back() {
+        let mut node = Node::new("n");
+        node.attrs.insert(
+            "retry_policy".to_string(),
+            AttrValue::String("unknown_preset".to_string()),
+        );
+        let graph = Graph::new("test");
+        let policy = build_retry_policy(&node, &graph);
+        // Unknown preset should fall back to graph default_max_retry=50
+        assert_eq!(policy.max_attempts, 51);
     }
 
     // --- normalize_label tests ---
@@ -1476,6 +1634,7 @@ mod tests {
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -1488,6 +1647,7 @@ mod tests {
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
         engine.run(&g, &config).await.unwrap();
         let checkpoint_path = dir.path().join("checkpoint.json");
@@ -1509,6 +1669,7 @@ mod tests {
         let engine = PipelineEngine::new(make_registry(), emitter);
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -1525,6 +1686,7 @@ mod tests {
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -1537,6 +1699,7 @@ mod tests {
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -1562,6 +1725,7 @@ mod tests {
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -1613,6 +1777,7 @@ mod tests {
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -1682,6 +1847,7 @@ mod tests {
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -1703,6 +1869,7 @@ mod tests {
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -1721,6 +1888,7 @@ mod tests {
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -1884,7 +2052,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let g = simple_graph();
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf() };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
         engine.run(&g, &config).await.unwrap();
 
         let manifest_path = dir.path().join("manifest.json");
@@ -1906,7 +2074,7 @@ mod tests {
         g.edges.push(Edge::new("start", "exit"));
 
         let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf() };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
         engine.run(&g, &config).await.unwrap();
 
         let manifest_path = dir.path().join("manifest.json");
@@ -1942,7 +2110,7 @@ mod tests {
         let mut registry = make_registry();
         registry.register("always_fail", Box::new(AlwaysFailHandler));
         let engine = PipelineEngine::new(registry, EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf() };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
         let outcome = engine.run(&g, &config).await.unwrap();
 
         assert_eq!(outcome.status, StageStatus::Success);
@@ -1978,7 +2146,7 @@ mod tests {
         let mut registry = make_registry();
         registry.register("always_fail", Box::new(AlwaysFailHandler));
         let engine = PipelineEngine::new(registry, EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf() };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
         let result = engine.run(&g, &config).await;
 
         assert!(result.is_ok());
@@ -2017,7 +2185,7 @@ mod tests {
         let mut registry = make_registry();
         registry.register("slow", Box::new(SlowHandler { sleep_ms: 500 }));
         let engine = PipelineEngine::new(registry, EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf() };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
         let result = engine.run(&g, &config).await;
         assert!(result.is_ok());
 
@@ -2051,7 +2219,7 @@ mod tests {
         let mut registry = make_registry();
         registry.register("slow", Box::new(SlowHandler { sleep_ms: 10 }));
         let engine = PipelineEngine::new(registry, EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf() };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
     }
@@ -2082,7 +2250,7 @@ mod tests {
         let mut registry = make_registry();
         registry.register("slow", Box::new(SlowHandler { sleep_ms: 500 }));
         let engine = PipelineEngine::new(registry, EventEmitter::new());
-        let config = RunConfig { logs_root: dir.path().to_path_buf() };
+        let config = RunConfig { logs_root: dir.path().to_path_buf(), cancel_token: None };
         let outcome = engine.run(&g, &config).await.unwrap();
 
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2090,5 +2258,169 @@ mod tests {
             outcome.notes.as_deref(),
             Some("auto-status: handler completed without writing status")
         );
+    }
+
+    // --- Gap #15: Interviewer.inform() tests ---
+
+    /// Mock interviewer that records inform() calls.
+    struct RecordingInformer {
+        messages: std::sync::Mutex<Vec<(String, String)>>,
+    }
+
+    impl RecordingInformer {
+        fn new() -> Self {
+            Self {
+                messages: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl crate::interviewer::Interviewer for RecordingInformer {
+        async fn ask(&self, _question: crate::interviewer::Question) -> crate::interviewer::Answer {
+            crate::interviewer::Answer::yes()
+        }
+
+        async fn inform(&self, message: &str, stage: &str) {
+            self.messages
+                .lock()
+                .unwrap()
+                .push((message.to_string(), stage.to_string()));
+        }
+    }
+
+    #[tokio::test]
+    async fn engine_calls_inform_on_pipeline_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+        let informer = Arc::new(RecordingInformer::new());
+        let engine = PipelineEngine::with_interviewer(
+            make_registry(),
+            EventEmitter::new(),
+            Arc::clone(&informer) as Arc<dyn crate::interviewer::Interviewer>,
+        );
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+        };
+        engine.run(&g, &config).await.unwrap();
+        // Give spawned inform tasks time to complete
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let messages = informer.messages.lock().unwrap();
+        assert!(
+            messages.iter().any(|(msg, stage)| msg.contains("Pipeline started") && stage == "pipeline"),
+            "expected 'Pipeline started' inform call, got: {messages:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn engine_calls_inform_on_stage_start_and_complete() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+        let informer = Arc::new(RecordingInformer::new());
+        let engine = PipelineEngine::with_interviewer(
+            make_registry(),
+            EventEmitter::new(),
+            Arc::clone(&informer) as Arc<dyn crate::interviewer::Interviewer>,
+        );
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+        };
+        engine.run(&g, &config).await.unwrap();
+        // Give spawned inform tasks time to complete
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let messages = informer.messages.lock().unwrap();
+        assert!(
+            messages.iter().any(|(msg, _)| msg.contains("Stage started")),
+            "expected 'Stage started' inform call, got: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|(msg, _)| msg.contains("Stage completed")),
+            "expected 'Stage completed' inform call, got: {messages:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn engine_without_interviewer_runs_normally() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+        let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+        };
+        let outcome = engine.run(&g, &config).await.unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
+    }
+
+    // --- Gap #7: Cancellation token tests ---
+
+    #[tokio::test]
+    async fn engine_returns_cancelled_when_token_set_before_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+        let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
+        let cancel_token = Arc::new(AtomicBool::new(true));
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: Some(cancel_token),
+        };
+        let result = engine.run(&g, &config).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), AttractorError::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn engine_runs_normally_with_unset_cancel_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = simple_graph();
+        let engine = PipelineEngine::new(make_registry(), EventEmitter::new());
+        let cancel_token = Arc::new(AtomicBool::new(false));
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: Some(cancel_token),
+        };
+        let outcome = engine.run(&g, &config).await.unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn engine_cancelled_mid_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut g = simple_graph();
+        // Insert a work node between start and exit
+        let mut work = Node::new("work");
+        work.attrs.insert("type".to_string(), AttrValue::String("slow".to_string()));
+        work.attrs.insert("max_retries".to_string(), AttrValue::Integer(0));
+        g.nodes.insert("work".to_string(), work);
+        g.edges.clear();
+        g.edges.push(Edge::new("start", "work"));
+        g.edges.push(Edge::new("work", "exit"));
+
+        let cancel_token = Arc::new(AtomicBool::new(false));
+        let cancel_token_clone = Arc::clone(&cancel_token);
+
+        let mut registry = make_registry();
+        registry.register("slow", Box::new(SlowHandler { sleep_ms: 200 }));
+        let engine = PipelineEngine::new(registry, EventEmitter::new());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: Some(cancel_token),
+        };
+
+        // Set cancel after a short delay (while the slow handler is running)
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            cancel_token_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+
+        let result = engine.run(&g, &config).await;
+        // The engine should detect cancellation at the next loop iteration
+        // after the slow handler completes
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), AttractorError::Cancelled));
     }
 }

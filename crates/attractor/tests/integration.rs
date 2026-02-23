@@ -175,6 +175,7 @@ async fn end_to_end_linear_pipeline() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -289,6 +290,7 @@ async fn end_to_end_branching_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -393,6 +395,7 @@ async fn end_to_end_human_gate_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine.run(&graph, &config).await.expect("run should succeed");
@@ -490,6 +493,7 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let result = engine.run(&graph, &config).await;
@@ -590,6 +594,7 @@ async fn goal_gate_routes_to_retry_target_when_present() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine
@@ -896,6 +901,7 @@ async fn retry_on_failure_then_succeed() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine
@@ -957,6 +963,7 @@ async fn pipeline_with_many_nodes() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine
@@ -1036,6 +1043,7 @@ impl CodergenBackend for MockCodergenBackend {
         node: &Node,
         prompt: &str,
         _context: &Context,
+        _thread_id: Option<&str>,
     ) -> Result<CodergenResult, AttractorError> {
         Ok(CodergenResult::Text(format!(
             "Response for {}: processed prompt '{}'",
@@ -1236,6 +1244,7 @@ async fn smoke_test_with_mock_codergen_backend() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine
@@ -1341,6 +1350,7 @@ async fn end_to_end_parallel_fan_out_fan_in() {
     let engine = PipelineEngine::new(full_registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine
@@ -1443,6 +1453,7 @@ async fn resume_from_checkpoint_completes_pipeline() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine
@@ -1530,6 +1541,7 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     // This should succeed because goal gate for gated_work is satisfied
@@ -1559,6 +1571,7 @@ async fn graph_goal_in_context() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -1584,6 +1597,7 @@ async fn event_streaming_lifecycle() {
     let engine = PipelineEngine::new(make_linear_registry(), emitter);
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -1649,6 +1663,7 @@ async fn context_flow_between_stages() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -1687,6 +1702,7 @@ async fn tool_handler_e2e() {
     let engine = PipelineEngine::new(make_full_registry(interviewer), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1743,6 +1759,7 @@ async fn auto_approve_interviewer_e2e() {
     let engine = PipelineEngine::new(make_full_registry(interviewer), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1765,6 +1782,7 @@ async fn codergen_without_backend_simulated() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -1860,6 +1878,7 @@ async fn branching_loop_back_on_failure() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1939,6 +1958,7 @@ async fn human_gate_loops_back() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1986,6 +2006,7 @@ async fn scenario_ship_a_feature() {
     let engine = PipelineEngine::new(make_full_registry(interviewer), emitter);
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2073,6 +2094,7 @@ async fn scenario_parallel_expert_review() {
     let engine = PipelineEngine::new(full_registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2141,6 +2163,7 @@ async fn scenario_node_retries_on_retry_status() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2194,6 +2217,7 @@ async fn scenario_loop_restart_resets_context() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2251,6 +2275,7 @@ async fn scenario_bug_triage_router() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2296,6 +2321,7 @@ async fn scenario_crash_recovery() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine
         .run_from_checkpoint(&graph, &config, &checkpoint)
@@ -2372,6 +2398,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
 
@@ -2417,6 +2444,7 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
 
@@ -2542,6 +2570,7 @@ async fn conditional_branching_success_fail_paths() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2585,6 +2614,7 @@ async fn edge_selection_condition_match_wins_over_weight() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2623,6 +2653,7 @@ async fn edge_selection_weight_breaks_ties() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2653,6 +2684,7 @@ async fn edge_selection_lexical_tiebreak() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2700,6 +2732,7 @@ async fn context_updates_visible_across_nodes() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2729,6 +2762,7 @@ async fn stylesheet_applies_model_override() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2773,6 +2807,7 @@ async fn custom_handler_registration_and_execution() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     engine.run(&graph, &config).await.expect("run");
 
@@ -2829,6 +2864,7 @@ async fn integration_smoke_plan_implement_review_done() {
     let engine = PipelineEngine::new(make_full_registry(interviewer), emitter);
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
     let outcome = engine.run(&graph, &config).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -3237,6 +3273,7 @@ async fn sub_pipeline_e2e_through_engine() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine
@@ -3378,6 +3415,7 @@ async fn manager_loop_with_child_observer_e2e() {
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine
@@ -3496,6 +3534,7 @@ async fn graph_merge_e2e_through_engine() {
     let engine = PipelineEngine::new(make_linear_registry(), EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
     };
 
     let outcome = engine
@@ -3576,6 +3615,7 @@ mod real_llm {
             _node: &Node,
             prompt: &str,
             _context: &Context,
+            _thread_id: Option<&str>,
         ) -> Result<CodergenResult, AttractorError> {
             let request = Request {
                 model: self.model.clone(),
@@ -3708,6 +3748,7 @@ mod real_llm {
         let engine = PipelineEngine::new(registry, EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
 
         let outcome = tokio::time::timeout(
@@ -3814,6 +3855,7 @@ mod real_llm {
         let engine = PipelineEngine::new(registry, EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
 
         let outcome = tokio::time::timeout(
@@ -3950,6 +3992,7 @@ mod real_llm {
         let engine = PipelineEngine::new(registry, EventEmitter::new());
         let config = RunConfig {
             logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
         };
 
         let outcome = tokio::time::timeout(

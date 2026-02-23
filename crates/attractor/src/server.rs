@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::extract::{Path, State};
@@ -47,6 +48,7 @@ struct ManagedPipeline {
     context: Option<Context>,
     checkpoint: Option<Checkpoint>,
     cancel_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    cancel_token: Arc<AtomicBool>,
 }
 
 /// Shared application state for the server.
@@ -135,6 +137,7 @@ async fn start_pipeline(
     let interviewer = Arc::new(WebInterviewer::new());
     let (event_tx, _) = broadcast::channel(256);
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    let cancel_token = Arc::new(AtomicBool::new(false));
 
     let context = Context::new();
 
@@ -146,7 +149,11 @@ async fn start_pipeline(
     });
 
     let registry = (state.registry_factory)(Arc::clone(&interviewer) as Arc<dyn Interviewer>);
-    let engine = PipelineEngine::new(registry, emitter);
+    let engine = PipelineEngine::with_interviewer(
+        registry,
+        emitter,
+        Arc::clone(&interviewer) as Arc<dyn Interviewer>,
+    );
 
     {
         let mut pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
@@ -160,6 +167,7 @@ async fn start_pipeline(
                 context: Some(context.clone()),
                 checkpoint: None,
                 cancel_tx: Some(cancel_tx),
+                cancel_token: Arc::clone(&cancel_token),
             },
         );
     }
@@ -170,7 +178,7 @@ async fn start_pipeline(
     tokio::spawn(async move {
         let logs_root = std::env::temp_dir().join(format!("attractor-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&logs_root).expect("failed to create logs directory");
-        let config = RunConfig { logs_root };
+        let config = RunConfig { logs_root, cancel_token: Some(cancel_token) };
 
         let result = tokio::select! {
             result = engine.run(&graph, &config) => result,
@@ -191,6 +199,9 @@ async fn start_pipeline(
             match result {
                 Ok(_) => {
                     pipeline.status = PipelineStatus::Completed;
+                }
+                Err(crate::error::AttractorError::Cancelled) => {
+                    pipeline.status = PipelineStatus::Cancelled;
                 }
                 Err(e) => {
                     pipeline.status = PipelineStatus::Failed;
@@ -336,6 +347,7 @@ async fn cancel_pipeline(
                 )
                     .into_response();
             }
+            pipeline.cancel_token.store(true, Ordering::Relaxed);
             if let Some(cancel_tx) = pipeline.cancel_tx.take() {
                 let _ = cancel_tx.send(());
             }
