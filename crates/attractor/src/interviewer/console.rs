@@ -1,4 +1,7 @@
+use std::io::IsTerminal;
+
 use async_trait::async_trait;
+use dialoguer::console::Term;
 use terminal::Styles;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -55,9 +58,112 @@ async fn read_line(prompt: &str) -> std::io::Result<String> {
     Ok(line.trim_end().to_string())
 }
 
+/// Ask a multiple-choice question using dialoguer's `Select` widget on a TTY.
+fn ask_select_interactive(question: &Question) -> Answer {
+    let items: Vec<String> = question
+        .options
+        .iter()
+        .map(|opt| format!("{} - {}", opt.key, opt.label))
+        .collect();
+
+    let has_freeform = question.allow_freeform;
+    let mut all_items = items;
+    if has_freeform {
+        all_items.push("Other (free text)...".to_string());
+    }
+
+    let selection = dialoguer::Select::new()
+        .with_prompt(&question.text)
+        .items(&all_items)
+        .default(0)
+        .interact_on_opt(&Term::stderr());
+
+    match selection {
+        Ok(Some(idx)) if has_freeform && idx == question.options.len() => {
+            // User chose the free-text option
+            dialoguer::Input::<String>::new()
+                .with_prompt("Enter your response")
+                .interact_on(&Term::stderr())
+                .map_or_else(|_| Answer::skipped(), Answer::text)
+        }
+        Ok(Some(idx)) if idx < question.options.len() => {
+            let opt = &question.options[idx];
+            Answer {
+                value: AnswerValue::Selected(opt.key.clone()),
+                selected_option: Some(opt.clone()),
+                text: None,
+            }
+        }
+        _ => Answer::skipped(),
+    }
+}
+
+/// Ask a multi-select question using dialoguer's `MultiSelect` widget on a TTY.
+fn ask_multi_select_interactive(question: &Question) -> Answer {
+    let items: Vec<String> = question
+        .options
+        .iter()
+        .map(|opt| format!("{} - {}", opt.key, opt.label))
+        .collect();
+
+    let selection = dialoguer::MultiSelect::new()
+        .with_prompt(&question.text)
+        .items(&items)
+        .interact_on_opt(&Term::stderr());
+
+    match selection {
+        Ok(Some(indices)) if !indices.is_empty() => {
+            let idx = indices[0];
+            let opt = &question.options[idx];
+            Answer {
+                value: AnswerValue::Selected(opt.key.clone()),
+                selected_option: Some(opt.clone()),
+                text: None,
+            }
+        }
+        _ => Answer::skipped(),
+    }
+}
+
+/// Ask a yes/no or confirmation question using dialoguer's `Confirm` widget on a TTY.
+fn ask_confirm_interactive(question: &Question) -> Answer {
+    let confirmed = dialoguer::Confirm::new()
+        .with_prompt(&question.text)
+        .default(true)
+        .interact_on_opt(&Term::stderr());
+
+    match confirmed {
+        Ok(Some(true)) => Answer::yes(),
+        _ => Answer::no(),
+    }
+}
+
+/// Ask a freeform question using dialoguer's `Input` widget on a TTY.
+fn ask_freeform_interactive(question: &Question) -> Answer {
+    dialoguer::Input::<String>::new()
+        .with_prompt(&question.text)
+        .interact_on(&Term::stderr())
+        .map_or_else(|_| Answer::skipped(), Answer::text)
+}
+
 #[async_trait]
 impl Interviewer for ConsoleInterviewer {
     async fn ask(&self, question: Question) -> Answer {
+        // If stdin is a TTY, use dialoguer for interactive arrow-key navigation.
+        // Otherwise, fall back to the line-based reader for piped input.
+        if std::io::stdin().is_terminal() {
+            let q = question;
+            return tokio::task::spawn_blocking(move || match q.question_type {
+                QuestionType::MultipleChoice => ask_select_interactive(&q),
+                QuestionType::MultiSelect => ask_multi_select_interactive(&q),
+                QuestionType::YesNo | QuestionType::Confirmation => ask_confirm_interactive(&q),
+                QuestionType::Freeform => ask_freeform_interactive(&q),
+            })
+            .await
+            .unwrap_or_else(|_| Answer::skipped());
+        }
+
+        // Non-TTY fallback: line-based stdin reading
         let s = self.styles;
         eprintln!(
             "{bold}{cyan}?{reset} {}",

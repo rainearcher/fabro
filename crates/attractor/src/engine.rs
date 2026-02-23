@@ -814,10 +814,12 @@ impl PipelineEngine {
                 name: node.label().to_string(),
                 index: stage_index,
             });
-            self.inform(
-                &format!("Stage started: {}", node.label()),
-                &node.id,
-            );
+            if node.handler_type() != Some("wait.human") {
+                self.inform(
+                    &format!("Stage started: {}", node.label()),
+                    &node.id,
+                );
+            }
             let stage_start = Instant::now();
 
             let (mut outcome, attempts_used) = self
