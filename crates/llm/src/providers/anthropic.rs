@@ -1881,6 +1881,33 @@ mod tests {
         assert_eq!(result["source"]["media_type"], "application/pdf");
     }
 
+    /// Regression test: deprecated beta header values must not be sent.
+    /// The Anthropic API rejects requests containing these old headers.
+    #[test]
+    fn beta_header_rejects_deprecated_values() {
+        let deprecated = [
+            "extended-thinking-2025-04-14",
+            "max-tokens-3-5-sonnet-2025-04-14",
+        ];
+
+        // No user headers — only cache header should appear
+        let header = build_beta_header(None, true).unwrap_or_default();
+        for dep in &deprecated {
+            assert!(!header.contains(dep), "default header must not contain deprecated value {dep}");
+        }
+
+        // With a valid user header
+        let opts = serde_json::json!({
+            "anthropic": {
+                "beta_headers": ["interleaved-thinking-2025-05-14"]
+            }
+        });
+        let header = build_beta_header(Some(&opts), true).unwrap_or_default();
+        for dep in &deprecated {
+            assert!(!header.contains(dep), "header with user values must not contain deprecated value {dep}");
+        }
+    }
+
     #[test]
     fn audio_produces_text_fallback() {
         let part = ContentPart::Audio(crate::types::AudioData {

@@ -1260,6 +1260,82 @@ mod tests {
     }
 
     #[test]
+    fn parse_part_function_call() {
+        let part = serde_json::json!({
+            "functionCall": {
+                "name": "get_weather",
+                "args": {"location": "NYC"}
+            }
+        });
+        let result = parse_part(&part).expect("should parse function call");
+        match result {
+            ContentPart::ToolCall(tc) => {
+                assert_eq!(tc.name, "get_weather");
+                assert_eq!(tc.arguments, serde_json::json!({"location": "NYC"}));
+                assert!(tc.provider_metadata.is_none());
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_part_function_call_with_thought_signature() {
+        let part = serde_json::json!({
+            "functionCall": {
+                "name": "get_weather",
+                "args": {"location": "NYC"}
+            },
+            "thoughtSignature": "abc123sig"
+        });
+        let result = parse_part(&part).expect("should parse function call with thought signature");
+        match result {
+            ContentPart::ToolCall(tc) => {
+                assert_eq!(tc.name, "get_weather");
+                let meta = tc.provider_metadata.expect("provider_metadata should be set");
+                assert_eq!(meta["thoughtSignature"], "abc123sig");
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn translate_messages_function_call_includes_thought_signature() {
+        let mut tc = ToolCall::new("call-1", "get_weather", serde_json::json!({"location": "NYC"}));
+        tc.provider_metadata = Some(serde_json::json!({"thoughtSignature": "sig456"}));
+
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![ContentPart::ToolCall(tc)],
+            name: None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        assert_eq!(contents.len(), 1);
+
+        let part = &contents[0].parts[0];
+        assert!(part.get("functionCall").is_some());
+        assert_eq!(part["thoughtSignature"], "sig456");
+    }
+
+    #[test]
+    fn translate_messages_function_call_without_thought_signature() {
+        let tc = ToolCall::new("call-1", "get_weather", serde_json::json!({"location": "NYC"}));
+
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![ContentPart::ToolCall(tc)],
+            name: None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        assert_eq!(contents.len(), 1);
+
+        let part = &contents[0].parts[0];
+        assert!(part.get("functionCall").is_some());
+        assert!(part.get("thoughtSignature").is_none());
+    }
+
+    #[test]
     fn parse_part_thought_false_is_regular_text() {
         let part = serde_json::json!({"text": "Regular text", "thought": false});
         let result = parse_part(&part).expect("should parse text part");
