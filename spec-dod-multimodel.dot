@@ -1,6 +1,6 @@
 digraph SpecDoDMultiModel {
     graph [
-        goal="Satisfy every Definition of Done checkbox across all three attractor-main specs (unified-llm-spec.md, coding-agent-loop-spec.md, attractor-spec.md). The implementation is in pure C11 under src/ and include/. Do NOT modify the spec files. Only modify implementation code. Uses multi-model consensus: Opus 4.6 and GPT-5.2 compete on audits and planning, GPT-5.2-codex and Opus 4.6 alternate on implementation.",
+        goal="Satisfy every Definition of Done checkbox across all three attractor specs (unified-llm-spec.md, coding-agent-loop-spec.md, attractor-spec.md). The implementation is in Rust under crates/. Do NOT modify the spec files. Only modify implementation code. Uses multi-model consensus: Opus 4.6 and GPT-5.2 compete on audits and planning, GPT-5.2-codex and Opus 4.6 alternate on implementation.",
         default_max_retry="3",
         retry_target="triage_merge",
         default_fidelity="full",
@@ -32,9 +32,9 @@ digraph SpecDoDMultiModel {
         shape=box,
         class="opus",
         fidelity="truncate",
-        prompt="Read attractor-main/unified-llm-spec.md Section 8 (Definition of Done) in full. Then read every source file under src/llm/, src/util/, and include/llm/, include/util/.
+        prompt="Read docs/specs/unified-llm-spec.md Section 8 (Definition of Done) in full. Then read every source file under crates/llm/src/.
 
-For EACH checkbox in sections 8.1 through 8.10, evaluate whether the current C implementation satisfies it. Be strict — a checkbox is only checked if the feature is fully implemented and would work correctly at runtime.
+For EACH checkbox in sections 8.1 through 8.10, evaluate whether the current Rust implementation satisfies it. Be strict — a checkbox is only checked if the feature is fully implemented and would work correctly at runtime.
 
 Respond with ONLY a JSON object (no prose) -- don't write it out as a file:
 {
@@ -58,9 +58,9 @@ Be thorough. Check every single checkbox."
         shape=box,
         class="gpt",
         fidelity="truncate",
-        prompt="Read attractor-main/unified-llm-spec.md Section 8 (Definition of Done) in full. Then read every source file under src/llm/, src/util/, and include/llm/, include/util/.
+        prompt="Read docs/specs/unified-llm-spec.md Section 8 (Definition of Done) in full. Then read every source file under crates/llm/src/.
 
-For EACH checkbox in sections 8.1 through 8.10, evaluate whether the current C implementation satisfies it. Be strict — a checkbox is only checked if the feature is fully implemented and would work correctly at runtime.
+For EACH checkbox in sections 8.1 through 8.10, evaluate whether the current Rust implementation satisfies it. Be strict — a checkbox is only checked if the feature is fully implemented and would work correctly at runtime.
 
 Respond with ONLY a JSON object (no prose) -- don't write it out as a file:
 {
@@ -86,9 +86,9 @@ Be thorough. Check every single checkbox."
         shape=box,
         class="opus",
         fidelity="truncate",
-        prompt="Read attractor-main/coding-agent-loop-spec.md Section 9 (Definition of Done) in full. Then read every source file under src/agent/ and include/agent/.
+        prompt="Read docs/specs/coding-agent-loop-spec.md Section 9 (Definition of Done) in full. Then read every source file under crates/agent/.
 
-For EACH checkbox in sections 9.1 through 9.13, evaluate whether the current C implementation satisfies it. Be strict.
+For EACH checkbox in sections 9.1 through 9.13, evaluate whether the current Rust implementation satisfies it. Be strict.
 
 Respond with ONLY a JSON object (no prose) -- don't write it out as a file:
 {
@@ -109,9 +109,9 @@ Be thorough. Check every single checkbox."
         shape=box,
         class="gpt",
         fidelity="truncate",
-        prompt="Read attractor-main/coding-agent-loop-spec.md Section 9 (Definition of Done) in full. Then read every source file under src/agent/ and include/agent/.
+        prompt="Read docs/specs/coding-agent-loop-spec.md Section 9 (Definition of Done) in full. Then read every source file under crates/agent/.
 
-For EACH checkbox in sections 9.1 through 9.13, evaluate whether the current C implementation satisfies it. Be strict.
+For EACH checkbox in sections 9.1 through 9.13, evaluate whether the current Rust implementation satisfies it. Be strict.
 
 Respond with ONLY a JSON object (no prose) -- don't write it out as a file:
 {
@@ -134,9 +134,9 @@ Be thorough. Check every single checkbox."
         shape=box,
         class="opus",
         fidelity="truncate",
-        prompt="Read attractor-main/attractor-spec.md Section 11 (Definition of Done) in full. Then read every source file under src/attractor/, src/main.c, and include/attractor/.
+        prompt="Read docs/specs/attractor-spec.md Section 11 (Definition of Done) in full. Then read every source file under crates/attractor/.
 
-For EACH checkbox in sections 11.1 through 11.13, evaluate whether the current C implementation satisfies it. Be strict.
+For EACH checkbox in sections 11.1 through 11.13, evaluate whether the current Rust implementation satisfies it. Be strict.
 
 Respond with ONLY a JSON object (no prose) -- don't write it out as a file:
 {
@@ -157,9 +157,9 @@ Be thorough. Check every single checkbox."
         shape=box,
         class="gpt",
         fidelity="truncate",
-        prompt="Read attractor-main/attractor-spec.md Section 11 (Definition of Done) in full. Then read every source file under src/attractor/, src/main.c, and include/attractor/.
+        prompt="Read docs/specs/attractor-spec.md Section 11 (Definition of Done) in full. Then read every source file under crates/attractor/.
 
-For EACH checkbox in sections 11.1 through 11.13, evaluate whether the current C implementation satisfies it. Be strict.
+For EACH checkbox in sections 11.1 through 11.13, evaluate whether the current Rust implementation satisfies it. Be strict.
 
 Respond with ONLY a JSON object (no prose) -- don't write it out as a file:
 {
@@ -314,7 +314,7 @@ Respond with JSON (not by writing out a file):
         prompt="The consensus audit results are in context key response.audit_consensus. Parse the all_failed_items list from that JSON and triage every failing DoD checkbox.
 
 Group failures into:
-1. IMPLEMENTABLE — can be fixed by writing/modifying C code (functions, handlers, logic)
+1. IMPLEMENTABLE — can be fixed by writing/modifying Rust code (functions, handlers, logic)
 2. STRUCTURAL — requires new files, new modules, or significant architecture changes
 3. DEFERRED — requires external resources (real API keys, network access, interactive testing) that cannot be done in a code-only pass
 
@@ -338,7 +338,7 @@ Respond with JSON (not by writing out a file):
         prompt="The consensus audit results are in context key response.audit_consensus. Parse the all_failed_items list from that JSON and triage every failing DoD checkbox.
 
 Group failures into:
-1. IMPLEMENTABLE — can be fixed by writing/modifying C code (functions, handlers, logic)
+1. IMPLEMENTABLE — can be fixed by writing/modifying Rust code (functions, handlers, logic)
 2. STRUCTURAL — requires new files, new modules, or significant architecture changes
 3. DEFERRED — requires external resources (real API keys, network access, interactive testing) that cannot be done in a code-only pass
 
@@ -396,17 +396,19 @@ Otherwise set preferred_next_label to \"Fix\"."
         fidelity="full",
         prompt="The merged triage report is in context key response.triage_merge. It contains a prioritized list of IMPLEMENTABLE DoD failures.
 
-Pick the top 5 most impactful items (or all if fewer than 5) and implement the fixes in pure C11.
+Pick the top 5 most impactful items (or all if fewer than 5) and implement the fixes in Rust.
+
+Begin by making sure the build is green with `cargo test`
 
 For each fix:
 1. Read the relevant source file(s)
 2. Make the minimal change needed to satisfy the DoD checkbox
-3. Write the modified file(s)
-4. Verify the fix compiles (mentally trace includes and types)
+3. Write the modified file(s) -- update tests as needed
+4. Verify the fix and the tests pass (`cargo test`)
 
 Constraints:
-- Do NOT modify any files under attractor-main/ (those are the specs)
-- Do NOT add external dependencies beyond what's already used (libcurl, pthreads, math)
+- Do NOT modify any files under docs/specs/ (those are the specs)
+- Do NOT add external dependencies beyond what's already used
 - Keep changes minimal and focused — one checkbox per fix
 - Maintain the existing code style
 
@@ -435,7 +437,7 @@ PART A — Review Codex's work:
 
 PART B — Implement additional fixes:
 5. From the remaining IMPLEMENTABLE items (see response.triage_merge for the full list), pick up to 5 more and implement them
-6. Follow the same constraints as Codex (pure C11, no new deps, minimal changes)
+6. Follow the same constraints as Codex (Rust, no new deps, minimal changes)
 
 Respond with JSON (not by writing out a file):
 {
@@ -483,7 +485,7 @@ Otherwise set preferred_next_label to \"Ready for build\"."
     build_check [
         label="Build & Smoke Test",
         shape=parallelogram,
-        tool_command="cd /Users/justin.mccarthy/code/jm-attractor && make clean && make 2>&1 && echo '---BUILD OK---' && ./attractor --dry-run test/simple.dot 2>&1 && ./attractor --dry-run test/branching.dot 2>&1 && ./attractor --dry-run test/styled.dot 2>&1 && ./attractor --dry-run test/parallel.dot 2>&1 && ./attractor --dry-run test/conditions.dot 2>&1 && echo '---ALL TESTS PASSED---'",
+        tool_command="cd /Users/bhelmkamp/p/brynary/attractor-rust && cargo build 2>&1 && echo '---BUILD OK---' && ./target/debug/attractor run --dry-run test/simple.dot 2>&1 && ./target/debug/attractor run --dry-run test/branching.dot 2>&1 && ./target/debug/attractor run --dry-run test/styled.dot 2>&1 && ./target/debug/attractor run --dry-run test/parallel.dot 2>&1 && ./target/debug/attractor run --dry-run test/conditions.dot 2>&1 && echo '---ALL TESTS PASSED---'",
         timeout="120s"
     ]
 
@@ -498,9 +500,8 @@ Read the relevant source files, identify the issue, and write corrected versions
 - Missing includes
 - Type mismatches
 - Undeclared functions
-- Linker errors
 
-Output the fixes applied and ensure the code will compile cleanly with: cc -Wall -Wextra -std=c11"
+Output the fixes applied and ensure the code will compile cleanly with: cargo build"
     ]
 
     /*========================================================================
@@ -518,9 +519,9 @@ Output the fixes applied and ensure the code will compile cleanly with: cc -Wall
         prompt="This is a verification pass. The items that were previously failing are listed in context key response.triage_merge (the implementable list). The fixes applied are in response.fix_codex and response.review_fix_opus.
 
 Re-read all three spec DoD sections:
-- attractor-main/unified-llm-spec.md Section 8
-- attractor-main/coding-agent-loop-spec.md Section 9
-- attractor-main/attractor-spec.md Section 11
+- docs/specs/unified-llm-spec.md Section 8
+- docs/specs/coding-agent-loop-spec.md Section 9
+- docs/specs/attractor-spec.md Section 11
 
 And re-read the implementation files that were changed in this iteration.
 
@@ -544,9 +545,9 @@ Respond with JSON (not by writing out a file):
         prompt="This is a verification pass. The items that were previously failing are listed in context key response.triage_merge (the implementable list). The fixes applied are in response.fix_codex and response.review_fix_opus.
 
 Re-read all three spec DoD sections:
-- attractor-main/unified-llm-spec.md Section 8
-- attractor-main/coding-agent-loop-spec.md Section 9
-- attractor-main/attractor-spec.md Section 11
+- docs/specs/unified-llm-spec.md Section 8
+- docs/specs/coding-agent-loop-spec.md Section 9
+- docs/specs/attractor-spec.md Section 11
 
 And re-read the implementation files that were changed in this iteration.
 
