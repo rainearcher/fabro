@@ -149,7 +149,7 @@ in the project. Keep changes minimal and focused on the task.";
     fn provider_options(&self) -> Option<serde_json::Value> {
         Some(serde_json::json!({
             "anthropic": {
-                "beta_headers": ["interleaved-thinking-2025-05-14", "extended-thinking-2025-04-14", "max-tokens-3-5-sonnet-2025-04-14"]
+                "beta_headers": ["interleaved-thinking-2025-05-14"]
             }
         }))
     }
@@ -284,14 +284,6 @@ mod tests {
         assert!(
             headers.contains(&"interleaved-thinking-2025-05-14"),
             "beta_headers should contain interleaved-thinking header"
-        );
-        assert!(
-            headers.contains(&"extended-thinking-2025-04-14"),
-            "beta_headers should contain extended-thinking header"
-        );
-        assert!(
-            headers.contains(&"max-tokens-3-5-sonnet-2025-04-14"),
-            "beta_headers should contain max-tokens header"
         );
     }
 
