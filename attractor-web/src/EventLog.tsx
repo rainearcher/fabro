@@ -30,8 +30,11 @@ function eventDetail(event: PipelineEvent): string {
       return `${data.error} (${data.duration_ms}ms)`;
     case "StageStarted":
       return `${data.name} [${data.index}]`;
-    case "StageCompleted":
-      return `${data.name} [${data.index}] ${data.duration_ms}ms`;
+    case "StageCompleted": {
+      let detail = `${data.name} [${data.index}] ${data.duration_ms}ms ${data.status}`;
+      if (data.preferred_label) detail += ` → "${data.preferred_label}"`;
+      return detail;
+    }
     case "StageFailed":
       return `${data.name} [${data.index}]: ${data.error}${data.will_retry ? " (will retry)" : ""}`;
     case "StageRetrying":

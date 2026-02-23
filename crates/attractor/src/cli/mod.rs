@@ -164,8 +164,18 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             name,
             index,
             duration_ms,
+            status,
+            preferred_label,
+            suggested_next_ids,
         } => {
-            format!("[STAGE_COMPLETED] name={name} index={index} duration={duration_ms}ms")
+            let mut s = format!("[STAGE_COMPLETED] name={name} index={index} duration={duration_ms}ms status={status}");
+            if let Some(label) = preferred_label {
+                s.push_str(&format!(" preferred_label=\"{label}\""));
+            }
+            if !suggested_next_ids.is_empty() {
+                s.push_str(&format!(" suggested_next_ids={}", suggested_next_ids.join(",")));
+            }
+            s
         }
         PipelineEvent::StageFailed {
             name,
@@ -263,8 +273,18 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             name,
             index,
             duration_ms,
+            status,
+            preferred_label,
+            suggested_next_ids,
         } => {
-            format!("{d}── STAGE_COMPLETED ──────────────────────────{r}\n  {d}name:{r}        {name}\n  {d}index:{r}       {index}\n  {d}duration_ms:{r} {duration_ms}\n")
+            let mut s = format!("{d}── STAGE_COMPLETED ──────────────────────────{r}\n  {d}name:{r}        {name}\n  {d}index:{r}       {index}\n  {d}duration_ms:{r} {duration_ms}\n  {d}status:{r}      {status}\n");
+            if let Some(label) = preferred_label {
+                s.push_str(&format!("  {d}preferred_label:{r} {label}\n"));
+            }
+            if !suggested_next_ids.is_empty() {
+                s.push_str(&format!("  {d}suggested_next_ids:{r} {}\n", suggested_next_ids.join(", ")));
+            }
+            s
         }
         PipelineEvent::StageFailed {
             name,

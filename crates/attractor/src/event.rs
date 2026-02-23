@@ -23,6 +23,9 @@ pub enum PipelineEvent {
         name: String,
         index: usize,
         duration_ms: u64,
+        status: String,
+        preferred_label: Option<String>,
+        suggested_next_ids: Vec<String>,
     },
     StageFailed {
         name: String,
