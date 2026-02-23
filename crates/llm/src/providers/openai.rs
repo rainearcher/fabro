@@ -249,9 +249,17 @@ fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Val
                                 .raw_arguments
                                 .as_ref()
                                 .map_or_else(|| tc.arguments.to_string(), Clone::clone);
+                            // Use the item-level ID (fc_xxx) for the `id` field;
+                            // fall back to tc.id if no provider_metadata was stored.
+                            let item_id = tc
+                                .provider_metadata
+                                .as_ref()
+                                .and_then(|m| m.get("id"))
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or(&tc.id);
                             input.push(serde_json::json!({
                                 "type": "function_call",
-                                "id": tc.id,
+                                "id": item_id,
                                 "call_id": tc.id,
                                 "name": tc.name,
                                 "arguments": args,
@@ -418,11 +426,14 @@ fn parse_output(output: &[serde_json::Value]) -> (Vec<ContentPart>, bool) {
             }
             Some("function_call") => {
                 has_tool_calls = true;
-                let id = item
-                    .get("call_id")
-                    .or_else(|| item.get("id"))
+                let item_id = item
+                    .get("id")
                     .and_then(serde_json::Value::as_str)
-                    .unwrap_or("")
+                    .unwrap_or("");
+                let call_id = item
+                    .get("call_id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(item_id)
                     .to_string();
                 let name = item
                     .get("name")
@@ -435,8 +446,12 @@ fn parse_output(output: &[serde_json::Value]) -> (Vec<ContentPart>, bool) {
                     .unwrap_or("{}");
                 let arguments = serde_json::from_str(args_str)
                     .unwrap_or_else(|_| serde_json::json!({}));
-                let mut tc = ToolCall::new(id, name, arguments);
+                let mut tc = ToolCall::new(call_id, name, arguments);
                 tc.raw_arguments = Some(args_str.to_string());
+                // Preserve item-level ID (fc_xxx) for Responses API round-trip
+                if !item_id.is_empty() {
+                    tc.provider_metadata = Some(serde_json::json!({"id": item_id}));
+                }
                 parts.push(ContentPart::ToolCall(tc));
             }
             _ => {}
@@ -682,6 +697,10 @@ fn handle_tool_call_delta(
             .to_string();
         let mut tc = ToolCall::new(lookup_id, name, serde_json::json!({}));
         tc.raw_arguments = Some(delta.to_string());
+        // Preserve item-level ID (fc_xxx) for Responses API round-trip
+        if !item_id.is_empty() && item_id != *lookup_id {
+            tc.provider_metadata = Some(serde_json::json!({"id": item_id}));
+        }
         state.tool_calls.push(tc.clone());
         events.push(StreamEvent::ToolCallStart { tool_call: tc });
     }
@@ -721,11 +740,14 @@ fn handle_output_item_done(
         }
         Some("function_call") => {
             let item = json.get("item").unwrap_or(json);
+            let item_id = item
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
             let call_id = item
                 .get("call_id")
-                .or_else(|| item.get("id"))
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
+                .unwrap_or(item_id)
                 .to_string();
             let name = item
                 .get("name")
@@ -741,11 +763,16 @@ fn handle_output_item_done(
 
             let mut tc = ToolCall::new(&call_id, &name, arguments);
             tc.raw_arguments = Some(args_str.to_string());
+            // Preserve item-level ID (fc_xxx) for Responses API round-trip
+            if !item_id.is_empty() {
+                tc.provider_metadata = Some(serde_json::json!({"id": item_id}));
+            }
 
             if let Some(existing) = state.tool_calls.iter_mut().find(|t| t.id == call_id) {
                 existing.name.clone_from(&name);
                 existing.arguments = tc.arguments.clone();
                 existing.raw_arguments.clone_from(&tc.raw_arguments);
+                existing.provider_metadata.clone_from(&tc.provider_metadata);
             } else {
                 state.tool_calls.push(tc.clone());
             }
@@ -1184,6 +1211,94 @@ mod tests {
         let content = input[0]["content"].as_array().expect("content should be array");
         assert_eq!(content[0]["type"], "input_text");
         assert_eq!(content[0]["text"], "[Document content not supported by this provider]");
+    }
+
+    #[test]
+    fn parse_output_preserves_both_ids_on_function_call() {
+        let output = vec![serde_json::json!({
+            "type": "function_call",
+            "id": "fc_abc123",
+            "call_id": "call_xyz789",
+            "name": "get_weather",
+            "arguments": "{\"location\":\"NYC\"}"
+        })];
+        let (parts, has_tool_calls) = parse_output(&output);
+        assert!(has_tool_calls);
+        assert_eq!(parts.len(), 1);
+        match &parts[0] {
+            ContentPart::ToolCall(tc) => {
+                // call_id is used as the ToolCall.id (links to tool results)
+                assert_eq!(tc.id, "call_xyz789");
+                // item-level id (fc_xxx) is preserved in provider_metadata
+                let meta = tc.provider_metadata.as_ref().expect("provider_metadata should be set");
+                assert_eq!(meta["id"], "fc_abc123");
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn translate_input_uses_item_id_for_id_field() {
+        let mut tc = ToolCall::new("call_xyz789", "get_weather", serde_json::json!({"location": "NYC"}));
+        tc.provider_metadata = Some(serde_json::json!({"id": "fc_abc123"}));
+
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![ContentPart::ToolCall(tc)],
+            name: None,
+            tool_call_id: None,
+        };
+        let (_, input) = translate_input(&[msg]);
+        let fc = &input[0];
+        assert_eq!(fc["type"], "function_call");
+        // id field uses the fc_ prefixed item ID
+        assert_eq!(fc["id"], "fc_abc123");
+        // call_id field uses the call_ prefixed call ID
+        assert_eq!(fc["call_id"], "call_xyz789");
+    }
+
+    #[test]
+    fn translate_input_falls_back_to_tc_id_without_metadata() {
+        let tc = ToolCall::new("call_xyz789", "get_weather", serde_json::json!({}));
+
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![ContentPart::ToolCall(tc)],
+            name: None,
+            tool_call_id: None,
+        };
+        let (_, input) = translate_input(&[msg]);
+        let fc = &input[0];
+        // Without provider_metadata, both fields use tc.id
+        assert_eq!(fc["id"], "call_xyz789");
+        assert_eq!(fc["call_id"], "call_xyz789");
+    }
+
+    #[test]
+    fn parse_output_round_trips_function_call_ids() {
+        // Simulate a response from the Responses API
+        let output = vec![serde_json::json!({
+            "type": "function_call",
+            "id": "fc_item1",
+            "call_id": "call_001",
+            "name": "search",
+            "arguments": "{\"q\":\"test\"}"
+        })];
+        let (parts, _) = parse_output(&output);
+
+        // Now translate back to input format
+        let msg = Message {
+            role: Role::Assistant,
+            content: parts,
+            name: None,
+            tool_call_id: None,
+        };
+        let (_, input) = translate_input(&[msg]);
+        let fc = &input[0];
+
+        // The round-tripped function call should have correct IDs
+        assert_eq!(fc["id"], "fc_item1");
+        assert_eq!(fc["call_id"], "call_001");
     }
 
     #[test]
