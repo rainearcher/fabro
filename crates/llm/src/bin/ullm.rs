@@ -180,6 +180,8 @@ async fn run_prompt(args: PromptArgs) -> Result<()> {
     let prompt_text = resolve_prompt(args.prompt, stdin_prompt)?;
     let (model_id, provider) = resolve_model(args.model);
 
+    eprintln!("Using model: {model_id}");
+
     let mut params = GenerateParams::new(&model_id).prompt(&prompt_text);
     if let Some(p) = provider {
         params = params.provider(&p);
@@ -284,7 +286,7 @@ mod tests {
             .stdout(predicate::str::contains("claude-opus-4-6"))
             .stdout(predicate::str::contains("claude-sonnet-4-5"))
             .stdout(predicate::str::contains("gpt-5.2"))
-            .stdout(predicate::str::contains("gemini-3-pro-preview"))
+            .stdout(predicate::str::contains("gemini-3.1-pro-preview"))
             .stdout(predicate::str::contains("anthropic"))
             .stdout(predicate::str::contains("openai"))
             .stdout(predicate::str::contains("gemini"));
@@ -303,7 +305,7 @@ mod tests {
         // Should NOT contain other providers
         assert
             .stdout(predicate::str::contains("gpt-5.2").not())
-            .stdout(predicate::str::contains("gemini-3-pro-preview").not());
+            .stdout(predicate::str::contains("gemini-3.1-pro-preview").not());
     }
 
     // Step 3: models list --query does substring match on id/name/aliases
@@ -344,7 +346,7 @@ mod tests {
             .success()
             .stdout(predicate::str::contains("claude-opus-4-6"))
             .stdout(predicate::str::contains("gpt-5.2"))
-            .stdout(predicate::str::contains("gemini-3-pro-preview"));
+            .stdout(predicate::str::contains("gemini-3.1-pro-preview"));
     }
 
     // Step 5: prompt requires prompt text (errors when no prompt and stdin is tty)

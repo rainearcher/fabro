@@ -103,7 +103,7 @@ mod tests {
         assert_eq!(model.id, "gpt-5.2");
 
         let model = get_latest_model("gemini", None).unwrap();
-        assert_eq!(model.id, "gemini-3-pro-preview");
+        assert_eq!(model.id, "gemini-3.1-pro-preview");
     }
 
     #[test]

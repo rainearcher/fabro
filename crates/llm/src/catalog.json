@@ -65,9 +65,9 @@
     "aliases": ["codex"]
   },
   {
-    "id": "gemini-3-pro-preview",
+    "id": "gemini-3.1-pro-preview",
     "provider": "gemini",
-    "display_name": "Gemini 3 Pro (Preview)",
+    "display_name": "Gemini 3.1 Pro (Preview)",
     "context_window": 1048576,
     "max_output": 65536,
     "supports_tools": true,

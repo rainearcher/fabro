@@ -43,7 +43,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     let provider = args.provider;
     let model = args.model.unwrap_or_else(|| match provider.as_deref() {
         Some("openai") => "gpt-5.2".to_string(),
-        Some("gemini") => "gemini-3-pro-preview".to_string(),
+        Some("gemini") => "gemini-3.1-pro-preview".to_string(),
         _ => "claude-sonnet-4-5".to_string(),
     });
 

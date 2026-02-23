@@ -51,8 +51,8 @@ enum PermissionLevel {
 
 fn default_model(provider: &str) -> &'static str {
     match provider {
-        "openai" => "gpt-5.2",
-        "gemini" => "gemini-3-pro-preview",
+        "openai" => "gpt-5.2-codex",
+        "gemini" => "gemini-3.1-pro-preview",
         // anthropic and unknown providers
         _ => "claude-opus-4-6",
     }
@@ -308,6 +308,10 @@ pub async fn run() -> anyhow::Result<()> {
         .model
         .as_deref()
         .unwrap_or_else(|| default_model(&cli.provider));
+    eprintln!(
+        "{}Using model: {model}{}",
+        styles.dim, styles.reset,
+    );
     let profile = build_profile(&cli.provider, model);
 
     // Build execution environment
@@ -458,12 +462,12 @@ mod tests {
 
     #[test]
     fn default_model_openai() {
-        assert_eq!(default_model("openai"), "gpt-5.2");
+        assert_eq!(default_model("openai"), "gpt-5.2-codex");
     }
 
     #[test]
     fn default_model_gemini() {
-        assert_eq!(default_model("gemini"), "gemini-3-pro-preview");
+        assert_eq!(default_model("gemini"), "gemini-3.1-pro-preview");
     }
 
     // validate_api_key tests

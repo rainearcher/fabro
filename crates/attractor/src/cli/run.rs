@@ -119,7 +119,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         })
         .unwrap_or_else(|| match provider.as_deref() {
             Some("openai") => "gpt-5.2".to_string(),
-            Some("gemini") => "gemini-3-pro-preview".to_string(),
+            Some("gemini") => "gemini-3.1-pro-preview".to_string(),
             _ => "claude-sonnet-4-5".to_string(),
         });
 
