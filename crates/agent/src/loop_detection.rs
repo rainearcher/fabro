@@ -94,7 +94,7 @@ fn is_repeating_pattern(signatures: &[u64], pattern_len: usize) -> bool {
 mod tests {
     use super::*;
     use std::time::SystemTime;
-    use unified_llm::types::{ToolCall, Usage};
+    use llm::types::{ToolCall, Usage};
 
     fn assistant_with_tool(name: &str, args: serde_json::Value) -> Turn {
         Turn::Assistant {

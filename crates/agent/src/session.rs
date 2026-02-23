@@ -14,9 +14,9 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
-use unified_llm::client::Client;
-use unified_llm::error::{ProviderErrorKind, SdkError};
-use unified_llm::types::{Message, Request, ToolChoice, ToolResult};
+use llm::client::Client;
+use llm::error::{ProviderErrorKind, SdkError};
+use llm::types::{Message, Request, ToolChoice, ToolResult};
 
 pub struct Session {
     id: String,
@@ -398,7 +398,7 @@ impl Session {
 
     async fn execute_tool_calls(
         &mut self,
-        tool_calls: &[unified_llm::types::ToolCall],
+        tool_calls: &[llm::types::ToolCall],
     ) -> Vec<ToolResult> {
         if self.provider_profile.supports_parallel_tool_calls() && tool_calls.len() > 1 {
             self.execute_tool_calls_parallel(tool_calls).await
@@ -409,7 +409,7 @@ impl Session {
 
     async fn execute_tool_calls_sequential(
         &self,
-        tool_calls: &[unified_llm::types::ToolCall],
+        tool_calls: &[llm::types::ToolCall],
     ) -> Vec<ToolResult> {
         let mut results = Vec::new();
         for tc in tool_calls {
@@ -450,7 +450,7 @@ impl Session {
 
     async fn execute_tool_calls_parallel(
         &self,
-        tool_calls: &[unified_llm::types::ToolCall],
+        tool_calls: &[llm::types::ToolCall],
     ) -> Vec<ToolResult> {
         let emitter = self.event_emitter.clone();
         let env = self.execution_env.clone();
@@ -669,9 +669,9 @@ mod tests {
     use super::*;
     use crate::test_support::*;
     use crate::tool_registry::{RegisteredTool, ToolRegistry};
-    use unified_llm::error::ProviderErrorDetail;
-    use unified_llm::provider::ProviderAdapter;
-    use unified_llm::types::ToolDefinition;
+    use llm::error::ProviderErrorDetail;
+    use llm::provider::ProviderAdapter;
+    use llm::types::ToolDefinition;
 
     // --- Tests ---
 

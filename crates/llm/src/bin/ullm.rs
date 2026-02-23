@@ -3,8 +3,8 @@ use std::io::{self, IsTerminal, Read};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use futures::StreamExt;
-use unified_llm::catalog;
-use unified_llm::generate::{self, GenerateParams};
+use llm::catalog;
+use llm::generate::{self, GenerateParams};
 
 #[derive(Parser)]
 #[command(name = "ullm")]
@@ -69,7 +69,7 @@ fn parse_option(s: &str) -> Result<(String, String), String> {
     Ok((key.to_string(), value.to_string()))
 }
 
-fn print_models_table(models: &[unified_llm::types::ModelInfo]) {
+fn print_models_table(models: &[llm::types::ModelInfo]) {
     println!(
         "{:<30} {:<12} {:<30} {:>14}",
         "ID", "PROVIDER", "ALIASES", "CONTEXT"
@@ -168,7 +168,7 @@ struct PromptArgs {
     option: Vec<(String, String)>,
 }
 
-fn print_usage(usage: &unified_llm::types::Usage) {
+fn print_usage(usage: &llm::types::Usage) {
     eprintln!(
         "Tokens: {} input, {} output, {} total",
         usage.input_tokens, usage.output_tokens, usage.total_tokens
@@ -198,7 +198,7 @@ async fn run_prompt(args: PromptArgs) -> Result<()> {
     } else {
         let mut stream_result = generate::stream(params).await?;
         while let Some(event) = stream_result.next().await {
-            if let unified_llm::types::StreamEvent::TextDelta { delta, .. } = event? {
+            if let llm::types::StreamEvent::TextDelta { delta, .. } = event? {
                 print!("{delta}");
             }
         }

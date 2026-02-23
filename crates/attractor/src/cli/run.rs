@@ -79,7 +79,7 @@ pub async fn run_command(args: RunArgs) -> anyhow::Result<()> {
     let dry_run_mode = if args.dry_run {
         true
     } else {
-        match unified_llm::client::Client::from_env().await {
+        match llm::client::Client::from_env().await {
             Ok(c) if c.provider_names().is_empty() => {
                 eprintln!("Warning: No LLM providers configured. Running in dry-run mode.");
                 true

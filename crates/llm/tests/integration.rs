@@ -1,6 +1,6 @@
-use unified_llm::provider::ProviderAdapter;
-use unified_llm::providers::{AnthropicAdapter, GeminiAdapter, OpenAiAdapter};
-use unified_llm::types::{Message, Request};
+use llm::provider::ProviderAdapter;
+use llm::providers::{AnthropicAdapter, GeminiAdapter, OpenAiAdapter};
+use llm::types::{Message, Request};
 
 fn make_request(model: &str) -> Request {
     Request {
@@ -30,7 +30,7 @@ async fn anthropic_complete() {
     let response = adapter.complete(&request).await.unwrap();
 
     assert!(!response.text().is_empty(), "response text should not be empty");
-    assert_eq!(response.finish_reason, unified_llm::types::FinishReason::Stop);
+    assert_eq!(response.finish_reason, llm::types::FinishReason::Stop);
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
     assert_eq!(response.provider, "anthropic");
@@ -46,7 +46,7 @@ async fn openai_complete() {
     let response = adapter.complete(&request).await.unwrap();
 
     assert!(!response.text().is_empty(), "response text should not be empty");
-    assert_eq!(response.finish_reason, unified_llm::types::FinishReason::Stop);
+    assert_eq!(response.finish_reason, llm::types::FinishReason::Stop);
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
     assert_eq!(response.provider, "openai");
@@ -62,7 +62,7 @@ async fn gemini_complete() {
     let response = adapter.complete(&request).await.unwrap();
 
     assert!(!response.text().is_empty(), "response text should not be empty");
-    assert_eq!(response.finish_reason, unified_llm::types::FinishReason::Stop);
+    assert_eq!(response.finish_reason, llm::types::FinishReason::Stop);
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
     assert_eq!(response.provider, "gemini");

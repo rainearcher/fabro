@@ -6,7 +6,7 @@ use crate::subagent::{
 };
 use crate::tool_registry::ToolRegistry;
 use std::sync::Arc;
-use unified_llm::types::ToolDefinition;
+use llm::types::ToolDefinition;
 
 /// Static capabilities of a provider profile.
 pub struct ProfileCapabilities {

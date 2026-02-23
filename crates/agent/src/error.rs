@@ -1,4 +1,4 @@
-use unified_llm::error::SdkError;
+use llm::error::SdkError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {

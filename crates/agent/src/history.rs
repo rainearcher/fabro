@@ -1,5 +1,5 @@
 use crate::types::Turn;
-use unified_llm::types::{ContentPart, Message, Role};
+use llm::types::{ContentPart, Message, Role};
 
 #[derive(Debug, Clone, Default)]
 pub struct History {
@@ -29,7 +29,7 @@ impl History {
                     let mut parts: Vec<ContentPart> = Vec::new();
                     if let Some(reasoning_text) = reasoning {
                         parts.push(ContentPart::Thinking(
-                            unified_llm::types::ThinkingData {
+                            llm::types::ThinkingData {
                                 text: reasoning_text.clone(),
                                 signature: None,
                                 redacted: false,
@@ -79,7 +79,7 @@ impl History {
 mod tests {
     use super::*;
     use std::time::SystemTime;
-    use unified_llm::types::{ToolCall, ToolResult, Usage};
+    use llm::types::{ToolCall, ToolResult, Usage};
 
     #[test]
     fn empty_history_produces_empty_messages() {

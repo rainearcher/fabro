@@ -7,7 +7,7 @@ use agent::{
     AnthropicProfile, GeminiProfile, LocalExecutionEnvironment, OpenAiProfile, ProviderProfile,
     Session, SessionConfig, Turn,
 };
-use unified_llm::client::Client;
+use llm::client::Client;
 
 use crate::context::Context;
 use crate::error::AttractorError;

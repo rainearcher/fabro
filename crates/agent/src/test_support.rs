@@ -8,10 +8,10 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use unified_llm::client::Client;
-use unified_llm::error::SdkError;
-use unified_llm::provider::{ProviderAdapter, StreamEventStream};
-use unified_llm::types::{FinishReason, Message, Request, Response, Usage};
+use llm::client::Client;
+use llm::error::SdkError;
+use llm::provider::{ProviderAdapter, StreamEventStream};
+use llm::types::{FinishReason, Message, Request, Response, Usage};
 
 // --- MockExecutionEnvironment ---
 
@@ -474,7 +474,7 @@ pub(crate) fn tool_call_response(
     tool_call_id: &str,
     args: serde_json::Value,
 ) -> Response {
-    use unified_llm::types::{ContentPart, Role, ToolCall};
+    use llm::types::{ContentPart, Role, ToolCall};
     Response {
         id: format!("resp_{tool_call_id}"),
         model: "mock-model".into(),
@@ -502,7 +502,7 @@ pub(crate) fn tool_call_response(
 }
 
 pub(crate) fn make_echo_tool() -> crate::tool_registry::RegisteredTool {
-    use unified_llm::types::ToolDefinition;
+    use llm::types::ToolDefinition;
     crate::tool_registry::RegisteredTool {
         definition: ToolDefinition {
             name: "echo".into(),
@@ -522,7 +522,7 @@ pub(crate) fn make_echo_tool() -> crate::tool_registry::RegisteredTool {
 }
 
 pub(crate) fn make_error_tool() -> crate::tool_registry::RegisteredTool {
-    use unified_llm::types::ToolDefinition;
+    use llm::types::ToolDefinition;
     crate::tool_registry::RegisteredTool {
         definition: ToolDefinition {
             name: "fail_tool".into(),
@@ -597,7 +597,7 @@ impl ProviderAdapter for CapturingLlmProvider {
 pub(crate) fn multi_tool_call_response(
     calls: Vec<(&str, &str, serde_json::Value)>,
 ) -> Response {
-    use unified_llm::types::{ContentPart, Role, ToolCall};
+    use llm::types::{ContentPart, Role, ToolCall};
     let mut content = vec![ContentPart::text("Let me use multiple tools.")];
     for (tool_name, tool_call_id, args) in &calls {
         content.push(ContentPart::ToolCall(ToolCall::new(

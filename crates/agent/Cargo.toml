@@ -10,7 +10,7 @@ keywords = ["llm", "ai", "agent", "coding"]
 categories = ["api-bindings"]
 
 [dependencies]
-unified-llm = { path = "../unified-llm" }
+llm = { path = "../llm" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

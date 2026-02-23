@@ -3600,8 +3600,8 @@ mod real_llm {
     use attractor::graph::Node;
     use attractor::handler::codergen::{CodergenBackend, CodergenHandler, CodergenResult};
 
-    use unified_llm::client::Client;
-    use unified_llm::types::{Message, Request};
+    use llm::client::Client;
+    use llm::types::{Message, Request};
 
     struct LlmCodergenBackend {
         client: Arc<Client>,

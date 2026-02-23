@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use unified_llm::types::ToolDefinition;
+use llm::types::ToolDefinition;
 
 pub type ToolExecutor = Arc<
     dyn Fn(

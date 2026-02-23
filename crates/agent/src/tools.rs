@@ -3,7 +3,7 @@ use crate::execution_env::GrepOptions;
 use crate::tool_registry::RegisteredTool;
 use std::fmt::Write;
 use std::sync::Arc;
-use unified_llm::types::ToolDefinition;
+use llm::types::ToolDefinition;
 
 pub(crate) fn required_str<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
     args.get(key)

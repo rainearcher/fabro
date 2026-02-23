@@ -3,7 +3,7 @@ use crate::profiles::assemble_system_prompt;
 use crate::profiles::BaseProfile;
 use crate::provider_profile::{ProfileCapabilities, ProviderProfile};
 use crate::tool_registry::{RegisteredTool, ToolRegistry};
-use unified_llm::types::ToolDefinition;
+use llm::types::ToolDefinition;
 use crate::tools::{
     make_glob_tool, make_grep_tool, make_read_file_tool, make_shell_tool, make_write_file_tool,
 };

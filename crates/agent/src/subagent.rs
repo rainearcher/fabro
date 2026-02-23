@@ -6,7 +6,7 @@ use crate::types::Turn;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use unified_llm::types::ToolDefinition;
+use llm::types::ToolDefinition;
 
 pub type SessionFactory = Arc<dyn Fn() -> Session + Send + Sync>;
 
