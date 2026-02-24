@@ -1,9 +1,11 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::context::Context;
 use crate::error::AttractorError;
+use crate::event::EventEmitter;
 use crate::graph::{Graph, Node};
 use crate::outcome::Outcome;
 
@@ -30,7 +32,7 @@ impl Handler for FanInHandler {
         context: &Context,
         _graph: &Graph,
         logs_root: &Path,
-        _services: &EngineServices,
+        services: &EngineServices,
     ) -> Result<Outcome, AttractorError> {
         let results = context.get("parallel.results");
         let Some(results) = results else {
@@ -40,7 +42,7 @@ impl Handler for FanInHandler {
         let prompt = node.prompt().filter(|p| !p.is_empty());
 
         let best = if let (Some(prompt_text), Some(backend)) = (prompt, &self.backend) {
-            llm_evaluate(backend.as_ref(), prompt_text, &results, context, logs_root, &node.id).await?
+            llm_evaluate(backend.as_ref(), prompt_text, &results, context, logs_root, &node.id, &services.emitter).await?
         } else {
             heuristic_select(&results)
         };
@@ -153,6 +155,7 @@ async fn llm_evaluate(
     context: &Context,
     logs_root: &Path,
     node_id: &str,
+    emitter: &Arc<EventEmitter>,
 ) -> Result<Candidate, AttractorError> {
     let results_text = serde_json::to_string_pretty(results)
         .unwrap_or_else(|_| results.to_string());
@@ -171,7 +174,7 @@ async fn llm_evaluate(
     let eval_node = Node::new("fan_in_eval");
 
     // Fan-in evaluation runs outside a thread context, so pass None
-    match backend.run(&eval_node, &full_prompt, context, None).await {
+    match backend.run(&eval_node, &full_prompt, context, None, emitter).await {
         Ok(CodergenResult::Full(outcome)) => {
             // If the backend returned a full Outcome, extract best_id from context_updates
             let best_id = outcome
@@ -367,6 +370,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
+                _emitter: &Arc<EventEmitter>,
             ) -> Result<CodergenResult, AttractorError> {
                 // Return text that contains the ID "branch_b"
                 Ok(CodergenResult::Text { text: "The best candidate is branch_b".to_string(), usage: None })

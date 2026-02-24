@@ -269,6 +269,53 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
         PipelineEvent::CheckpointSaved { node_id } => {
             format!("[CHECKPOINT_SAVED] node={node_id}")
         }
+        PipelineEvent::Prompt { stage, text } => {
+            let truncated = if text.len() > 80 { &text[..80] } else { text };
+            format!("[PROMPT] stage={stage} text=\"{truncated}\"")
+        }
+        PipelineEvent::AssistantMessage {
+            stage,
+            model,
+            input_tokens,
+            output_tokens,
+            tool_call_count,
+            ..
+        } => {
+            let total = input_tokens + output_tokens;
+            let tokens_str = format_tokens_human(total);
+            format!("[ASSISTANT_MESSAGE] stage={stage} model={model} tokens={tokens_str} tool_calls={tool_call_count}")
+        }
+        PipelineEvent::ToolCallStarted {
+            stage,
+            tool_name,
+            ..
+        } => {
+            format!("[TOOL_CALL_STARTED] stage={stage} tool={tool_name}")
+        }
+        PipelineEvent::ToolCallCompleted {
+            stage,
+            tool_name,
+            is_error,
+            ..
+        } => {
+            format!("[TOOL_CALL_COMPLETED] stage={stage} tool={tool_name} is_error={is_error}")
+        }
+        PipelineEvent::SessionError { stage, error } => {
+            format!("[SESSION_ERROR] stage={stage} error=\"{error}\"")
+        }
+        PipelineEvent::ContextWindowWarning {
+            stage,
+            usage_percent,
+            ..
+        } => {
+            format!("[CONTEXT_WINDOW_WARNING] stage={stage} usage={usage_percent}%")
+        }
+        PipelineEvent::LoopDetected { stage } => {
+            format!("[LOOP_DETECTED] stage={stage}")
+        }
+        PipelineEvent::TurnLimitReached { stage } => {
+            format!("[TURN_LIMIT_REACHED] stage={stage}")
+        }
     };
     format!("{dim}{body}{reset}", dim = styles.dim, reset = styles.reset)
 }
@@ -388,6 +435,63 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             format!(
                 "{d}── CHECKPOINT_SAVED ─────────────────────────{r}\n  {d}node_id:{r} {node_id}\n"
             )
+        }
+        PipelineEvent::Prompt { stage, text } => {
+            format!("{d}── PROMPT ───────────────────────────────────{r}\n  {d}stage:{r} {stage}\n  {d}text:{r}\n{text}\n")
+        }
+        PipelineEvent::AssistantMessage {
+            stage,
+            text,
+            model,
+            input_tokens,
+            output_tokens,
+            tool_call_count,
+        } => {
+            let total = input_tokens + output_tokens;
+            let truncated = if text.len() > 200 { &text[..200] } else { text.as_str() };
+            format!("{d}── ASSISTANT_MESSAGE ────────────────────────{r}\n  {d}stage:{r}       {stage}\n  {d}model:{r}       {model}\n  {d}tokens:{r}      {} ({} in / {} out)\n  {d}tool_calls:{r}  {tool_call_count}\n  {d}text:{r}        {truncated}\n",
+                format_tokens_human(total),
+                format_tokens_human(*input_tokens),
+                format_tokens_human(*output_tokens),
+            )
+        }
+        PipelineEvent::ToolCallStarted {
+            stage,
+            tool_name,
+            tool_call_id,
+            arguments,
+        } => {
+            let args_str = serde_json::to_string(arguments).unwrap_or_else(|_| arguments.to_string());
+            let truncated = if args_str.len() > 200 { &args_str[..200] } else { &args_str };
+            format!("{d}── TOOL_CALL_STARTED ────────────────────────{r}\n  {d}stage:{r}        {stage}\n  {d}tool_name:{r}    {tool_name}\n  {d}tool_call_id:{r} {tool_call_id}\n  {d}arguments:{r}    {truncated}\n")
+        }
+        PipelineEvent::ToolCallCompleted {
+            stage,
+            tool_name,
+            tool_call_id,
+            output,
+            is_error,
+        } => {
+            let output_str = serde_json::to_string(output).unwrap_or_else(|_| output.to_string());
+            let truncated = if output_str.len() > 200 { &output_str[..200] } else { &output_str };
+            format!("{d}── TOOL_CALL_COMPLETED ──────────────────────{r}\n  {d}stage:{r}        {stage}\n  {d}tool_name:{r}    {tool_name}\n  {d}tool_call_id:{r} {tool_call_id}\n  {d}is_error:{r}     {is_error}\n  {d}output:{r}       {truncated}\n")
+        }
+        PipelineEvent::SessionError { stage, error } => {
+            format!("{d}── SESSION_ERROR ────────────────────────────{r}\n  {d}stage:{r} {stage}\n  {d}error:{r} {error}\n")
+        }
+        PipelineEvent::ContextWindowWarning {
+            stage,
+            estimated_tokens,
+            context_window_size,
+            usage_percent,
+        } => {
+            format!("{d}── CONTEXT_WINDOW_WARNING ───────────────────{r}\n  {d}stage:{r}               {stage}\n  {d}estimated_tokens:{r}    {estimated_tokens}\n  {d}context_window_size:{r} {context_window_size}\n  {d}usage_percent:{r}       {usage_percent}%\n")
+        }
+        PipelineEvent::LoopDetected { stage } => {
+            format!("{d}── LOOP_DETECTED ────────────────────────────{r}\n  {d}stage:{r} {stage}\n")
+        }
+        PipelineEvent::TurnLimitReached { stage } => {
+            format!("{d}── TURN_LIMIT_REACHED ───────────────────────{r}\n  {d}stage:{r} {stage}\n")
         }
     }
 }

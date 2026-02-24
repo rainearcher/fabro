@@ -1,9 +1,11 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::context::Context;
 use crate::error::AttractorError;
+use crate::event::EventEmitter;
 use crate::graph::{Graph, Node};
 use crate::outcome::{Outcome, StageUsage};
 
@@ -27,6 +29,7 @@ pub trait CodergenBackend: Send + Sync {
         prompt: &str,
         context: &Context,
         thread_id: Option<&str>,
+        emitter: &Arc<EventEmitter>,
     ) -> Result<CodergenResult, AttractorError>;
 }
 
@@ -175,7 +178,7 @@ impl Handler for CodergenHandler {
         context: &Context,
         graph: &Graph,
         logs_root: &Path,
-        _services: &EngineServices,
+        services: &EngineServices,
     ) -> Result<Outcome, AttractorError> {
         // 1. Build prompt
         let raw_prompt = node
@@ -203,7 +206,7 @@ impl Handler for CodergenHandler {
             .get("internal.thread_id")
             .and_then(|v| v.as_str().map(String::from));
         let (response_text, stage_usage) = if let Some(backend) = &self.backend {
-            match backend.run(node, &prompt, context, thread_id.as_deref()).await {
+            match backend.run(node, &prompt, context, thread_id.as_deref(), &services.emitter).await {
                 Ok(CodergenResult::Full(outcome)) => {
                     let status_json = serde_json::to_string_pretty(&outcome)
                         .unwrap_or_else(|_| "{}".to_string());
@@ -521,6 +524,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 thread_id: Option<&str>,
+                _emitter: &Arc<EventEmitter>,
             ) -> Result<CodergenResult, AttractorError> {
                 *self.captured_thread_id.lock().unwrap() =
                     Some(thread_id.map(String::from));
@@ -566,6 +570,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 thread_id: Option<&str>,
+                _emitter: &Arc<EventEmitter>,
             ) -> Result<CodergenResult, AttractorError> {
                 *self.captured_thread_id.lock().unwrap() =
                     Some(thread_id.map(String::from));
@@ -606,6 +611,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
+                _emitter: &Arc<EventEmitter>,
             ) -> Result<CodergenResult, AttractorError> {
                 Err(AttractorError::Handler("Request timed out".to_string()))
             }
@@ -717,6 +723,7 @@ Some text in between.
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
+                _emitter: &Arc<EventEmitter>,
             ) -> Result<CodergenResult, AttractorError> {
                 Err(AttractorError::Validation("bad config".to_string()))
             }

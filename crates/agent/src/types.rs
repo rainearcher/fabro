@@ -43,33 +43,31 @@ pub enum SessionState {
     Closed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EventKind {
-    SessionStart,
-    SessionEnd,
+#[derive(Debug, Clone)]
+pub enum AgentEvent {
+    SessionStarted,
+    SessionEnded,
     UserInput,
     AssistantTextStart,
-    AssistantTextDelta,
-    AssistantTextEnd,
-    ToolCallStart,
-    ToolCallOutputDelta,
-    ToolCallEnd,
-    SteeringInjected,
-    TurnLimit,
-    LoopDetection,
-    ContextWindowWarning,
-    Error,
-}
-
-#[derive(Debug, Clone)]
-pub enum EventData {
-    Empty,
-    ToolCall {
+    AssistantMessage {
+        text: String,
+        model: String,
+        input_tokens: i64,
+        output_tokens: i64,
+        tool_call_count: usize,
+    },
+    TextDelta {
+        delta: String,
+    },
+    ToolCallStarted {
         tool_name: String,
         tool_call_id: String,
         arguments: serde_json::Value,
     },
-    ToolCallEnd {
+    ToolCallOutputDelta {
+        delta: String,
+    },
+    ToolCallCompleted {
         tool_name: String,
         tool_call_id: String,
         output: serde_json::Value,
@@ -78,22 +76,21 @@ pub enum EventData {
     Error {
         error: String,
     },
-    TextDelta {
-        delta: String,
-    },
-    ContextWarning {
+    ContextWindowWarning {
         estimated_tokens: usize,
         context_window_size: usize,
         usage_percent: usize,
     },
+    LoopDetected,
+    TurnLimitReached,
+    SteeringInjected,
 }
 
 #[derive(Debug, Clone)]
 pub struct SessionEvent {
-    pub kind: EventKind,
+    pub event: AgentEvent,
     pub timestamp: SystemTime,
     pub session_id: String,
-    pub data: EventData,
 }
 
 #[cfg(test)]
@@ -103,13 +100,23 @@ mod tests {
     #[test]
     fn session_event_construction() {
         let event = SessionEvent {
-            kind: EventKind::SessionStart,
+            event: AgentEvent::SessionStarted,
             timestamp: SystemTime::now(),
             session_id: "sess_1".into(),
-            data: EventData::Empty,
         };
-        assert_eq!(event.kind, EventKind::SessionStart);
+        assert!(matches!(event.event, AgentEvent::SessionStarted));
         assert_eq!(event.session_id, "sess_1");
-        assert!(matches!(event.data, EventData::Empty));
+    }
+
+    #[test]
+    fn agent_event_assistant_message() {
+        let event = AgentEvent::AssistantMessage {
+            text: "Hello".into(),
+            model: "test-model".into(),
+            input_tokens: 100,
+            output_tokens: 50,
+            tool_call_count: 2,
+        };
+        assert!(matches!(event, AgentEvent::AssistantMessage { tool_call_count: 2, .. }));
     }
 }

@@ -9,7 +9,7 @@ use crate::project_docs::discover_project_docs;
 use crate::provider_profile::ProviderProfile;
 use crate::tool_registry::ToolRegistry;
 use crate::truncation::truncate_tool_output;
-use crate::types::{EventData, EventKind, SessionState, Turn};
+use crate::types::{AgentEvent, SessionState, Turn};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -65,7 +65,7 @@ impl Session {
     /// Call before `process_input`.
     pub async fn initialize(&mut self) {
         self.event_emitter
-            .emit(EventKind::SessionStart, self.id.clone(), EventData::Empty);
+            .emit(self.id.clone(), AgentEvent::SessionStarted);
 
         let doc_root = self
             .config
@@ -176,7 +176,7 @@ impl Session {
         if self.state != SessionState::Closed {
             self.state = SessionState::Closed;
             self.event_emitter
-                .emit(EventKind::SessionEnd, self.id.clone(), EventData::Empty);
+                .emit(self.id.clone(), AgentEvent::SessionEnded);
         }
     }
 
@@ -228,7 +228,7 @@ impl Session {
             timestamp: SystemTime::now(),
         });
         self.event_emitter
-            .emit(EventKind::UserInput, self.id.clone(), EventData::Empty);
+            .emit(self.id.clone(), AgentEvent::UserInput);
 
         // Drain steering queue before first LLM call
         self.drain_steering();
@@ -247,14 +247,14 @@ impl Session {
             // Check max_tool_rounds_per_input
             if round_count >= self.config.max_tool_rounds_per_input {
                 self.event_emitter
-                    .emit(EventKind::TurnLimit, self.id.clone(), EventData::Empty);
+                    .emit(self.id.clone(), AgentEvent::TurnLimitReached);
                 break;
             }
 
             // Check max_turns
             if self.config.max_turns > 0 && self.history.turns().len() >= self.config.max_turns {
                 self.event_emitter
-                    .emit(EventKind::TurnLimit, self.id.clone(), EventData::Empty);
+                    .emit(self.id.clone(), AgentEvent::TurnLimitReached);
                 break;
             }
 
@@ -268,20 +268,16 @@ impl Session {
             let request = self.build_request(&system_prompt);
 
             // Emit AssistantTextStart before LLM call
-            self.event_emitter.emit(
-                EventKind::AssistantTextStart,
-                self.id.clone(),
-                EventData::Empty,
-            );
+            self.event_emitter
+                .emit(self.id.clone(), AgentEvent::AssistantTextStart);
 
             // Call LLM (streaming)
             let mut event_stream = match self.llm_client.stream(&request).await {
                 Ok(stream) => stream,
                 Err(err) => {
                     self.event_emitter.emit(
-                        EventKind::Error,
                         self.id.clone(),
-                        EventData::Error {
+                        AgentEvent::Error {
                             error: err.to_string(),
                         },
                     );
@@ -299,9 +295,8 @@ impl Session {
                     Ok(event) => {
                         if let StreamEvent::TextDelta { ref delta, .. } = event {
                             self.event_emitter.emit(
-                                EventKind::AssistantTextDelta,
                                 self.id.clone(),
-                                EventData::TextDelta {
+                                AgentEvent::TextDelta {
                                     delta: delta.clone(),
                                 },
                             );
@@ -310,9 +305,8 @@ impl Session {
                     }
                     Err(err) => {
                         self.event_emitter.emit(
-                            EventKind::Error,
                             self.id.clone(),
-                            EventData::Error {
+                            AgentEvent::Error {
                                 error: err.to_string(),
                             },
                         );
@@ -370,11 +364,16 @@ impl Session {
                 timestamp: SystemTime::now(),
             });
 
-            // Emit AssistantTextEnd
+            // Emit AssistantMessage with enriched data from the response
             self.event_emitter.emit(
-                EventKind::AssistantTextEnd,
                 self.id.clone(),
-                EventData::Empty,
+                AgentEvent::AssistantMessage {
+                    text: text.clone(),
+                    model: response.model.clone(),
+                    input_tokens: response.usage.input_tokens,
+                    output_tokens: response.usage.output_tokens,
+                    tool_call_count: tool_calls.len(),
+                },
             );
 
             // Check context window usage
@@ -417,11 +416,8 @@ impl Session {
                     content: "WARNING: Loop detected. You appear to be repeating the same tool calls. Please try a different approach or ask for clarification.".to_string(),
                     timestamp: SystemTime::now(),
                 });
-                self.event_emitter.emit(
-                    EventKind::LoopDetection,
-                    self.id.clone(),
-                    EventData::Empty,
-                );
+                self.event_emitter
+                    .emit(self.id.clone(), AgentEvent::LoopDetected);
             }
         }
 
@@ -440,11 +436,8 @@ impl Session {
                 content: msg,
                 timestamp: SystemTime::now(),
             });
-            self.event_emitter.emit(
-                EventKind::SteeringInjected,
-                self.id.clone(),
-                EventData::Empty,
-            );
+            self.event_emitter
+                .emit(self.id.clone(), AgentEvent::SteeringInjected);
         }
     }
 
@@ -506,9 +499,8 @@ impl Session {
             }
 
             self.event_emitter.emit(
-                EventKind::ToolCallStart,
                 self.id.clone(),
-                EventData::ToolCall {
+                AgentEvent::ToolCallStarted {
                     tool_name: tc.name.clone(),
                     tool_call_id: tc.id.clone(),
                     arguments: tc.arguments.clone(),
@@ -527,17 +519,15 @@ impl Session {
             .await;
 
             self.event_emitter.emit(
-                EventKind::ToolCallOutputDelta,
                 self.id.clone(),
-                EventData::TextDelta {
+                AgentEvent::ToolCallOutputDelta {
                     delta: result.content.to_string(),
                 },
             );
 
             self.event_emitter.emit(
-                EventKind::ToolCallEnd,
                 self.id.clone(),
-                EventData::ToolCallEnd {
+                AgentEvent::ToolCallCompleted {
                     tool_name: tc.name.clone(),
                     tool_call_id: tc.id.clone(),
                     output: result.content.clone(),
@@ -574,9 +564,8 @@ impl Session {
                 let tc = tc.clone();
                 async move {
                     emitter.emit(
-                        EventKind::ToolCallStart,
                         session_id.clone(),
-                        EventData::ToolCall {
+                        AgentEvent::ToolCallStarted {
                             tool_name: tc.name.clone(),
                             tool_call_id: tc.id.clone(),
                             arguments: tc.arguments.clone(),
@@ -595,17 +584,15 @@ impl Session {
                     .await;
 
                     emitter.emit(
-                        EventKind::ToolCallOutputDelta,
                         session_id.clone(),
-                        EventData::TextDelta {
+                        AgentEvent::ToolCallOutputDelta {
                             delta: result.content.to_string(),
                         },
                     );
 
                     emitter.emit(
-                        EventKind::ToolCallEnd,
                         session_id,
-                        EventData::ToolCallEnd {
+                        AgentEvent::ToolCallCompleted {
                             tool_name: tc.name.clone(),
                             tool_call_id: tc.id.clone(),
                             output: result.content.clone(),
@@ -663,9 +650,8 @@ impl Session {
 
         if estimated_tokens > threshold {
             self.event_emitter.emit(
-                EventKind::ContextWindowWarning,
                 self.id.clone(),
-                EventData::ContextWarning {
+                AgentEvent::ContextWindowWarning {
                     estimated_tokens,
                     context_window_size: context_window,
                     usage_percent: estimated_tokens * 100 / context_window,
@@ -959,13 +945,13 @@ mod tests {
         // Collect events
         let mut events = Vec::new();
         while let Ok(event) = rx.try_recv() {
-            events.push(event.kind.clone());
+            events.push(event);
         }
 
-        assert!(events.contains(&EventKind::SessionStart));
-        assert!(events.contains(&EventKind::UserInput));
-        assert!(events.contains(&EventKind::AssistantTextEnd));
-        assert!(events.contains(&EventKind::SessionEnd));
+        assert!(events.iter().any(|e| matches!(e.event, AgentEvent::SessionStarted)));
+        assert!(events.iter().any(|e| matches!(e.event, AgentEvent::UserInput)));
+        assert!(events.iter().any(|e| matches!(e.event, AgentEvent::AssistantMessage { .. })));
+        assert!(events.iter().any(|e| matches!(e.event, AgentEvent::SessionEnded)));
     }
 
     #[tokio::test]
@@ -985,17 +971,17 @@ mod tests {
 
         let mut tool_end_events = Vec::new();
         while let Ok(event) = rx.try_recv() {
-            if event.kind == EventKind::ToolCallEnd {
+            if matches!(event.event, AgentEvent::ToolCallCompleted { .. }) {
                 tool_end_events.push(event);
             }
         }
 
         assert_eq!(tool_end_events.len(), 1);
-        match &tool_end_events[0].data {
-            EventData::ToolCallEnd { output, .. } => {
+        match &tool_end_events[0].event {
+            AgentEvent::ToolCallCompleted { output, .. } => {
                 assert_eq!(output, &serde_json::json!("echo: hello world"));
             }
-            _ => panic!("Expected ToolCallEnd event data"),
+            _ => panic!("Expected ToolCallCompleted event"),
         }
     }
 
@@ -1073,10 +1059,10 @@ mod tests {
 
         session.process_input("Keep echoing").await.unwrap();
 
-        // Check for LoopDetection event
+        // Check for LoopDetected event
         let mut found_loop_detection = false;
         while let Ok(event) = rx.try_recv() {
-            if event.kind == EventKind::LoopDetection {
+            if matches!(event.event, AgentEvent::LoopDetected) {
                 found_loop_detection = true;
             }
         }
@@ -1238,14 +1224,14 @@ mod tests {
         let result = session.process_input("Hello").await;
         assert!(matches!(result, Err(AgentError::SessionClosed)));
 
-        // No SessionStart event should have been emitted
+        // No SessionStarted event should have been emitted
         let mut events = Vec::new();
         while let Ok(event) = rx.try_recv() {
-            events.push(event.kind.clone());
+            events.push(event);
         }
         assert!(
-            !events.contains(&EventKind::SessionStart),
-            "SessionStart should not be emitted for a closed session"
+            !events.iter().any(|e| matches!(e.event, AgentEvent::SessionStarted)),
+            "SessionStarted should not be emitted for a closed session"
         );
     }
 
@@ -1289,13 +1275,13 @@ mod tests {
             panic!("Expected ToolResults turn at index 2");
         }
 
-        // Verify ToolCallStart and ToolCallEnd events for all 3 calls
+        // Verify ToolCallStarted and ToolCallCompleted events for all 3 calls
         let mut start_count = 0;
         let mut end_count = 0;
         while let Ok(event) = rx.try_recv() {
-            match event.kind {
-                EventKind::ToolCallStart => start_count += 1,
-                EventKind::ToolCallEnd => end_count += 1,
+            match &event.event {
+                AgentEvent::ToolCallStarted { .. } => start_count += 1,
+                AgentEvent::ToolCallCompleted { .. } => end_count += 1,
                 _ => {}
             }
         }
@@ -1327,17 +1313,13 @@ mod tests {
 
         let mut found_warning = false;
         while let Ok(event) = rx.try_recv() {
-            if event.kind == EventKind::ContextWindowWarning {
+            if let AgentEvent::ContextWindowWarning {
+                context_window_size,
+                ..
+            } = &event.event
+            {
                 found_warning = true;
-                match &event.data {
-                    EventData::ContextWarning {
-                        context_window_size,
-                        ..
-                    } => {
-                        assert_eq!(*context_window_size, 100);
-                    }
-                    _ => panic!("Expected ContextWarning event data"),
-                }
+                assert_eq!(*context_window_size, 100);
             }
         }
         assert!(found_warning);
@@ -1380,7 +1362,7 @@ mod tests {
 
         let mut found_warning = false;
         while let Ok(event) = rx.try_recv() {
-            if event.kind == EventKind::ContextWindowWarning {
+            if matches!(event.event, AgentEvent::ContextWindowWarning { .. }) {
                 found_warning = true;
             }
         }
@@ -1486,14 +1468,14 @@ mod tests {
         let mut session_start_count = 0;
         let mut session_end_count = 0;
         while let Ok(event) = rx.try_recv() {
-            if event.kind == EventKind::SessionStart {
+            if matches!(event.event, AgentEvent::SessionStarted) {
                 session_start_count += 1;
             }
-            if event.kind == EventKind::SessionEnd {
+            if matches!(event.event, AgentEvent::SessionEnded) {
                 session_end_count += 1;
             }
         }
-        // SESSION_START is emitted once during initialize(), SESSION_END once during close()
+        // SessionStarted is emitted once during initialize(), SessionEnded once during close()
         assert_eq!(session_start_count, 1);
         assert_eq!(session_end_count, 1);
     }
@@ -1681,17 +1663,17 @@ mod tests {
 
         let mut tool_end_events = Vec::new();
         while let Ok(event) = rx.try_recv() {
-            if event.kind == EventKind::ToolCallEnd {
+            if matches!(event.event, AgentEvent::ToolCallCompleted { .. }) {
                 tool_end_events.push(event);
             }
         }
 
         assert_eq!(tool_end_events.len(), 1);
-        match &tool_end_events[0].data {
-            EventData::ToolCallEnd { is_error, .. } => {
-                assert!(is_error, "ToolCallEnd event should have is_error: true");
+        match &tool_end_events[0].event {
+            AgentEvent::ToolCallCompleted { is_error, .. } => {
+                assert!(is_error, "ToolCallCompleted event should have is_error: true");
             }
-            _ => panic!("Expected ToolCallEnd event data"),
+            _ => panic!("Expected ToolCallCompleted event"),
         }
     }
 
@@ -1704,10 +1686,8 @@ mod tests {
 
         let mut deltas = Vec::new();
         while let Ok(event) = rx.try_recv() {
-            if event.kind == EventKind::AssistantTextDelta {
-                if let EventData::TextDelta { delta } = &event.data {
-                    deltas.push(delta.clone());
-                }
+            if let AgentEvent::TextDelta { delta } = &event.event {
+                deltas.push(delta.clone());
             }
         }
 

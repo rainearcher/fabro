@@ -77,6 +77,47 @@ pub enum PipelineEvent {
     CheckpointSaved {
         node_id: String,
     },
+    Prompt {
+        stage: String,
+        text: String,
+    },
+    AssistantMessage {
+        stage: String,
+        text: String,
+        model: String,
+        input_tokens: i64,
+        output_tokens: i64,
+        tool_call_count: usize,
+    },
+    ToolCallStarted {
+        stage: String,
+        tool_name: String,
+        tool_call_id: String,
+        arguments: serde_json::Value,
+    },
+    ToolCallCompleted {
+        stage: String,
+        tool_name: String,
+        tool_call_id: String,
+        output: serde_json::Value,
+        is_error: bool,
+    },
+    SessionError {
+        stage: String,
+        error: String,
+    },
+    ContextWindowWarning {
+        stage: String,
+        estimated_tokens: usize,
+        context_window_size: usize,
+        usage_percent: usize,
+    },
+    LoopDetected {
+        stage: String,
+    },
+    TurnLimitReached {
+        stage: String,
+    },
 }
 
 /// Listener callback type for pipeline events.
@@ -167,5 +208,38 @@ mod tests {
     fn event_emitter_default() {
         let emitter = EventEmitter::default();
         assert_eq!(emitter.listeners.len(), 0);
+    }
+
+    #[test]
+    fn llm_conversation_event_serialization() {
+        let event = PipelineEvent::ToolCallStarted {
+            stage: "plan".to_string(),
+            tool_name: "read_file".to_string(),
+            tool_call_id: "call_1".to_string(),
+            arguments: serde_json::json!({"path": "/tmp/test.txt"}),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("ToolCallStarted"));
+        assert!(json.contains("read_file"));
+        assert!(json.contains("plan"));
+
+        // Verify round-trip
+        let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineEvent::ToolCallStarted { stage, .. } if stage == "plan"));
+    }
+
+    #[test]
+    fn assistant_message_event_serialization() {
+        let event = PipelineEvent::AssistantMessage {
+            stage: "code".to_string(),
+            text: "Here is the implementation".to_string(),
+            model: "claude-opus-4-6".to_string(),
+            input_tokens: 1000,
+            output_tokens: 500,
+            tool_call_count: 3,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("AssistantMessage"));
+        assert!(json.contains("claude-opus-4-6"));
     }
 }

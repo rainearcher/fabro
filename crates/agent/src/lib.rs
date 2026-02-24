@@ -39,7 +39,7 @@ pub use tools::{
     make_shell_tool_with_config, make_write_file_tool,
 };
 pub use truncation::{truncate_lines, truncate_output, truncate_tool_output, TruncationMode};
-pub use types::{EventData, EventKind, SessionEvent, SessionState, Turn};
+pub use types::{AgentEvent, SessionEvent, SessionState, Turn};
 
 #[cfg(test)]
 pub(crate) mod test_support;

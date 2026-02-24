@@ -1,5 +1,5 @@
 use crate::{
-    AnthropicProfile, EventData, EventKind, GeminiProfile, LocalExecutionEnvironment, OpenAiProfile,
+    AgentEvent, AnthropicProfile, GeminiProfile, LocalExecutionEnvironment, OpenAiProfile,
     ProviderProfile, Session, SessionConfig, ToolApprovalFn, Turn,
 };
 use clap::{Parser, ValueEnum};
@@ -348,8 +348,8 @@ pub async fn run() -> anyhow::Result<()> {
     tokio::spawn(async move {
         let s = styles;
         while let Ok(event) = rx.recv().await {
-            match (&event.kind, &event.data) {
-                (EventKind::ToolCallStart, EventData::ToolCall { tool_name, arguments, .. }) => {
+            match &event.event {
+                AgentEvent::ToolCallStarted { tool_name, arguments, .. } => {
                     eprintln!(
                         "  {dim}\u{25cf}{reset} {bold}{cyan}{tool_name}{reset}{dim}({args}){reset}",
                         dim = s.dim,
@@ -359,12 +359,9 @@ pub async fn run() -> anyhow::Result<()> {
                         args = format_tool_args(arguments, &cwd_str),
                     );
                 }
-                (
-                    EventKind::ToolCallEnd,
-                    EventData::ToolCallEnd {
-                        tool_name, output, is_error, ..
-                    },
-                ) if verbose => {
+                AgentEvent::ToolCallCompleted {
+                    tool_name, output, is_error, ..
+                } if verbose => {
                     let label = if *is_error { "tool error" } else { "tool result" };
                     eprintln!(
                         "  {}[{label}] {tool_name}:{}\n{}",
@@ -374,7 +371,7 @@ pub async fn run() -> anyhow::Result<()> {
                             .unwrap_or_else(|_| output.to_string()),
                     );
                 }
-                (EventKind::Error, EventData::Error { error }) => {
+                AgentEvent::Error { error } => {
                     eprintln!(
                         "  {red}\u{2717} {error}{reset}",
                         red = s.red,

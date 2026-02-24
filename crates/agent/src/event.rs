@@ -1,4 +1,4 @@
-use crate::types::{EventData, EventKind, SessionEvent};
+use crate::types::{AgentEvent, SessionEvent};
 use std::time::SystemTime;
 use tokio::sync::broadcast;
 
@@ -14,15 +14,14 @@ impl EventEmitter {
         Self { sender }
     }
 
-    pub fn emit(&self, kind: EventKind, session_id: String, data: EventData) {
-        let event = SessionEvent {
-            kind,
+    pub fn emit(&self, session_id: String, event: AgentEvent) {
+        let wrapped = SessionEvent {
+            event,
             timestamp: SystemTime::now(),
             session_id,
-            data,
         };
         // Ignore send error (no receivers)
-        let _ = self.sender.send(event);
+        let _ = self.sender.send(wrapped);
     }
 
     #[must_use]
@@ -46,12 +45,11 @@ mod tests {
         let emitter = EventEmitter::new();
         let mut receiver = emitter.subscribe();
 
-        emitter.emit(EventKind::SessionStart, "sess-1".into(), EventData::Empty);
+        emitter.emit("sess-1".into(), AgentEvent::SessionStarted);
 
         let event = receiver.recv().await.unwrap();
-        assert_eq!(event.kind, EventKind::SessionStart);
+        assert!(matches!(event.event, AgentEvent::SessionStarted));
         assert_eq!(event.session_id, "sess-1");
-        assert!(matches!(event.data, EventData::Empty));
     }
 
     #[tokio::test]
@@ -60,17 +58,15 @@ mod tests {
         let mut receiver = emitter.subscribe();
 
         emitter.emit(
-            EventKind::Error,
             "sess-2".into(),
-            EventData::Error {
+            AgentEvent::Error {
                 error: "something went wrong".into(),
             },
         );
 
         let event = receiver.recv().await.unwrap();
-        assert_eq!(event.kind, EventKind::Error);
         assert!(
-            matches!(&event.data, EventData::Error { error } if error == "something went wrong")
+            matches!(&event.event, AgentEvent::Error { error } if error == "something went wrong")
         );
     }
 
@@ -80,12 +76,12 @@ mod tests {
         let mut rx1 = emitter.subscribe();
         let mut rx2 = emitter.subscribe();
 
-        emitter.emit(EventKind::SessionEnd, "sess-3".into(), EventData::Empty);
+        emitter.emit("sess-3".into(), AgentEvent::SessionEnded);
 
         let e1 = rx1.recv().await.unwrap();
         let e2 = rx2.recv().await.unwrap();
-        assert_eq!(e1.kind, EventKind::SessionEnd);
-        assert_eq!(e2.kind, EventKind::SessionEnd);
+        assert!(matches!(e1.event, AgentEvent::SessionEnded));
+        assert!(matches!(e2.event, AgentEvent::SessionEnded));
         assert_eq!(e1.session_id, "sess-3");
         assert_eq!(e2.session_id, "sess-3");
     }
@@ -94,9 +90,8 @@ mod tests {
     fn emit_without_subscribers_does_not_panic() {
         let emitter = EventEmitter::new();
         emitter.emit(
-            EventKind::Error,
             "sess-4".into(),
-            EventData::Error {
+            AgentEvent::Error {
                 error: "test".into(),
             },
         );

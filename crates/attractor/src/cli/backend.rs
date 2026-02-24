@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use agent::{
-    AnthropicProfile, DockerConfig, DockerExecutionEnvironment, EventData, EventKind,
+    AgentEvent, AnthropicProfile, DockerConfig, DockerExecutionEnvironment,
     ExecutionEnvironment, GeminiProfile, LocalExecutionEnvironment, OpenAiProfile, ProviderProfile,
     Session, SessionConfig, Turn,
 };
@@ -62,6 +62,7 @@ impl CodergenBackend for AgentBackend {
         prompt: &str,
         _context: &Context,
         _thread_id: Option<&str>,
+        emitter: &Arc<crate::event::EventEmitter>,
     ) -> Result<CodergenResult, AttractorError> {
         let client = Client::from_env()
             .await
@@ -90,23 +91,99 @@ impl CodergenBackend for AgentBackend {
 
         let mut session = Session::new(client, profile, exec_env, config);
 
-        // Subscribe to session events for real-time tool status on stderr.
+        // Subscribe to session events: forward to pipeline emitter and optionally print to stderr.
         let verbose = self.verbose;
-        if verbose >= 1 {
-            let node_id = node.id.clone();
-            let styles = self.styles;
-            let mut rx = session.subscribe();
-            tokio::spawn(async move {
-                while let Ok(event) = rx.recv().await {
-                    match (&event.kind, &event.data) {
-                        (
-                            EventKind::ToolCallStart,
-                            EventData::ToolCall {
-                                tool_name,
-                                arguments,
-                                ..
-                            },
-                        ) => {
+        let node_id = node.id.clone();
+        let styles = self.styles;
+        let pipeline_emitter = Arc::clone(emitter);
+        let mut rx = session.subscribe();
+        tokio::spawn(async move {
+            use crate::event::PipelineEvent;
+            while let Ok(event) = rx.recv().await {
+                // Forward agent events to pipeline events
+                match &event.event {
+                    AgentEvent::AssistantMessage {
+                        text,
+                        model,
+                        input_tokens,
+                        output_tokens,
+                        tool_call_count,
+                    } => {
+                        pipeline_emitter.emit(&PipelineEvent::AssistantMessage {
+                            stage: node_id.clone(),
+                            text: text.clone(),
+                            model: model.clone(),
+                            input_tokens: *input_tokens,
+                            output_tokens: *output_tokens,
+                            tool_call_count: *tool_call_count,
+                        });
+                    }
+                    AgentEvent::ToolCallStarted {
+                        tool_name,
+                        tool_call_id,
+                        arguments,
+                    } => {
+                        pipeline_emitter.emit(&PipelineEvent::ToolCallStarted {
+                            stage: node_id.clone(),
+                            tool_name: tool_name.clone(),
+                            tool_call_id: tool_call_id.clone(),
+                            arguments: arguments.clone(),
+                        });
+                    }
+                    AgentEvent::ToolCallCompleted {
+                        tool_name,
+                        tool_call_id,
+                        output,
+                        is_error,
+                    } => {
+                        pipeline_emitter.emit(&PipelineEvent::ToolCallCompleted {
+                            stage: node_id.clone(),
+                            tool_name: tool_name.clone(),
+                            tool_call_id: tool_call_id.clone(),
+                            output: output.clone(),
+                            is_error: *is_error,
+                        });
+                    }
+                    AgentEvent::Error { error } => {
+                        pipeline_emitter.emit(&PipelineEvent::SessionError {
+                            stage: node_id.clone(),
+                            error: error.clone(),
+                        });
+                    }
+                    AgentEvent::ContextWindowWarning {
+                        estimated_tokens,
+                        context_window_size,
+                        usage_percent,
+                    } => {
+                        pipeline_emitter.emit(&PipelineEvent::ContextWindowWarning {
+                            stage: node_id.clone(),
+                            estimated_tokens: *estimated_tokens,
+                            context_window_size: *context_window_size,
+                            usage_percent: *usage_percent,
+                        });
+                    }
+                    AgentEvent::LoopDetected => {
+                        pipeline_emitter.emit(&PipelineEvent::LoopDetected {
+                            stage: node_id.clone(),
+                        });
+                    }
+                    AgentEvent::TurnLimitReached => {
+                        pipeline_emitter.emit(&PipelineEvent::TurnLimitReached {
+                            stage: node_id.clone(),
+                        });
+                    }
+                    // Streaming events and session lifecycle not forwarded
+                    _ => {}
+                }
+
+                // Verbose stderr printing (gated on verbosity)
+                if verbose >= 1 {
+                    match &event.event {
+                        AgentEvent::ToolCallStarted {
+                            tool_name,
+                            arguments,
+                            ..
+                        } => {
                             eprintln!(
                                 "{dim}[{node_id}]{reset}   {dim}\u{25cf}{reset} {bold}{cyan}{tool_name}{reset}{dim}({args}){reset}",
                                 dim = styles.dim,
@@ -116,15 +193,12 @@ impl CodergenBackend for AgentBackend {
                                 args = format_tool_args(arguments),
                             );
                         }
-                        (
-                            EventKind::ToolCallEnd,
-                            EventData::ToolCallEnd {
-                                tool_name,
-                                output,
-                                is_error,
-                                ..
-                            },
-                        ) if verbose >= 2 => {
+                        AgentEvent::ToolCallCompleted {
+                            tool_name,
+                            output,
+                            is_error,
+                            ..
+                        } if verbose >= 2 => {
                             let label = if *is_error { "error" } else { "result" };
                             eprintln!(
                                 "{dim}[{node_id}]   [{label}] {tool_name}:{reset}\n{}",
@@ -134,7 +208,7 @@ impl CodergenBackend for AgentBackend {
                                 reset = styles.reset,
                             );
                         }
-                        (EventKind::Error, EventData::Error { error }) => {
+                        AgentEvent::Error { error } => {
                             eprintln!(
                                 "{dim}[{node_id}]{reset}   {red}\u{2717} {error}{reset}",
                                 dim = styles.dim,
@@ -145,8 +219,14 @@ impl CodergenBackend for AgentBackend {
                         _ => {}
                     }
                 }
-            });
-        }
+            }
+        });
+
+        // Emit Prompt event before processing
+        emitter.emit(&crate::event::PipelineEvent::Prompt {
+            stage: node.id.clone(),
+            text: prompt.to_string(),
+        });
 
         session.initialize().await;
         session.process_input(prompt).await.map_err(|e| {
