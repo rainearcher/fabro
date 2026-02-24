@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::bail;
-use chrono::Local;
+use chrono::{Local, Utc};
 use terminal::Styles;
 
 use crate::checkpoint::Checkpoint;
@@ -92,6 +92,39 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             }
         }
     });
+
+    // NDJSON progress log + live.json snapshot
+    {
+        let ndjson_path = logs_dir.join("progress.ndjson");
+        let live_path = logs_dir.join("live.json");
+        let run_id = Arc::new(Mutex::new(String::new()));
+        let run_id_clone = Arc::clone(&run_id);
+        emitter.on_event(move |event| {
+            if let crate::event::PipelineEvent::PipelineStarted { id, .. } = event {
+                *run_id_clone.lock().unwrap() = id.clone();
+            }
+            let envelope = serde_json::json!({
+                "timestamp": Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                "run_id": *run_id_clone.lock().unwrap(),
+                "event": event,
+            });
+            // Append to progress.ndjson
+            if let Ok(line) = serde_json::to_string(&envelope) {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&ndjson_path)
+                {
+                    let _ = writeln!(f, "{line}");
+                }
+            }
+            // Overwrite live.json
+            if let Ok(pretty) = serde_json::to_string_pretty(&envelope) {
+                let _ = std::fs::write(&live_path, pretty);
+            }
+        });
+    }
 
     if args.verbose >= 2 {
         emitter.on_event(move |event| {
