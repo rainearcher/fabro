@@ -187,7 +187,7 @@ pub async fn discover_skills(
         std::collections::HashMap::new();
 
     for dir in dirs {
-        let paths = match env.glob("*.md", Some(dir)).await {
+        let paths = match env.glob("*/SKILL.md", Some(dir)).await {
             Ok(paths) => paths,
             Err(_) => continue,
         };
@@ -402,12 +402,12 @@ name: trimmed
     async fn discover_loads_files() {
         let mut files = HashMap::new();
         files.insert(
-            "/skills/commit.md".into(),
+            "/skills/commit/SKILL.md".into(),
             "---\nname: commit\ndescription: Make a commit\n---\nDo commit".into(),
         );
         let env = MockExecutionEnvironment {
             files,
-            glob_results: vec!["/skills/commit.md".into()],
+            glob_results: vec!["/skills/commit/SKILL.md".into()],
             ..Default::default()
         };
 
@@ -421,13 +421,13 @@ name: trimmed
     async fn discover_skips_invalid() {
         let mut files = HashMap::new();
         files.insert(
-            "/skills/good.md".into(),
+            "/skills/good/SKILL.md".into(),
             "---\nname: good\n---\nGood template".into(),
         );
-        files.insert("/skills/bad.md".into(), "no frontmatter here".into());
+        files.insert("/skills/bad/SKILL.md".into(), "no frontmatter here".into());
         let env = MockExecutionEnvironment {
             files,
-            glob_results: vec!["/skills/good.md".into(), "/skills/bad.md".into()],
+            glob_results: vec!["/skills/good/SKILL.md".into(), "/skills/bad/SKILL.md".into()],
             ..Default::default()
         };
 
@@ -447,11 +447,11 @@ name: trimmed
     async fn discover_project_overrides_global() {
         let mut files = HashMap::new();
         files.insert(
-            "/global/commit.md".into(),
+            "/global/commit/SKILL.md".into(),
             "---\nname: commit\ndescription: Global commit\n---\nGlobal template".into(),
         );
         files.insert(
-            "/project/commit.md".into(),
+            "/project/commit/SKILL.md".into(),
             "---\nname: commit\ndescription: Project commit\n---\nProject template".into(),
         );
 
@@ -460,7 +460,7 @@ name: trimmed
         // and glob returns both — the later dir overrides the earlier.
         let env = MockExecutionEnvironment {
             files,
-            glob_results: vec!["/global/commit.md".into(), "/project/commit.md".into()],
+            glob_results: vec!["/global/commit/SKILL.md".into(), "/project/commit/SKILL.md".into()],
             ..Default::default()
         };
 
