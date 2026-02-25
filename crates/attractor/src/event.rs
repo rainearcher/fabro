@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use agent::AgentEvent;
 use crate::outcome::StageUsage;
-use llm::types::Usage;
 
 /// Events emitted during pipeline execution for observability.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,60 +107,10 @@ pub enum PipelineEvent {
         stage: String,
         text: String,
     },
-    AssistantMessage {
+    /// Forwarded from an agent session, tagged with the pipeline stage.
+    Agent {
         stage: String,
-        text: String,
-        model: String,
-        usage: Usage,
-        tool_call_count: usize,
-    },
-    ToolCallStarted {
-        stage: String,
-        tool_name: String,
-        tool_call_id: String,
-        arguments: serde_json::Value,
-    },
-    ToolCallCompleted {
-        stage: String,
-        tool_name: String,
-        tool_call_id: String,
-        output: serde_json::Value,
-        is_error: bool,
-    },
-    SessionError {
-        stage: String,
-        error: String,
-    },
-    ContextWindowWarning {
-        stage: String,
-        estimated_tokens: usize,
-        context_window_size: usize,
-        usage_percent: usize,
-    },
-    LoopDetected {
-        stage: String,
-    },
-    TurnLimitReached {
-        stage: String,
-    },
-    CompactionStarted {
-        stage: String,
-        estimated_tokens: usize,
-        context_window_size: usize,
-    },
-    CompactionCompleted {
-        stage: String,
-        original_turn_count: usize,
-        preserved_turn_count: usize,
-        summary_token_estimate: usize,
-    },
-    LlmRetry {
-        stage: String,
-        provider: String,
-        model: String,
-        attempt: usize,
-        delay_ms: u64,
-        error: String,
+        event: AgentEvent,
     },
     ParallelEarlyTermination {
         reason: String,
@@ -223,6 +173,7 @@ impl EventEmitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use llm::types::Usage;
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -287,39 +238,44 @@ mod tests {
     }
 
     #[test]
-    fn llm_conversation_event_serialization() {
-        let event = PipelineEvent::ToolCallStarted {
+    fn agent_event_wrapper_serialization() {
+        let event = PipelineEvent::Agent {
             stage: "plan".to_string(),
-            tool_name: "read_file".to_string(),
-            tool_call_id: "call_1".to_string(),
-            arguments: serde_json::json!({"path": "/tmp/test.txt"}),
+            event: AgentEvent::ToolCallStarted {
+                tool_name: "read_file".to_string(),
+                tool_call_id: "call_1".to_string(),
+                arguments: serde_json::json!({"path": "/tmp/test.txt"}),
+            },
         };
         let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("Agent"));
         assert!(json.contains("ToolCallStarted"));
         assert!(json.contains("read_file"));
         assert!(json.contains("plan"));
 
         // Verify round-trip
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::ToolCallStarted { stage, .. } if stage == "plan"));
+        assert!(matches!(deserialized, PipelineEvent::Agent { stage, .. } if stage == "plan"));
     }
 
     #[test]
-    fn assistant_message_event_serialization() {
-        let event = PipelineEvent::AssistantMessage {
+    fn agent_assistant_message_serialization() {
+        let event = PipelineEvent::Agent {
             stage: "code".to_string(),
-            text: "Here is the implementation".to_string(),
-            model: "claude-opus-4-6".to_string(),
-            usage: Usage {
-                input_tokens: 1000,
-                output_tokens: 500,
-                total_tokens: 1500,
-                cache_read_tokens: Some(800),
-                cache_write_tokens: Some(50),
-                reasoning_tokens: Some(100),
-                raw: None,
+            event: AgentEvent::AssistantMessage {
+                text: "Here is the implementation".to_string(),
+                model: "claude-opus-4-6".to_string(),
+                usage: Usage {
+                    input_tokens: 1000,
+                    output_tokens: 500,
+                    total_tokens: 1500,
+                    cache_read_tokens: Some(800),
+                    cache_write_tokens: Some(50),
+                    reasoning_tokens: Some(100),
+                    raw: None,
+                },
+                tool_call_count: 3,
             },
-            tool_call_count: 3,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("AssistantMessage"));
@@ -330,27 +286,29 @@ mod tests {
         // Round-trip
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
         match deserialized {
-            PipelineEvent::AssistantMessage { usage, .. } => {
+            PipelineEvent::Agent { event: AgentEvent::AssistantMessage { usage, .. }, .. } => {
                 assert_eq!(usage.cache_read_tokens, Some(800));
                 assert_eq!(usage.reasoning_tokens, Some(100));
             }
-            _ => panic!("expected AssistantMessage"),
+            _ => panic!("expected Agent(AssistantMessage)"),
         }
     }
 
     #[test]
-    fn assistant_message_without_cache_tokens_omits_them() {
-        let event = PipelineEvent::AssistantMessage {
+    fn agent_assistant_message_without_cache_tokens_omits_them() {
+        let event = PipelineEvent::Agent {
             stage: "code".to_string(),
-            text: "response".to_string(),
-            model: "test-model".to_string(),
-            usage: Usage {
-                input_tokens: 100,
-                output_tokens: 50,
-                total_tokens: 150,
-                ..Default::default()
+            event: AgentEvent::AssistantMessage {
+                text: "response".to_string(),
+                model: "test-model".to_string(),
+                usage: Usage {
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    total_tokens: 150,
+                    ..Default::default()
+                },
+                tool_call_count: 0,
             },
-            tool_call_count: 0,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(!json.contains("cache_read_tokens"));
@@ -478,27 +436,31 @@ mod tests {
     }
 
     #[test]
-    fn compaction_pipeline_event_serialization() {
-        let started = PipelineEvent::CompactionStarted {
+    fn agent_compaction_event_serialization() {
+        let started = PipelineEvent::Agent {
             stage: "code".to_string(),
-            estimated_tokens: 5000,
-            context_window_size: 8000,
+            event: AgentEvent::CompactionStarted {
+                estimated_tokens: 5000,
+                context_window_size: 8000,
+            },
         };
         let json = serde_json::to_string(&started).unwrap();
         assert!(json.contains("CompactionStarted"));
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::CompactionStarted { stage, .. } if stage == "code"));
+        assert!(matches!(deserialized, PipelineEvent::Agent { stage, .. } if stage == "code"));
 
-        let completed = PipelineEvent::CompactionCompleted {
+        let completed = PipelineEvent::Agent {
             stage: "code".to_string(),
-            original_turn_count: 20,
-            preserved_turn_count: 6,
-            summary_token_estimate: 500,
+            event: AgentEvent::CompactionCompleted {
+                original_turn_count: 20,
+                preserved_turn_count: 6,
+                summary_token_estimate: 500,
+            },
         };
         let json = serde_json::to_string(&completed).unwrap();
         assert!(json.contains("CompactionCompleted"));
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::CompactionCompleted { stage, .. } if stage == "code"));
+        assert!(matches!(deserialized, PipelineEvent::Agent { stage, .. } if stage == "code"));
     }
 
     #[test]
@@ -566,22 +528,24 @@ mod tests {
     }
 
     #[test]
-    fn llm_retry_event_serialization() {
-        let event = PipelineEvent::LlmRetry {
+    fn agent_llm_retry_event_serialization() {
+        let event = PipelineEvent::Agent {
             stage: "code".to_string(),
-            provider: "anthropic".to_string(),
-            model: "claude-opus-4-6".to_string(),
-            attempt: 2,
-            delay_ms: 1500,
-            error: "rate limited".to_string(),
+            event: AgentEvent::LlmRetry {
+                provider: "anthropic".to_string(),
+                model: "claude-opus-4-6".to_string(),
+                attempt: 2,
+                delay_secs: 1.5,
+                error: "rate limited".to_string(),
+            },
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("LlmRetry"));
         assert!(json.contains("\"provider\":\"anthropic\""));
-        assert!(json.contains("\"delay_ms\":1500"));
+        assert!(json.contains("\"delay_secs\":1.5"));
 
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(deserialized, PipelineEvent::LlmRetry { attempt: 2, .. }));
+        assert!(matches!(deserialized, PipelineEvent::Agent { stage, .. } if stage == "code"));
     }
 
     #[test]

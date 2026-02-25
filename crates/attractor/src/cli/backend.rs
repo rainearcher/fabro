@@ -109,28 +109,13 @@ impl CodergenBackend for AgentBackend {
         tokio::spawn(async move {
             use crate::event::PipelineEvent;
             while let Ok(event) = rx.recv().await {
-                // Forward agent events to pipeline events
+                // Track file changes from tool calls
                 match &event.event {
-                    AgentEvent::AssistantMessage {
-                        text,
-                        model,
-                        usage,
-                        tool_call_count,
-                    } => {
-                        pipeline_emitter.emit(&PipelineEvent::AssistantMessage {
-                            stage: node_id.clone(),
-                            text: text.clone(),
-                            model: model.clone(),
-                            usage: usage.clone(),
-                            tool_call_count: *tool_call_count,
-                        });
-                    }
                     AgentEvent::ToolCallStarted {
                         tool_name,
                         tool_call_id,
                         arguments,
                     } => {
-                        // Track file paths from write_file/edit_file tool calls
                         if tool_name == "write_file" || tool_name == "edit_file" {
                             if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str()) {
                                 pending_clone.lock().unwrap().insert(
@@ -139,20 +124,12 @@ impl CodergenBackend for AgentBackend {
                                 );
                             }
                         }
-                        pipeline_emitter.emit(&PipelineEvent::ToolCallStarted {
-                            stage: node_id.clone(),
-                            tool_name: tool_name.clone(),
-                            tool_call_id: tool_call_id.clone(),
-                            arguments: arguments.clone(),
-                        });
                     }
                     AgentEvent::ToolCallCompleted {
-                        tool_name,
                         tool_call_id,
-                        output,
                         is_error,
+                        ..
                     } => {
-                        // On successful completion, move file from pending to touched
                         if !*is_error {
                             if let Some(path) = pending_clone.lock().unwrap().remove(tool_call_id) {
                                 files_clone.lock().unwrap().insert(path);
@@ -160,82 +137,26 @@ impl CodergenBackend for AgentBackend {
                         } else {
                             pending_clone.lock().unwrap().remove(tool_call_id);
                         }
-                        pipeline_emitter.emit(&PipelineEvent::ToolCallCompleted {
-                            stage: node_id.clone(),
-                            tool_name: tool_name.clone(),
-                            tool_call_id: tool_call_id.clone(),
-                            output: output.clone(),
-                            is_error: *is_error,
-                        });
                     }
-                    AgentEvent::Error { error } => {
-                        pipeline_emitter.emit(&PipelineEvent::SessionError {
-                            stage: node_id.clone(),
-                            error: error.clone(),
-                        });
-                    }
-                    AgentEvent::ContextWindowWarning {
-                        estimated_tokens,
-                        context_window_size,
-                        usage_percent,
-                    } => {
-                        pipeline_emitter.emit(&PipelineEvent::ContextWindowWarning {
-                            stage: node_id.clone(),
-                            estimated_tokens: *estimated_tokens,
-                            context_window_size: *context_window_size,
-                            usage_percent: *usage_percent,
-                        });
-                    }
-                    AgentEvent::LoopDetected => {
-                        pipeline_emitter.emit(&PipelineEvent::LoopDetected {
-                            stage: node_id.clone(),
-                        });
-                    }
-                    AgentEvent::TurnLimitReached => {
-                        pipeline_emitter.emit(&PipelineEvent::TurnLimitReached {
-                            stage: node_id.clone(),
-                        });
-                    }
-                    AgentEvent::CompactionStarted {
-                        estimated_tokens,
-                        context_window_size,
-                    } => {
-                        pipeline_emitter.emit(&PipelineEvent::CompactionStarted {
-                            stage: node_id.clone(),
-                            estimated_tokens: *estimated_tokens,
-                            context_window_size: *context_window_size,
-                        });
-                    }
-                    AgentEvent::CompactionCompleted {
-                        original_turn_count,
-                        preserved_turn_count,
-                        summary_token_estimate,
-                    } => {
-                        pipeline_emitter.emit(&PipelineEvent::CompactionCompleted {
-                            stage: node_id.clone(),
-                            original_turn_count: *original_turn_count,
-                            preserved_turn_count: *preserved_turn_count,
-                            summary_token_estimate: *summary_token_estimate,
-                        });
-                    }
-                    AgentEvent::LlmRetry {
-                        provider,
-                        model,
-                        attempt,
-                        delay_secs,
-                        error,
-                    } => {
-                        pipeline_emitter.emit(&PipelineEvent::LlmRetry {
-                            stage: node_id.clone(),
-                            provider: provider.clone(),
-                            model: model.clone(),
-                            attempt: *attempt,
-                            delay_ms: (*delay_secs * 1000.0) as u64,
-                            error: error.clone(),
-                        });
-                    }
-                    // Streaming events and session lifecycle not forwarded
                     _ => {}
+                }
+
+                // Forward non-streaming agent events to pipeline
+                if !matches!(
+                    &event.event,
+                    AgentEvent::SessionStarted
+                        | AgentEvent::SessionEnded
+                        | AgentEvent::UserInput
+                        | AgentEvent::AssistantTextStart
+                        | AgentEvent::TextDelta { .. }
+                        | AgentEvent::ToolCallOutputDelta { .. }
+                        | AgentEvent::SkillExpanded { .. }
+                        | AgentEvent::SteeringInjected
+                ) {
+                    pipeline_emitter.emit(&PipelineEvent::Agent {
+                        stage: node_id.clone(),
+                        event: event.event.clone(),
+                    });
                 }
 
                 // Verbose stderr printing (gated on verbosity)

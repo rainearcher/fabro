@@ -10,6 +10,7 @@ use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 use terminal::Styles;
 
+use agent::AgentEvent;
 use crate::event::PipelineEvent;
 use crate::outcome::StageUsage;
 use crate::validation::{Diagnostic, Severity};
@@ -320,79 +321,44 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             let truncated = if text.len() > 80 { &text[..80] } else { text };
             format!("[PROMPT] stage={stage} text=\"{truncated}\"")
         }
-        PipelineEvent::AssistantMessage {
-            stage,
-            model,
-            usage,
-            tool_call_count,
-            ..
-        } => {
-            let total = usage.input_tokens + usage.output_tokens;
-            let tokens_str = format_tokens_human(total);
-            let mut s = format!("[ASSISTANT_MESSAGE] stage={stage} model={model} tokens={tokens_str} tool_calls={tool_call_count}");
-            if let Some(cache_read) = usage.cache_read_tokens {
-                s.push_str(&format!(" cache_read={}", format_tokens_human(cache_read)));
+        PipelineEvent::Agent { stage, event } => match event {
+            AgentEvent::AssistantMessage { model, usage, tool_call_count, .. } => {
+                let total = usage.input_tokens + usage.output_tokens;
+                let tokens_str = format_tokens_human(total);
+                let mut s = format!("[ASSISTANT_MESSAGE] stage={stage} model={model} tokens={tokens_str} tool_calls={tool_call_count}");
+                if let Some(cache_read) = usage.cache_read_tokens {
+                    s.push_str(&format!(" cache_read={}", format_tokens_human(cache_read)));
+                }
+                if let Some(reasoning) = usage.reasoning_tokens {
+                    s.push_str(&format!(" reasoning={}", format_tokens_human(reasoning)));
+                }
+                s
             }
-            if let Some(reasoning) = usage.reasoning_tokens {
-                s.push_str(&format!(" reasoning={}", format_tokens_human(reasoning)));
+            AgentEvent::ToolCallStarted { tool_name, .. } => {
+                format!("[TOOL_CALL_STARTED] stage={stage} tool={tool_name}")
             }
-            s
-        }
-        PipelineEvent::ToolCallStarted {
-            stage,
-            tool_name,
-            ..
-        } => {
-            format!("[TOOL_CALL_STARTED] stage={stage} tool={tool_name}")
-        }
-        PipelineEvent::ToolCallCompleted {
-            stage,
-            tool_name,
-            is_error,
-            ..
-        } => {
-            format!("[TOOL_CALL_COMPLETED] stage={stage} tool={tool_name} is_error={is_error}")
-        }
-        PipelineEvent::SessionError { stage, error } => {
-            format!("[SESSION_ERROR] stage={stage} error=\"{error}\"")
-        }
-        PipelineEvent::ContextWindowWarning {
-            stage,
-            usage_percent,
-            ..
-        } => {
-            format!("[CONTEXT_WINDOW_WARNING] stage={stage} usage={usage_percent}%")
-        }
-        PipelineEvent::LoopDetected { stage } => {
-            format!("[LOOP_DETECTED] stage={stage}")
-        }
-        PipelineEvent::TurnLimitReached { stage } => {
-            format!("[TURN_LIMIT_REACHED] stage={stage}")
-        }
-        PipelineEvent::CompactionStarted {
-            stage,
-            estimated_tokens,
-            context_window_size,
-        } => {
-            format!("[COMPACTION_STARTED] stage={stage} estimated_tokens={estimated_tokens} context_window={context_window_size}")
-        }
-        PipelineEvent::CompactionCompleted {
-            stage,
-            original_turn_count,
-            preserved_turn_count,
-            summary_token_estimate,
-        } => {
-            format!("[COMPACTION_COMPLETED] stage={stage} original_turns={original_turn_count} preserved_turns={preserved_turn_count} summary_tokens={summary_token_estimate}")
-        }
-        PipelineEvent::LlmRetry {
-            stage,
-            provider,
-            model,
-            attempt,
-            delay_ms,
-            error,
-        } => {
-            format!("[LLM_RETRY] stage={stage} provider={provider} model={model} attempt={attempt} delay={delay_ms}ms error=\"{error}\"")
+            AgentEvent::ToolCallCompleted { tool_name, is_error, .. } => {
+                format!("[TOOL_CALL_COMPLETED] stage={stage} tool={tool_name} is_error={is_error}")
+            }
+            AgentEvent::Error { error } => {
+                format!("[SESSION_ERROR] stage={stage} error=\"{error}\"")
+            }
+            AgentEvent::ContextWindowWarning { usage_percent, .. } => {
+                format!("[CONTEXT_WINDOW_WARNING] stage={stage} usage={usage_percent}%")
+            }
+            AgentEvent::LoopDetected => format!("[LOOP_DETECTED] stage={stage}"),
+            AgentEvent::TurnLimitReached => format!("[TURN_LIMIT_REACHED] stage={stage}"),
+            AgentEvent::CompactionStarted { estimated_tokens, context_window_size } => {
+                format!("[COMPACTION_STARTED] stage={stage} estimated_tokens={estimated_tokens} context_window={context_window_size}")
+            }
+            AgentEvent::CompactionCompleted { original_turn_count, preserved_turn_count, summary_token_estimate } => {
+                format!("[COMPACTION_COMPLETED] stage={stage} original_turns={original_turn_count} preserved_turns={preserved_turn_count} summary_tokens={summary_token_estimate}")
+            }
+            AgentEvent::LlmRetry { provider, model, attempt, delay_secs, error } => {
+                let delay_ms = (*delay_secs * 1000.0) as u64;
+                format!("[LLM_RETRY] stage={stage} provider={provider} model={model} attempt={attempt} delay={delay_ms}ms error=\"{error}\"")
+            }
+            other => format!("[AGENT] stage={stage} event={other:?}"),
         }
         PipelineEvent::ParallelEarlyTermination {
             reason,
@@ -591,94 +557,60 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
         PipelineEvent::Prompt { stage, text } => {
             format!("{d}── PROMPT ───────────────────────────────────{r}\n  {d}stage:{r} {stage}\n  {d}text:{r}\n{text}\n")
         }
-        PipelineEvent::AssistantMessage {
-            stage,
-            text,
-            model,
-            usage,
-            tool_call_count,
-        } => {
-            let total = usage.input_tokens + usage.output_tokens;
-            let truncated = if text.len() > 200 { &text[..200] } else { text.as_str() };
-            let mut s = format!("{d}── ASSISTANT_MESSAGE ────────────────────────{r}\n  {d}stage:{r}       {stage}\n  {d}model:{r}       {model}\n  {d}tokens:{r}      {} ({} in / {} out)\n  {d}tool_calls:{r}  {tool_call_count}\n",
-                format_tokens_human(total),
-                format_tokens_human(usage.input_tokens),
-                format_tokens_human(usage.output_tokens),
-            );
-            if let Some(cache_read) = usage.cache_read_tokens {
-                s.push_str(&format!("  {d}cache_read:{r}  {}\n", format_tokens_human(cache_read)));
+        PipelineEvent::Agent { stage, event } => match event {
+            AgentEvent::AssistantMessage { text, model, usage, tool_call_count } => {
+                let total = usage.input_tokens + usage.output_tokens;
+                let truncated = if text.len() > 200 { &text[..200] } else { text.as_str() };
+                let mut s = format!("{d}── ASSISTANT_MESSAGE ────────────────────────{r}\n  {d}stage:{r}       {stage}\n  {d}model:{r}       {model}\n  {d}tokens:{r}      {} ({} in / {} out)\n  {d}tool_calls:{r}  {tool_call_count}\n",
+                    format_tokens_human(total),
+                    format_tokens_human(usage.input_tokens),
+                    format_tokens_human(usage.output_tokens),
+                );
+                if let Some(cache_read) = usage.cache_read_tokens {
+                    s.push_str(&format!("  {d}cache_read:{r}  {}\n", format_tokens_human(cache_read)));
+                }
+                if let Some(cache_write) = usage.cache_write_tokens {
+                    s.push_str(&format!("  {d}cache_write:{r} {}\n", format_tokens_human(cache_write)));
+                }
+                if let Some(reasoning) = usage.reasoning_tokens {
+                    s.push_str(&format!("  {d}reasoning:{r}   {}\n", format_tokens_human(reasoning)));
+                }
+                s.push_str(&format!("  {d}text:{r}        {truncated}\n"));
+                s
             }
-            if let Some(cache_write) = usage.cache_write_tokens {
-                s.push_str(&format!("  {d}cache_write:{r} {}\n", format_tokens_human(cache_write)));
+            AgentEvent::ToolCallStarted { tool_name, tool_call_id, arguments } => {
+                let args_str = serde_json::to_string(arguments).unwrap_or_else(|_| arguments.to_string());
+                let truncated = if args_str.len() > 200 { &args_str[..200] } else { &args_str };
+                format!("{d}── TOOL_CALL_STARTED ────────────────────────{r}\n  {d}stage:{r}        {stage}\n  {d}tool_name:{r}    {tool_name}\n  {d}tool_call_id:{r} {tool_call_id}\n  {d}arguments:{r}    {truncated}\n")
             }
-            if let Some(reasoning) = usage.reasoning_tokens {
-                s.push_str(&format!("  {d}reasoning:{r}   {}\n", format_tokens_human(reasoning)));
+            AgentEvent::ToolCallCompleted { tool_name, tool_call_id, output, is_error } => {
+                let output_str = serde_json::to_string(output).unwrap_or_else(|_| output.to_string());
+                let truncated = if output_str.len() > 200 { &output_str[..200] } else { &output_str };
+                format!("{d}── TOOL_CALL_COMPLETED ──────────────────────{r}\n  {d}stage:{r}        {stage}\n  {d}tool_name:{r}    {tool_name}\n  {d}tool_call_id:{r} {tool_call_id}\n  {d}is_error:{r}     {is_error}\n  {d}output:{r}       {truncated}\n")
             }
-            s.push_str(&format!("  {d}text:{r}        {truncated}\n"));
-            s
-        }
-        PipelineEvent::ToolCallStarted {
-            stage,
-            tool_name,
-            tool_call_id,
-            arguments,
-        } => {
-            let args_str = serde_json::to_string(arguments).unwrap_or_else(|_| arguments.to_string());
-            let truncated = if args_str.len() > 200 { &args_str[..200] } else { &args_str };
-            format!("{d}── TOOL_CALL_STARTED ────────────────────────{r}\n  {d}stage:{r}        {stage}\n  {d}tool_name:{r}    {tool_name}\n  {d}tool_call_id:{r} {tool_call_id}\n  {d}arguments:{r}    {truncated}\n")
-        }
-        PipelineEvent::ToolCallCompleted {
-            stage,
-            tool_name,
-            tool_call_id,
-            output,
-            is_error,
-        } => {
-            let output_str = serde_json::to_string(output).unwrap_or_else(|_| output.to_string());
-            let truncated = if output_str.len() > 200 { &output_str[..200] } else { &output_str };
-            format!("{d}── TOOL_CALL_COMPLETED ──────────────────────{r}\n  {d}stage:{r}        {stage}\n  {d}tool_name:{r}    {tool_name}\n  {d}tool_call_id:{r} {tool_call_id}\n  {d}is_error:{r}     {is_error}\n  {d}output:{r}       {truncated}\n")
-        }
-        PipelineEvent::SessionError { stage, error } => {
-            format!("{d}── SESSION_ERROR ────────────────────────────{r}\n  {d}stage:{r} {stage}\n  {d}error:{r} {error}\n")
-        }
-        PipelineEvent::ContextWindowWarning {
-            stage,
-            estimated_tokens,
-            context_window_size,
-            usage_percent,
-        } => {
-            format!("{d}── CONTEXT_WINDOW_WARNING ───────────────────{r}\n  {d}stage:{r}               {stage}\n  {d}estimated_tokens:{r}    {estimated_tokens}\n  {d}context_window_size:{r} {context_window_size}\n  {d}usage_percent:{r}       {usage_percent}%\n")
-        }
-        PipelineEvent::LoopDetected { stage } => {
-            format!("{d}── LOOP_DETECTED ────────────────────────────{r}\n  {d}stage:{r} {stage}\n")
-        }
-        PipelineEvent::TurnLimitReached { stage } => {
-            format!("{d}── TURN_LIMIT_REACHED ───────────────────────{r}\n  {d}stage:{r} {stage}\n")
-        }
-        PipelineEvent::CompactionStarted {
-            stage,
-            estimated_tokens,
-            context_window_size,
-        } => {
-            format!("{d}── COMPACTION_STARTED ───────────────────────{r}\n  {d}stage:{r}               {stage}\n  {d}estimated_tokens:{r}    {estimated_tokens}\n  {d}context_window_size:{r} {context_window_size}\n")
-        }
-        PipelineEvent::CompactionCompleted {
-            stage,
-            original_turn_count,
-            preserved_turn_count,
-            summary_token_estimate,
-        } => {
-            format!("{d}── COMPACTION_COMPLETED ─────────────────────{r}\n  {d}stage:{r}                  {stage}\n  {d}original_turn_count:{r}    {original_turn_count}\n  {d}preserved_turn_count:{r}   {preserved_turn_count}\n  {d}summary_token_estimate:{r} {summary_token_estimate}\n")
-        }
-        PipelineEvent::LlmRetry {
-            stage,
-            provider,
-            model,
-            attempt,
-            delay_ms,
-            error,
-        } => {
-            format!("{d}── LLM_RETRY ────────────────────────────────{r}\n  {d}stage:{r}    {stage}\n  {d}provider:{r} {provider}\n  {d}model:{r}    {model}\n  {d}attempt:{r}  {attempt}\n  {d}delay_ms:{r} {delay_ms}\n  {d}error:{r}    {error}\n")
+            AgentEvent::Error { error } => {
+                format!("{d}── SESSION_ERROR ────────────────────────────{r}\n  {d}stage:{r} {stage}\n  {d}error:{r} {error}\n")
+            }
+            AgentEvent::ContextWindowWarning { estimated_tokens, context_window_size, usage_percent } => {
+                format!("{d}── CONTEXT_WINDOW_WARNING ───────────────────{r}\n  {d}stage:{r}               {stage}\n  {d}estimated_tokens:{r}    {estimated_tokens}\n  {d}context_window_size:{r} {context_window_size}\n  {d}usage_percent:{r}       {usage_percent}%\n")
+            }
+            AgentEvent::LoopDetected => {
+                format!("{d}── LOOP_DETECTED ────────────────────────────{r}\n  {d}stage:{r} {stage}\n")
+            }
+            AgentEvent::TurnLimitReached => {
+                format!("{d}── TURN_LIMIT_REACHED ───────────────────────{r}\n  {d}stage:{r} {stage}\n")
+            }
+            AgentEvent::CompactionStarted { estimated_tokens, context_window_size } => {
+                format!("{d}── COMPACTION_STARTED ───────────────────────{r}\n  {d}stage:{r}               {stage}\n  {d}estimated_tokens:{r}    {estimated_tokens}\n  {d}context_window_size:{r} {context_window_size}\n")
+            }
+            AgentEvent::CompactionCompleted { original_turn_count, preserved_turn_count, summary_token_estimate } => {
+                format!("{d}── COMPACTION_COMPLETED ─────────────────────{r}\n  {d}stage:{r}                  {stage}\n  {d}original_turn_count:{r}    {original_turn_count}\n  {d}preserved_turn_count:{r}   {preserved_turn_count}\n  {d}summary_token_estimate:{r} {summary_token_estimate}\n")
+            }
+            AgentEvent::LlmRetry { provider, model, attempt, delay_secs, error } => {
+                let delay_ms = (*delay_secs * 1000.0) as u64;
+                format!("{d}── LLM_RETRY ────────────────────────────────{r}\n  {d}stage:{r}    {stage}\n  {d}provider:{r} {provider}\n  {d}model:{r}    {model}\n  {d}attempt:{r}  {attempt}\n  {d}delay_ms:{r} {delay_ms}\n  {d}error:{r}    {error}\n")
+            }
+            other => format!("{d}── AGENT ────────────────────────────────────{r}\n  {d}stage:{r} {stage}\n  {d}event:{r} {other:?}\n"),
         }
         PipelineEvent::ParallelEarlyTermination {
             reason,

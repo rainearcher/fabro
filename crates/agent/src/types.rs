@@ -1,5 +1,6 @@
 use std::time::SystemTime;
 use llm::types::{ContentPart, ToolCall, ToolResult, Usage};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub enum Turn {
@@ -43,7 +44,7 @@ pub enum SessionState {
     Closed,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentEvent {
     SessionStarted,
     SessionEnded,
