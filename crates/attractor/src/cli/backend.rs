@@ -280,20 +280,8 @@ impl CodergenBackend for AgentBackend {
         })?;
 
         // Aggregate token usage from all assistant turns.
-        let (mut turn_count, mut tool_call_count, mut input_tokens, mut output_tokens) =
-            (0usize, 0usize, 0i64, 0i64);
-        let (mut cache_read_tokens, mut cache_write_tokens, mut reasoning_tokens): (
-            Option<i64>,
-            Option<i64>,
-            Option<i64>,
-        ) = (None, None, None);
-
-        fn add_optional(acc: &mut Option<i64>, val: Option<i64>) {
-            if let Some(v) = val {
-                *acc = Some(acc.unwrap_or(0) + v);
-            }
-        }
-
+        let (mut turn_count, mut tool_call_count) = (0usize, 0usize);
+        let mut total_usage = llm::types::Usage::default();
         for turn in session.history().turns() {
             if let Turn::Assistant {
                 tool_calls, usage, ..
@@ -301,26 +289,22 @@ impl CodergenBackend for AgentBackend {
             {
                 turn_count += 1;
                 tool_call_count += tool_calls.len();
-                input_tokens += usage.input_tokens;
-                output_tokens += usage.output_tokens;
-                add_optional(&mut cache_read_tokens, usage.cache_read_tokens);
-                add_optional(&mut cache_write_tokens, usage.cache_write_tokens);
-                add_optional(&mut reasoning_tokens, usage.reasoning_tokens);
+                total_usage = total_usage + usage.clone();
             }
         }
 
         let stage_usage = StageUsage {
             model: self.model.clone(),
-            input_tokens,
-            output_tokens,
-            cache_read_tokens,
-            cache_write_tokens,
-            reasoning_tokens,
+            input_tokens: total_usage.input_tokens,
+            output_tokens: total_usage.output_tokens,
+            cache_read_tokens: total_usage.cache_read_tokens,
+            cache_write_tokens: total_usage.cache_write_tokens,
+            reasoning_tokens: total_usage.reasoning_tokens,
         };
 
         // Print session summary to stderr.
         if self.verbose >= 1 {
-            let total_tokens = input_tokens + output_tokens;
+            let total_tokens = total_usage.input_tokens + total_usage.output_tokens;
             let token_str = if total_tokens >= 1000 {
                 format!("{}k tokens", total_tokens / 1000)
             } else {

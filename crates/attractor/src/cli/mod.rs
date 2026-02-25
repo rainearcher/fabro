@@ -178,11 +178,12 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
         PipelineEvent::PipelineFailed { error, duration_ms } => {
             format!("[PIPELINE_FAILED] error=\"{error}\" duration={duration_ms}ms")
         }
-        PipelineEvent::StageStarted { name, index, handler_type } => {
+        PipelineEvent::StageStarted { name, index, handler_type, attempt, max_attempts } => {
             let mut s = format!("[STAGE_STARTED] name={name} index={index}");
             if let Some(ht) = handler_type {
                 s.push_str(&format!(" handler_type={ht}"));
             }
+            s.push_str(&format!(" attempt={attempt}/{max_attempts}"));
             s
         }
         PipelineEvent::StageCompleted {
@@ -196,6 +197,8 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             failure_reason,
             notes,
             files_touched,
+            attempt,
+            max_attempts,
         } => {
             let mut s = format!("[STAGE_COMPLETED] name={name} index={index} duration={duration_ms}ms status={status}");
             if let Some(label) = preferred_label {
@@ -222,6 +225,7 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             if !files_touched.is_empty() {
                 s.push_str(&format!(" files_touched={}", files_touched.len()));
             }
+            s.push_str(&format!(" attempt={attempt}/{max_attempts}"));
             s
         }
         PipelineEvent::StageFailed {
@@ -243,10 +247,11 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             name,
             index,
             attempt,
+            max_attempts,
             delay_ms,
         } => {
             format!(
-                "[STAGE_RETRYING] name={name} index={index} attempt={attempt} delay={delay_ms}ms"
+                "[STAGE_RETRYING] name={name} index={index} attempt={attempt}/{max_attempts} delay={delay_ms}ms"
             )
         }
         PipelineEvent::ParallelStarted { branch_count, join_policy, error_policy } => {
@@ -289,6 +294,19 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
         }
         PipelineEvent::CheckpointSaved { node_id } => {
             format!("[CHECKPOINT_SAVED] node={node_id}")
+        }
+        PipelineEvent::EdgeSelected { from_node, to_node, label, condition } => {
+            let mut s = format!("[EDGE_SELECTED] from={from_node} to={to_node}");
+            if let Some(l) = label {
+                s.push_str(&format!(" label=\"{l}\""));
+            }
+            if let Some(c) = condition {
+                s.push_str(&format!(" condition=\"{c}\""));
+            }
+            s
+        }
+        PipelineEvent::LoopRestart { from_node, to_node } => {
+            format!("[LOOP_RESTART] from={from_node} to={to_node}")
         }
         PipelineEvent::Prompt { stage, text } => {
             let truncated = if text.len() > 80 { &text[..80] } else { text };
@@ -384,13 +402,14 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
         PipelineEvent::PipelineFailed { error, duration_ms } => {
             format!("{d}── PIPELINE_FAILED ──────────────────────────{r}\n  {d}error:{r}       {error}\n  {d}duration_ms:{r} {duration_ms}\n")
         }
-        PipelineEvent::StageStarted { name, index, handler_type } => {
+        PipelineEvent::StageStarted { name, index, handler_type, attempt, max_attempts } => {
             let mut s = format!(
                 "{d}── STAGE_STARTED ────────────────────────────{r}\n  {d}name:{r}  {name}\n  {d}index:{r} {index}\n"
             );
             if let Some(ht) = handler_type {
                 s.push_str(&format!("  {d}handler_type:{r} {ht}\n"));
             }
+            s.push_str(&format!("  {d}attempt:{r}      {attempt}/{max_attempts}\n"));
             s
         }
         PipelineEvent::StageCompleted {
@@ -404,6 +423,8 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             failure_reason,
             notes,
             files_touched,
+            attempt,
+            max_attempts,
         } => {
             let mut s = format!("{d}── STAGE_COMPLETED ──────────────────────────{r}\n  {d}name:{r}        {name}\n  {d}index:{r}       {index}\n  {d}duration_ms:{r} {duration_ms}\n  {d}status:{r}      {status}\n");
             if let Some(label) = preferred_label {
@@ -442,6 +463,7 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             if let Some(n) = notes {
                 s.push_str(&format!("  {d}notes:{r}       {n}\n"));
             }
+            s.push_str(&format!("  {d}attempt:{r}     {attempt}/{max_attempts}\n"));
             s
         }
         PipelineEvent::StageFailed {
@@ -461,9 +483,10 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             name,
             index,
             attempt,
+            max_attempts,
             delay_ms,
         } => {
-            format!("{d}── STAGE_RETRYING ───────────────────────────{r}\n  {d}name:{r}     {name}\n  {d}index:{r}    {index}\n  {d}attempt:{r}  {attempt}\n  {d}delay_ms:{r} {delay_ms}\n")
+            format!("{d}── STAGE_RETRYING ───────────────────────────{r}\n  {d}name:{r}     {name}\n  {d}index:{r}    {index}\n  {d}attempt:{r}  {attempt}/{max_attempts}\n  {d}delay_ms:{r} {delay_ms}\n")
         }
         PipelineEvent::ParallelStarted { branch_count, join_policy, error_policy } => {
             format!("{d}── PARALLEL_STARTED ─────────────────────────{r}\n  {d}branch_count:{r} {branch_count}\n  {d}join_policy:{r}  {join_policy}\n  {d}error_policy:{r} {error_policy}\n")
@@ -507,6 +530,19 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             format!(
                 "{d}── CHECKPOINT_SAVED ─────────────────────────{r}\n  {d}node_id:{r} {node_id}\n"
             )
+        }
+        PipelineEvent::EdgeSelected { from_node, to_node, label, condition } => {
+            let mut s = format!("{d}── EDGE_SELECTED ────────────────────────────{r}\n  {d}from:{r} {from_node}\n  {d}to:{r}   {to_node}\n");
+            if let Some(l) = label {
+                s.push_str(&format!("  {d}label:{r}     {l}\n"));
+            }
+            if let Some(c) = condition {
+                s.push_str(&format!("  {d}condition:{r} {c}\n"));
+            }
+            s
+        }
+        PipelineEvent::LoopRestart { from_node, to_node } => {
+            format!("{d}── LOOP_RESTART ─────────────────────────────{r}\n  {d}from:{r} {from_node}\n  {d}to:{r}   {to_node}\n")
         }
         PipelineEvent::Prompt { stage, text } => {
             format!("{d}── PROMPT ───────────────────────────────────{r}\n  {d}stage:{r} {stage}\n  {d}text:{r}\n{text}\n")

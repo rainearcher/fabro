@@ -572,6 +572,7 @@ impl PipelineEngine {
                             name: node.label().to_string(),
                             index: stage_index,
                             attempt: usize::try_from(attempt).unwrap_or(usize::MAX),
+                            max_attempts: usize::try_from(policy.max_attempts).unwrap_or(usize::MAX),
                             delay_ms: millis_u64(delay),
                         });
                         tokio::time::sleep(delay).await;
@@ -595,6 +596,7 @@ impl PipelineEngine {
                             name: node.label().to_string(),
                             index: stage_index,
                             attempt: usize::try_from(attempt).unwrap_or(usize::MAX),
+                            max_attempts: usize::try_from(policy.max_attempts).unwrap_or(usize::MAX),
                             delay_ms: millis_u64(delay),
                         });
                         tokio::time::sleep(delay).await;
@@ -811,6 +813,8 @@ impl PipelineEngine {
                 name: node.label().to_string(),
                 index: stage_index,
                 handler_type: node.handler_type().map(String::from),
+                attempt: 1,
+                max_attempts: usize::try_from(retry_policy.max_attempts).unwrap_or(usize::MAX),
             });
             if node.handler_type() != Some("wait.human") {
                 self.inform(
@@ -866,6 +870,8 @@ impl PipelineEngine {
                     failure_reason: outcome.failure_reason.clone(),
                     notes: outcome.notes.clone(),
                     files_touched: outcome.files_touched.clone(),
+                    attempt: usize::try_from(attempts_used).unwrap_or(usize::MAX),
+                    max_attempts: usize::try_from(retry_policy.max_attempts).unwrap_or(usize::MAX),
                 });
                 self.inform(
                     &format!("Stage completed: {}", node.label()),
@@ -891,6 +897,14 @@ impl PipelineEngine {
 
             // Step 5: Select next edge (done before checkpoint so we can store next_node_id)
             let next_edge = select_edge(&node.id, &outcome, &context, graph);
+            if let Some(edge) = next_edge {
+                self.services.emitter.emit(&PipelineEvent::EdgeSelected {
+                    from_node: node.id.clone(),
+                    to_node: edge.to.clone(),
+                    label: edge.label().map(String::from),
+                    condition: edge.condition().map(String::from),
+                });
+            }
             let next_node_id_for_checkpoint = next_edge.map(|e| e.to.clone());
 
             // Step 6: Save checkpoint with all state
@@ -939,6 +953,10 @@ impl PipelineEngine {
                     incoming_edge = Some(edge);
                     // Gap #6: Handle loop_restart by recursively running from the target
                     if edge.loop_restart() {
+                        self.services.emitter.emit(&PipelineEvent::LoopRestart {
+                            from_node: node.id.clone(),
+                            to_node: edge.to.clone(),
+                        });
                         return Box::pin(self.run_internal(
                             graph,
                             config,

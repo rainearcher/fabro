@@ -22,6 +22,8 @@ pub enum PipelineEvent {
         name: String,
         index: usize,
         handler_type: Option<String>,
+        attempt: usize,
+        max_attempts: usize,
     },
     StageCompleted {
         name: String,
@@ -34,6 +36,8 @@ pub enum PipelineEvent {
         failure_reason: Option<String>,
         notes: Option<String>,
         files_touched: Vec<String>,
+        attempt: usize,
+        max_attempts: usize,
     },
     StageFailed {
         name: String,
@@ -46,6 +50,7 @@ pub enum PipelineEvent {
         name: String,
         index: usize,
         attempt: usize,
+        max_attempts: usize,
         delay_ms: u64,
     },
     ParallelStarted {
@@ -85,6 +90,16 @@ pub enum PipelineEvent {
     },
     CheckpointSaved {
         node_id: String,
+    },
+    EdgeSelected {
+        from_node: String,
+        to_node: String,
+        label: Option<String>,
+        condition: Option<String>,
+    },
+    LoopRestart {
+        from_node: String,
+        to_node: String,
     },
     Prompt {
         stage: String,
@@ -218,17 +233,23 @@ mod tests {
             name: "plan".to_string(),
             index: 0,
             handler_type: Some("codergen".to_string()),
+            attempt: 1,
+            max_attempts: 3,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("StageStarted"));
         assert!(json.contains("plan"));
         assert!(json.contains("\"handler_type\":\"codergen\""));
+        assert!(json.contains("\"attempt\":1"));
+        assert!(json.contains("\"max_attempts\":3"));
 
         // None handler_type serializes as null
         let event_none = PipelineEvent::StageStarted {
             name: "plan".to_string(),
             index: 0,
             handler_type: None,
+            attempt: 1,
+            max_attempts: 1,
         };
         let json_none = serde_json::to_string(&event_none).unwrap();
         assert!(json_none.contains("\"handler_type\":null"));
@@ -324,11 +345,15 @@ mod tests {
             failure_reason: Some("lint errors remain".to_string()),
             notes: Some("fixed 3 of 5 issues".to_string()),
             files_touched: vec!["src/main.rs".to_string()],
+            attempt: 2,
+            max_attempts: 3,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"failure_reason\":\"lint errors remain\""));
         assert!(json.contains("\"notes\":\"fixed 3 of 5 issues\""));
         assert!(json.contains("src/main.rs"));
+        assert!(json.contains("\"attempt\":2"));
+        assert!(json.contains("\"max_attempts\":3"));
 
         let event_none = PipelineEvent::StageCompleted {
             name: "plan".to_string(),
@@ -341,6 +366,8 @@ mod tests {
             failure_reason: None,
             notes: None,
             files_touched: vec![],
+            attempt: 1,
+            max_attempts: 1,
         };
         let json_none = serde_json::to_string(&event_none).unwrap();
         assert!(json_none.contains("\"failure_reason\":null"));
@@ -437,5 +464,69 @@ mod tests {
         assert!(json.contains("CompactionCompleted"));
         let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
         assert!(matches!(deserialized, PipelineEvent::CompactionCompleted { stage, .. } if stage == "code"));
+    }
+
+    #[test]
+    fn edge_selected_event_serialization() {
+        let event = PipelineEvent::EdgeSelected {
+            from_node: "plan".to_string(),
+            to_node: "code".to_string(),
+            label: Some("success".to_string()),
+            condition: Some("outcome == 'success'".to_string()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("EdgeSelected"));
+        assert!(json.contains("\"from_node\":\"plan\""));
+        assert!(json.contains("\"to_node\":\"code\""));
+        assert!(json.contains("\"label\":\"success\""));
+        assert!(json.contains("\"condition\":\"outcome == 'success'\""));
+
+        let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineEvent::EdgeSelected { from_node, to_node, .. } if from_node == "plan" && to_node == "code"));
+
+        // None label/condition
+        let event_none = PipelineEvent::EdgeSelected {
+            from_node: "a".to_string(),
+            to_node: "b".to_string(),
+            label: None,
+            condition: None,
+        };
+        let json_none = serde_json::to_string(&event_none).unwrap();
+        assert!(json_none.contains("\"label\":null"));
+        assert!(json_none.contains("\"condition\":null"));
+    }
+
+    #[test]
+    fn loop_restart_event_serialization() {
+        let event = PipelineEvent::LoopRestart {
+            from_node: "review".to_string(),
+            to_node: "code".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("LoopRestart"));
+        assert!(json.contains("\"from_node\":\"review\""));
+        assert!(json.contains("\"to_node\":\"code\""));
+
+        let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineEvent::LoopRestart { from_node, to_node } if from_node == "review" && to_node == "code"));
+    }
+
+    #[test]
+    fn stage_retrying_event_serialization() {
+        let event = PipelineEvent::StageRetrying {
+            name: "lint".to_string(),
+            index: 2,
+            attempt: 3,
+            max_attempts: 5,
+            delay_ms: 400,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("StageRetrying"));
+        assert!(json.contains("\"attempt\":3"));
+        assert!(json.contains("\"max_attempts\":5"));
+        assert!(json.contains("\"delay_ms\":400"));
+
+        let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineEvent::StageRetrying { max_attempts: 5, .. }));
     }
 }
