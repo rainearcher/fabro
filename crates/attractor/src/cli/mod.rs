@@ -7,14 +7,51 @@ pub mod validate;
 
 use std::path::Path;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
 use terminal::Styles;
 
 use agent::AgentEvent;
 use crate::event::PipelineEvent;
 use crate::outcome::StageUsage;
 use crate::validation::{Diagnostic, Severity};
+
+/// Execution environment for agent tool operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum ExecutionEnvKind {
+    /// Run tools on the local host (default)
+    #[default]
+    Local,
+    /// Run tools inside a Docker container
+    Docker,
+    /// Run tools inside a Daytona cloud sandbox
+    Daytona,
+}
+
+impl fmt::Display for ExecutionEnvKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Local => write!(f, "local"),
+            Self::Docker => write!(f, "docker"),
+            Self::Daytona => write!(f, "daytona"),
+        }
+    }
+}
+
+impl FromStr for ExecutionEnvKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "local" => Ok(Self::Local),
+            "docker" => Ok(Self::Docker),
+            "daytona" => Ok(Self::Daytona),
+            other => Err(format!("unknown execution environment: {other}")),
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "attractor", version, about = "DOT-based pipeline runner for AI workflows")]
@@ -67,9 +104,9 @@ pub struct RunArgs {
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
 
-    /// Run agent tools inside a Docker container
-    #[arg(long)]
-    pub docker: bool,
+    /// Execution environment for agent tools
+    #[arg(long, value_enum, default_value_t)]
+    pub execution_env: ExecutionEnvKind,
 }
 
 #[derive(Args)]
@@ -101,9 +138,9 @@ pub struct ServeArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Run agent tools inside a Docker container
-    #[arg(long)]
-    pub docker: bool,
+    /// Execution environment for agent tools
+    #[arg(long, value_enum, default_value_t)]
+    pub execution_env: ExecutionEnvKind,
 }
 
 /// Read a .dot file from disk.
@@ -667,5 +704,31 @@ pub fn format_tokens_human(tokens: i64) -> String {
         format!("{:.1}k", tokens as f64 / 1000.0)
     } else {
         tokens.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn execution_env_kind_default_is_local() {
+        assert_eq!(ExecutionEnvKind::default(), ExecutionEnvKind::Local);
+    }
+
+    #[test]
+    fn execution_env_kind_from_str() {
+        assert_eq!("local".parse::<ExecutionEnvKind>().unwrap(), ExecutionEnvKind::Local);
+        assert_eq!("docker".parse::<ExecutionEnvKind>().unwrap(), ExecutionEnvKind::Docker);
+        assert_eq!("daytona".parse::<ExecutionEnvKind>().unwrap(), ExecutionEnvKind::Daytona);
+        assert_eq!("LOCAL".parse::<ExecutionEnvKind>().unwrap(), ExecutionEnvKind::Local);
+        assert!("invalid".parse::<ExecutionEnvKind>().is_err());
+    }
+
+    #[test]
+    fn execution_env_kind_display() {
+        assert_eq!(ExecutionEnvKind::Local.to_string(), "local");
+        assert_eq!(ExecutionEnvKind::Docker.to_string(), "docker");
+        assert_eq!(ExecutionEnvKind::Daytona.to_string(), "daytona");
     }
 }

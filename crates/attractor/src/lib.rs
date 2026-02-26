@@ -2,6 +2,7 @@ pub mod artifact;
 pub mod checkpoint;
 pub mod cli;
 pub mod condition;
+pub mod daytona_env;
 pub mod context;
 pub mod engine;
 pub mod error;

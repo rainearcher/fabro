@@ -6586,7 +6586,8 @@ async fn attractor_e2e_with_real_llm() {
             None,
             0,
             &TEST_STYLES,
-            false,
+            attractor::cli::ExecutionEnvKind::Local,
+            Vec::new(),
         )) as Box<dyn attractor::handler::codergen::CodergenBackend>)
     });
 

@@ -12,6 +12,7 @@ use agent::{
 use llm::client::Client;
 use terminal::Styles;
 
+use crate::cli::ExecutionEnvKind;
 use crate::context::Context;
 use crate::error::AttractorError;
 use crate::graph::Node;
@@ -24,24 +25,27 @@ pub struct AgentBackend {
     provider: Option<String>,
     verbose: u8,
     styles: &'static Styles,
-    docker: bool,
+    execution_env: ExecutionEnvKind,
+    setup_commands: Vec<String>,
 }
 
 impl AgentBackend {
     #[must_use]
-    pub const fn new(
+    pub fn new(
         model: String,
         provider: Option<String>,
         verbose: u8,
         styles: &'static Styles,
-        docker: bool,
+        execution_env: ExecutionEnvKind,
+        setup_commands: Vec<String>,
     ) -> Self {
         Self {
             model,
             provider,
             verbose,
             styles,
-            docker,
+            execution_env,
+            setup_commands,
         }
     }
 
@@ -146,17 +150,27 @@ impl CodergenBackend for AgentBackend {
         let profile = self.build_profile();
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-        let exec_env: Arc<dyn ExecutionEnvironment> = if self.docker {
-            let config = DockerConfig {
-                host_working_directory: cwd.to_string_lossy().to_string(),
-                ..DockerConfig::default()
-            };
-            Arc::new(
-                DockerExecutionEnvironment::new(config)
-                    .map_err(|e| AttractorError::Handler(format!("Failed to create Docker environment: {e}")))?,
-            )
-        } else {
-            Arc::new(LocalExecutionEnvironment::new(cwd))
+        let exec_env: Arc<dyn ExecutionEnvironment> = match self.execution_env {
+            ExecutionEnvKind::Docker => {
+                let config = DockerConfig {
+                    host_working_directory: cwd.to_string_lossy().to_string(),
+                    ..DockerConfig::default()
+                };
+                Arc::new(
+                    DockerExecutionEnvironment::new(config)
+                        .map_err(|e| AttractorError::Handler(format!("Failed to create Docker environment: {e}")))?,
+                )
+            }
+            ExecutionEnvKind::Daytona => {
+                let daytona_client = daytona_sdk::Client::new()
+                    .await
+                    .map_err(|e| AttractorError::Handler(format!("Failed to create Daytona client: {e}")))?;
+                Arc::new(crate::daytona_env::DaytonaExecutionEnvironment::new(
+                    daytona_client,
+                    crate::daytona_env::DaytonaConfig::default(),
+                ))
+            }
+            ExecutionEnvKind::Local => Arc::new(LocalExecutionEnvironment::new(cwd)),
         };
 
         let config = SessionConfig {
@@ -164,6 +178,7 @@ impl CodergenBackend for AgentBackend {
             ..SessionConfig::default()
         };
 
+        let exec_env_for_setup = Arc::clone(&exec_env);
         let mut session = Session::new(client, profile, exec_env, config);
 
         // File change tracking: shared between spawned task and main fn.
@@ -284,6 +299,22 @@ impl CodergenBackend for AgentBackend {
         });
 
         session.initialize().await;
+
+        // Run setup commands inside the execution environment
+        for cmd in &self.setup_commands {
+            let result = exec_env_for_setup
+                .exec_command(cmd, 300_000, None, None, None)
+                .await
+                .map_err(|e| AttractorError::Handler(format!("Setup command failed: {e}")))?;
+            if result.exit_code != 0 {
+                return Err(AttractorError::Handler(format!(
+                    "Setup command failed (exit code {}): {cmd}\n{}",
+                    result.exit_code,
+                    result.stderr,
+                )));
+            }
+        }
+
         session.process_input(prompt).await.map_err(|e| {
             AttractorError::Handler(format!("Agent session failed: {e}"))
         })?;
@@ -384,4 +415,24 @@ fn format_tool_args(args: &serde_json::Value) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_backend_stores_execution_env_kind() {
+        let styles = Box::leak(Box::new(Styles::new(false)));
+        let backend = AgentBackend::new(
+            "claude-opus-4-6".to_string(),
+            None,
+            0,
+            styles,
+            ExecutionEnvKind::Daytona,
+            vec!["npm install".to_string()],
+        );
+        assert_eq!(backend.execution_env, ExecutionEnvKind::Daytona);
+        assert_eq!(backend.setup_commands, vec!["npm install".to_string()]);
+    }
 }

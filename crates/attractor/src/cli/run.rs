@@ -52,16 +52,14 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             std::env::set_current_dir(dir)
                 .map_err(|e| anyhow::anyhow!("Failed to set working directory to {dir}: {e}"))?;
         }
-        if let Some(ref setup) = cfg.setup {
-            let cwd = std::env::current_dir()?;
-            eprintln!(
-                "{dim}Running {} setup command(s)…{reset}",
-                setup.commands.len(),
-                dim = styles.dim, reset = styles.reset,
-            );
-            task_config::run_setup(setup, &cwd).await?;
-        }
     }
+
+    // Collect setup commands — they'll be run inside the execution environment
+    let setup_commands: Vec<String> = task_cfg
+        .as_ref()
+        .and_then(|c| c.setup.as_ref())
+        .map(|s| s.commands.clone())
+        .unwrap_or_default();
 
     // 1. Parse and validate pipeline
     let source = read_dot_file(&dot_path)?;
@@ -296,7 +294,8 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
                 provider.clone(),
                 args.verbose,
                 styles,
-                args.docker,
+                args.execution_env,
+                setup_commands.clone(),
             )))
         }
     });

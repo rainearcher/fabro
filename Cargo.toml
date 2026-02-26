@@ -34,3 +34,4 @@ walkdir = "2"
 regex = "1"
 aho-corasick = "1"
 toml = "0.8"
+daytona-sdk = { git = "https://github.com/brynary/daytona-sdk-rust", package = "daytona-sdk" }

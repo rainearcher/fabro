@@ -41,6 +41,9 @@ nom = "7"
 toml.workspace = true
 dirs = "6"
 dialoguer.workspace = true
+daytona-sdk.workspace = true
+git2.workspace = true
+tokio-util.workspace = true
 axum = { version = "0.8", optional = true }
 tower = { version = "0.5", optional = true }
 tokio-stream = { workspace = true, optional = true, features = ["sync"] }
