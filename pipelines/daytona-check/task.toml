@@ -1,0 +1,32 @@
+version = 1
+task = "Run cargo check in a Daytona cloud sandbox"
+graph = "check.dot"
+
+[llm]
+model = "claude-sonnet"
+
+[execution]
+environment = "daytona"
+
+[execution.daytona.sandbox]
+name = "attractor-cargo-check"
+auto_stop_interval = 60
+
+[execution.daytona.sandbox.labels]
+project = "attractor-rust"
+
+[execution.daytona.snapshot]
+name = "attractor-rust-check-dev"
+cpu = 4
+memory = 8
+disk = 10
+dockerfile = """
+FROM rust:1.85-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libssl-dev cmake git curl ca-certificates ripgrep \
+    && rm -rf /var/lib/apt/lists/*
+RUN rustup update stable && rustup default stable
+RUN useradd -m -s /bin/bash daytona
+USER daytona
+WORKDIR /home/daytona
+"""

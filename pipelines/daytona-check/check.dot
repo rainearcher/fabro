@@ -1,0 +1,12 @@
+digraph DaytonaCheck {
+    graph [goal="Run cargo test in a Daytona sandbox and summarize results"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    run_tests [label="Run Tests", prompt="Run `cargo test --workspace 2>&1` and report the results"]
+    report    [label="Report", prompt="Summarize the test results"]
+
+    start -> run_tests -> report -> exit
+}
