@@ -1,22 +1,49 @@
 use crate::Region;
 use aho_corasick::AhoCorasick;
 use regex::Regex;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/rules_generated.rs"));
 }
 
-struct CompiledRule {
+struct LazyRule {
     #[allow(dead_code)]
     id: &'static str,
-    regex: Regex,
+    pattern: &'static str,
+    regex: OnceLock<Option<Regex>>,
     #[allow(dead_code)]
     keywords: &'static [&'static str],
-    secret_group: usize,
-    allowlist_regexes: Vec<Regex>,
+    allowlist_regex_patterns: &'static [&'static str],
+    allowlist_regexes: Vec<OnceLock<Option<Regex>>>,
     allowlist_stopwords: &'static [&'static str],
     allowlist_regex_target: Option<&'static str>,
+}
+
+impl LazyRule {
+    fn regex(&self) -> Option<&Regex> {
+        self.regex
+            .get_or_init(|| Regex::new(self.pattern).ok())
+            .as_ref()
+    }
+
+    fn secret_group(&self) -> usize {
+        match self.regex() {
+            Some(r) if r.captures_len() > 1 => 1,
+            _ => 0,
+        }
+    }
+
+    fn allowlist_regex(&self, index: usize) -> Option<&Regex> {
+        self.allowlist_regexes[index]
+            .get_or_init(|| Regex::new(self.allowlist_regex_patterns[index]).ok())
+            .as_ref()
+    }
+
+    fn is_allowlisted(&self, target: &str) -> bool {
+        (0..self.allowlist_regex_patterns.len())
+            .any(|i| self.allowlist_regex(i).is_some_and(|r| r.is_match(target)))
+    }
 }
 
 struct GitleaksEngine {
@@ -25,8 +52,8 @@ struct GitleaksEngine {
     keyword_to_rules: Vec<Vec<usize>>,
     /// Rules that have no keywords (must always be checked).
     no_keyword_rules: Vec<usize>,
-    rules: Vec<CompiledRule>,
-    global_allowlist_regexes: Vec<Regex>,
+    rules: Vec<LazyRule>,
+    global_allowlist_regexes: Vec<OnceLock<Option<Regex>>>,
     global_allowlist_stopwords: &'static [&'static str],
 }
 
@@ -38,22 +65,6 @@ impl GitleaksEngine {
         let mut no_keyword_rules = Vec::new();
 
         for def in generated::RULES {
-            let regex = match Regex::new(def.regex_pattern) {
-                Ok(r) => r,
-                Err(_) => continue, // skip rules with invalid regex
-            };
-
-            // Determine which capture group holds the secret.
-            // If the regex has capture groups, group 1 is the secret.
-            // Otherwise, group 0 (full match) is the secret.
-            let secret_group = if regex.captures_len() > 1 { 1 } else { 0 };
-
-            let allowlist_regexes: Vec<Regex> = def
-                .allowlist_regexes
-                .iter()
-                .filter_map(|p| Regex::new(p).ok())
-                .collect();
-
             let rule_idx = rules.len();
 
             if def.keywords.is_empty() {
@@ -61,7 +72,6 @@ impl GitleaksEngine {
             } else {
                 for kw in def.keywords {
                     let kw_lower = kw.to_lowercase();
-                    // Check if this keyword already exists
                     if let Some(pos) = all_keywords.iter().position(|k| k == &kw_lower) {
                         keyword_to_rules[pos].push(rule_idx);
                     } else {
@@ -71,11 +81,14 @@ impl GitleaksEngine {
                 }
             }
 
-            rules.push(CompiledRule {
+            let allowlist_regexes = def.allowlist_regexes.iter().map(|_| OnceLock::new()).collect();
+
+            rules.push(LazyRule {
                 id: def.id,
-                regex,
+                pattern: def.regex_pattern,
+                regex: OnceLock::new(),
                 keywords: def.keywords,
-                secret_group,
+                allowlist_regex_patterns: def.allowlist_regexes,
                 allowlist_regexes,
                 allowlist_stopwords: def.allowlist_stopwords,
                 allowlist_regex_target: def.allowlist_regex_target,
@@ -87,9 +100,9 @@ impl GitleaksEngine {
             .build(&all_keywords)
             .ok()?;
 
-        let global_allowlist_regexes: Vec<Regex> = generated::GLOBAL_ALLOWLIST_REGEXES
+        let global_allowlist_regexes = generated::GLOBAL_ALLOWLIST_REGEXES
             .iter()
-            .filter_map(|p| Regex::new(p).ok())
+            .map(|_| OnceLock::new())
             .collect();
 
         Some(GitleaksEngine {
@@ -100,6 +113,12 @@ impl GitleaksEngine {
             global_allowlist_regexes,
             global_allowlist_stopwords: generated::GLOBAL_ALLOWLIST_STOPWORDS,
         })
+    }
+
+    fn global_allowlist_regex(&self, index: usize) -> Option<&Regex> {
+        self.global_allowlist_regexes[index]
+            .get_or_init(|| Regex::new(generated::GLOBAL_ALLOWLIST_REGEXES[index]).ok())
+            .as_ref()
     }
 
     fn find_regions(&self, s: &str) -> Vec<Region> {
@@ -128,13 +147,19 @@ impl GitleaksEngine {
             }
             let rule = &self.rules[idx];
 
-            let captures_iter = rule.regex.captures_iter(s);
-            for caps in captures_iter {
+            // Lazy-compile the regex on first use; skip if invalid.
+            let regex = match rule.regex() {
+                Some(r) => r,
+                None => continue,
+            };
+            let secret_group = rule.secret_group();
+
+            for caps in regex.captures_iter(s) {
                 let full_match = caps.get(0).unwrap();
 
                 // Get the secret: group 1 if it exists, otherwise full match
-                let secret_match = if rule.secret_group > 0 {
-                    match caps.get(rule.secret_group) {
+                let secret_match = if secret_group > 0 {
+                    match caps.get(secret_group) {
                         Some(m) => m,
                         None => continue,
                     }
@@ -148,18 +173,14 @@ impl GitleaksEngine {
                 }
 
                 // Check global allowlist regexes against the secret
-                if self
-                    .global_allowlist_regexes
-                    .iter()
-                    .any(|r| r.is_match(secret))
-                {
+                let globally_allowlisted = (0..generated::GLOBAL_ALLOWLIST_REGEXES.len())
+                    .any(|i| self.global_allowlist_regex(i).is_some_and(|r| r.is_match(secret)));
+                if globally_allowlisted {
                     continue;
                 }
 
                 // Check global allowlist stopwords
-                if self
-                    .global_allowlist_stopwords.contains(&secret)
-                {
+                if self.global_allowlist_stopwords.contains(&secret) {
                     continue;
                 }
 
@@ -170,11 +191,7 @@ impl GitleaksEngine {
                     secret
                 };
 
-                if rule
-                    .allowlist_regexes
-                    .iter()
-                    .any(|r| r.is_match(allowlist_target))
-                {
+                if rule.is_allowlisted(allowlist_target) {
                     continue;
                 }
 
