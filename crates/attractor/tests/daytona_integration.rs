@@ -4,10 +4,22 @@
 //! Run with: `cargo test --package attractor -- --ignored daytona`
 
 use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 
 use agent::ExecutionEnvironment;
 use attractor::artifact::sync_artifacts_to_env;
+use attractor::checkpoint::Checkpoint;
+use attractor::context::Context;
 use attractor::daytona_env::{DaytonaConfig, DaytonaExecutionEnvironment};
+use attractor::engine::{PipelineEngine, RunConfig};
+use attractor::error::AttractorError;
+use attractor::event::EventEmitter;
+use attractor::graph::{AttrValue, Edge, Graph, Node};
+use attractor::handler::exit::ExitHandler;
+use attractor::handler::start::StartHandler;
+use attractor::handler::{Handler, HandlerRegistry};
+use attractor::outcome::{Outcome, StageStatus};
 
 async fn create_env() -> DaytonaExecutionEnvironment {
     dotenvy::dotenv().ok();
@@ -179,6 +191,111 @@ async fn daytona_artifact_sync_uploads_and_rewrites_pointer() {
     assert!(
         env.file_exists(remote_path).await.unwrap(),
         "artifact file should exist in Daytona sandbox at {remote_path}"
+    );
+
+    let remote_content = env.read_file(remote_path, None, None).await.unwrap();
+    assert!(
+        remote_content.len() > 100 * 1024,
+        "remote artifact should be >100KB, got {} bytes",
+        remote_content.len()
+    );
+
+    env.cleanup().await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Full pipeline E2E on Daytona
+// ---------------------------------------------------------------------------
+
+/// Handler that produces a >100KB context_update to trigger artifact offloading.
+struct LargeOutputHandler;
+
+#[async_trait::async_trait]
+impl Handler for LargeOutputHandler {
+    async fn execute(
+        &self,
+        node: &Node,
+        _context: &Context,
+        _graph: &Graph,
+        _logs_root: &Path,
+        _services: &attractor::handler::EngineServices,
+    ) -> Result<Outcome, AttractorError> {
+        let mut outcome = Outcome::success();
+        let large_value = "x".repeat(150 * 1024);
+        outcome.context_updates.insert(
+            format!("response.{}", node.id),
+            serde_json::json!(large_value),
+        );
+        Ok(outcome)
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn daytona_pipeline_artifact_offload_and_sync() {
+    let env = create_env().await;
+    env.initialize().await.unwrap();
+    let env: Arc<dyn ExecutionEnvironment> = Arc::new(env);
+
+    // Pipeline: start -> big_output -> exit
+    let mut graph = Graph::new("DaytonaArtifactPipeline");
+    graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Test artifact offload+sync on Daytona".to_string()),
+    );
+
+    let mut start = Node::new("start");
+    start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    graph.nodes.insert("start".to_string(), start);
+
+    let mut exit = Node::new("exit");
+    exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    graph.nodes.insert("exit".to_string(), exit);
+
+    let mut big_output = Node::new("big_output");
+    big_output.attrs.insert("label".to_string(), AttrValue::String("Big Output".to_string()));
+    graph.nodes.insert("big_output".to_string(), big_output);
+
+    graph.edges.push(Edge::new("start", "big_output"));
+    graph.edges.push(Edge::new("big_output", "exit"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = HandlerRegistry::new(Box::new(LargeOutputHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+
+    let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), env.clone());
+    let config = RunConfig {
+        logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
+        dry_run: false,
+    };
+
+    let outcome = engine.run(&graph, &config).await.expect("pipeline should succeed");
+    assert_eq!(outcome.status, StageStatus::Success);
+
+    // Checkpoint should have a pointer rewritten for Daytona
+    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json"))
+        .expect("checkpoint should load");
+    let pointer_value = checkpoint
+        .context_values
+        .get("response.big_output")
+        .expect("context should have response.big_output");
+    let pointer_str = pointer_value.as_str().expect("pointer should be a string");
+    let expected_prefix = format!(
+        "file://{}/.attractor/artifacts/",
+        env.working_directory()
+    );
+    assert!(
+        pointer_str.starts_with(&expected_prefix),
+        "pointer should reference Daytona path, got: {pointer_str}"
+    );
+
+    // Verify the artifact file is readable in the sandbox
+    let remote_path = pointer_str.strip_prefix("file://").unwrap();
+    assert!(
+        env.file_exists(remote_path).await.unwrap(),
+        "artifact should exist in Daytona sandbox at {remote_path}"
     );
 
     let remote_content = env.read_file(remote_path, None, None).await.unwrap();
