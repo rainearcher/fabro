@@ -369,6 +369,7 @@ const KNOWN_HANDLER_TYPES: &[&str] = &[
     "parallel",
     "parallel.fan_in",
     "script",
+    "tool",
     "stack.manager_loop",
 ];
 

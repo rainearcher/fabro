@@ -29,6 +29,7 @@ impl Handler for ScriptHandler {
         let script = node
             .attrs
             .get("script")
+            .or_else(|| node.attrs.get("tool_command"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
@@ -128,6 +129,9 @@ impl Handler for ScriptHandler {
                     outcome
                         .context_updates
                         .insert("script.output".to_string(), serde_json::json!(stdout));
+                    outcome
+                        .context_updates
+                        .insert("tool.output".to_string(), serde_json::json!(stdout));
                     outcome.notes = Some(format!("Script completed: {script}"));
                     Ok(outcome)
                 } else {
@@ -517,5 +521,49 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("Invalid language"));
+    }
+
+    #[tokio::test]
+    async fn tool_command_attribute_fallback() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
+        node.attrs.insert(
+            "tool_command".to_string(),
+            AttrValue::String("echo legacy".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let logs_root = tempfile::tempdir().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, logs_root.path(), &make_services())
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
+        let script_output = outcome.context_updates.get("script.output").unwrap();
+        assert!(script_output.as_str().unwrap().contains("legacy"));
+    }
+
+    #[tokio::test]
+    async fn tool_output_context_key_dual_write() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
+        node.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("echo dual".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let logs_root = tempfile::tempdir().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, logs_root.path(), &make_services())
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
+        let script_output = outcome.context_updates.get("script.output").unwrap();
+        let tool_output = outcome.context_updates.get("tool.output").unwrap();
+        assert_eq!(script_output, tool_output);
+        assert!(script_output.as_str().unwrap().contains("dual"));
     }
 }

@@ -115,6 +115,7 @@ pub fn default_registry(
         Box::new(wait_human::WaitHumanHandler::new(interviewer)),
     );
     registry.register("script", Box::new(script::ScriptHandler));
+    registry.register("tool", Box::new(script::ScriptHandler));
     registry.register("parallel", Box::new(parallel::ParallelHandler));
     registry.register(
         "parallel.fan_in",

@@ -1725,6 +1725,11 @@ async fn tool_handler_e2e() {
         .get("script.output")
         .expect("script.output should exist");
     assert!(script_output.as_str().unwrap().contains("hello-from-script"));
+    let tool_output = cp
+        .context_values
+        .get("tool.output")
+        .expect("tool.output should exist");
+    assert_eq!(script_output, tool_output);
 }
 
 #[tokio::test]
