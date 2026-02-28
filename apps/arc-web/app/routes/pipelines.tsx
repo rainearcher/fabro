@@ -47,7 +47,7 @@ const ciConfig: Record<CiStatus, { label: string; dot: string; text: string }> =
 function CiBadge({ status }: { status: CiStatus }) {
   const config = ciConfig[status];
   return (
-    <span className={`ml-auto inline-flex items-center gap-1.5 ${config.text}`}>
+    <span className={`inline-flex items-center gap-1.5 font-mono text-xs ${config.text}`}>
       <span className={`size-1.5 rounded-full ${config.dot}`} />
       {config.label}
     </span>
@@ -62,6 +62,7 @@ interface PullRequest {
   deletions?: number;
   ci?: CiStatus;
   elapsed?: string;
+  elapsedWarning?: boolean;
   resources?: string;
   actionDisabled?: boolean;
   comments?: number;
@@ -145,6 +146,7 @@ const columns: Column[] = [
         additions: 234,
         deletions: 67,
         ci: "failing",
+        elapsed: "35m",
         comments: 4,
       },
       {
@@ -154,6 +156,7 @@ const columns: Column[] = [
         additions: 412,
         deletions: 0,
         ci: "pending",
+        elapsed: "12m",
         actionDisabled: true,
         comments: 1,
       },
@@ -174,6 +177,8 @@ const columns: Column[] = [
         additions: 189,
         deletions: 45,
         ci: "passing",
+        elapsed: "3d",
+        elapsedWarning: true,
         comments: 7,
       },
       {
@@ -183,6 +188,7 @@ const columns: Column[] = [
         additions: 56,
         deletions: 12,
         ci: "passing",
+        elapsed: "1h 5m",
         comments: 2,
       },
       {
@@ -192,6 +198,7 @@ const columns: Column[] = [
         additions: 34,
         deletions: 8,
         ci: "passing",
+        elapsed: "48m",
         comments: 0,
       },
     ],
@@ -267,16 +274,15 @@ function PrCard({
               {pr.comments}
             </span>
           )}
-          {pr.ci != null && <CiBadge status={pr.ci} />}
           {pr.elapsed != null && (
-            <span className="ml-auto font-mono text-navy-600">{pr.elapsed}</span>
+            <span className={`ml-auto font-mono ${pr.elapsedWarning ? "text-amber" : "text-navy-600"}`}>{pr.elapsed}</span>
           )}
         </div>
       )}
 
-      {actions != null && actions.length > 0 && (
-        <div className="mt-3 flex gap-1.5">
-          {actions.map((label) => (
+      {(actions != null && actions.length > 0 || pr.ci != null) && (
+        <div className="mt-3 flex items-center gap-1.5">
+          {actions?.map((label) => (
             <button
               key={label}
               type="button"
@@ -319,6 +325,7 @@ function PrCard({
               {label}
             </button>
           ))}
+          {pr.ci != null && <span className="ml-auto flex items-center"><CiBadge status={pr.ci} /></span>}
         </div>
       )}
     </div>
