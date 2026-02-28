@@ -1,34 +1,6 @@
-import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import { MultiFileDiff } from "@pierre/diffs/react";
-import { useState } from "react";
 
 export const handle = { wide: true };
-
-function countLines(oldContents: string, newContents: string) {
-  const oldLines = oldContents ? oldContents.split("\n") : [];
-  const newLines = newContents ? newContents.split("\n") : [];
-  let additions = 0;
-  let deletions = 0;
-  const max = Math.max(oldLines.length, newLines.length);
-  for (let i = 0; i < max; i++) {
-    if (oldLines[i] !== newLines[i]) {
-      if (i < newLines.length) additions++;
-      if (i < oldLines.length) deletions++;
-    }
-  }
-  return { additions, deletions };
-}
-
-function FileStatus({ oldContents, newContents }: { oldContents: string; newContents: string }) {
-  if (!oldContents) return <span className="rounded-full bg-mint/15 px-2 py-0.5 text-xs font-medium text-mint">Added</span>;
-  const { additions, deletions } = countLines(oldContents, newContents);
-  return (
-    <span className="flex items-center gap-2 font-mono text-xs">
-      {additions > 0 && <span className="text-mint">+{additions}</span>}
-      {deletions > 0 && <span className="text-coral">-{deletions}</span>}
-    </span>
-  );
-}
 
 const files = [
   {

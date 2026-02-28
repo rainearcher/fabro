@@ -5,9 +5,9 @@ import { workflowData } from "./workflow-detail";
 import type { Route } from "./+types/run-detail";
 
 const tabs = [
-  { name: "Stages", path: "" },
+  { name: "Overview", path: "" },
+  { name: "Stages", path: "/stages" },
   { name: "Files Changed", path: "/files" },
-  { name: "Logs", path: "/logs" },
 ];
 
 export const handle = { hideHeader: true };

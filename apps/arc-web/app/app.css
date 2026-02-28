@@ -50,6 +50,32 @@
   font-family: inherit;
 }
 
+/* ── @pierre/diffs brand overrides ── */
+
+:root {
+  --diffs-font-family: "JetBrains Mono", ui-monospace, monospace;
+  --diffs-header-font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --diffs-font-size: 13px;
+  --diffs-line-height: 20px;
+
+  /* Surfaces */
+  --diffs-bg-buffer-override: #0F1729;
+  --diffs-bg-context-override: #161d2e;
+  --diffs-bg-hover-override: #1c2438;
+  --diffs-bg-separator-override: #252C3D;
+
+  /* Line numbers */
+  --diffs-fg-number-override: #4B5768;
+
+  /* Additions — mint */
+  --diffs-addition-color-override: #5AC8A8;
+  --diffs-fg-number-addition-override: rgba(90, 200, 168, 0.5);
+
+  /* Deletions — coral */
+  --diffs-deletion-color-override: #E86B6B;
+  --diffs-fg-number-deletion-override: rgba(232, 107, 107, 0.5);
+}
+
 .bg-atmosphere::before {
   content: "";
   position: fixed;
