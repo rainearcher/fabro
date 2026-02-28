@@ -281,7 +281,13 @@ function PrCard({
               key={label}
               type="button"
               disabled={pr.actionDisabled}
-              className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.08] px-2.5 py-1 text-[11px] font-medium text-ice-300 transition-colors hover:border-teal-500/40 hover:text-white disabled:cursor-not-allowed disabled:text-navy-600 disabled:border-white/[0.04]"
+              className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:text-navy-600 disabled:border-white/[0.04] ${
+                label === "Merge"
+                  ? "border-mint/20 text-mint hover:border-mint/50 hover:text-white"
+                  : label === "Answer Question"
+                    ? "border-amber/20 text-amber hover:border-amber/50 hover:text-white"
+                    : "border-white/[0.08] text-ice-300 hover:border-teal-500/40 hover:text-white"
+              }`}
             >
               {label === "Watch" && (
                 <svg viewBox="0 0 16 16" fill="currentColor" className="size-3" aria-hidden="true">
