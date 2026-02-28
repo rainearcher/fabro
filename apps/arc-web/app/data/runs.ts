@@ -157,7 +157,7 @@ export const columns: {
 ];
 
 export function allRunsFlat(): RunWithStatus[] {
-  return columns.flatMap((col) =>
+  return [...columns].reverse().flatMap((col) =>
     col.items.map((item) => ({
       ...item,
       status: col.id,
