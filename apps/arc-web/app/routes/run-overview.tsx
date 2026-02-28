@@ -11,16 +11,17 @@ export const handle = { wide: true };
 type StageStatus = "completed" | "running" | "pending" | "failed";
 
 interface Stage {
+  id: string;
   name: string;
   status: StageStatus;
   duration: string;
 }
 
 const stages: Stage[] = [
-  { name: "Detect Drift", status: "completed", duration: "1m 12s" },
-  { name: "Propose Changes", status: "completed", duration: "2m 34s" },
-  { name: "Review Changes", status: "completed", duration: "0m 45s" },
-  { name: "Apply Changes", status: "running", duration: "1m 58s" },
+  { id: "detect-drift", name: "Detect Drift", status: "completed", duration: "1m 12s" },
+  { id: "propose-changes", name: "Propose Changes", status: "completed", duration: "2m 34s" },
+  { id: "review-changes", name: "Review Changes", status: "completed", duration: "0m 45s" },
+  { id: "apply-changes", name: "Apply Changes", status: "running", duration: "1m 58s" },
 ];
 
 const statusConfig: Record<StageStatus, { icon: typeof CheckCircleIcon; color: string }> = {
@@ -273,9 +274,9 @@ export default function RunOverview() {
               const config = statusConfig[stage.status];
               const Icon = config.icon;
               return (
-                <li key={stage.name}>
+                <li key={stage.id}>
                   <Link
-                    to={`/runs/${id}/stages`}
+                    to={`/runs/${id}/stages/${stage.id}`}
                     className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-ice-300 transition-colors hover:bg-white/[0.04] hover:text-white"
                   >
                     <Icon className={`size-4 shrink-0 ${config.color} ${stage.status === "running" ? "animate-spin" : ""}`} />

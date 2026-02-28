@@ -18,7 +18,7 @@ export default [
     route("runs", "routes/pipelines.tsx"),
     route("runs/:id", "routes/run-detail.tsx", [
       index("routes/run-overview.tsx"),
-      route("stages", "routes/run-stages.tsx"),
+      route("stages/:stageId", "routes/run-stages.tsx"),
       route("files", "routes/run-files-changed.tsx"),
       route("usage", "routes/run-usage.tsx"),
     ]),

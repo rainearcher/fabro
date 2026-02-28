@@ -11,16 +11,17 @@ export const handle = { wide: true };
 type StageStatus = "completed" | "running" | "pending" | "failed";
 
 interface Stage {
+  id: string;
   name: string;
   status: StageStatus;
   duration: string;
 }
 
 const stages: Stage[] = [
-  { name: "Detect Drift", status: "completed", duration: "1m 12s" },
-  { name: "Propose Changes", status: "completed", duration: "2m 34s" },
-  { name: "Review Changes", status: "completed", duration: "0m 45s" },
-  { name: "Apply Changes", status: "running", duration: "1m 58s" },
+  { id: "detect-drift", name: "Detect Drift", status: "completed", duration: "1m 12s" },
+  { id: "propose-changes", name: "Propose Changes", status: "completed", duration: "2m 34s" },
+  { id: "review-changes", name: "Review Changes", status: "completed", duration: "0m 45s" },
+  { id: "apply-changes", name: "Apply Changes", status: "running", duration: "1m 58s" },
 ];
 
 const statusConfig: Record<StageStatus, { icon: typeof CheckCircleIcon; color: string }> = {
@@ -41,7 +42,7 @@ type TurnType =
   | { kind: "assistant"; content: string }
   | { kind: "tool"; tools: ToolUse[] };
 
-const selectedStage = stages[0];
+// selectedStage is resolved from the URL param in RunStages below
 
 const turns: TurnType[] = [
   {
@@ -148,9 +149,10 @@ function AssistantBlock({ content }: { content: string }) {
 }
 
 export default function RunStages() {
-  const { id } = useParams();
+  const { id, stageId } = useParams();
   const run = findRun(id ?? "");
   const workflow = run ? workflowData[run.workflow] : undefined;
+  const selectedStage = stages.find((s) => s.id === stageId) ?? stages[0];
   const selectedConfig = statusConfig[selectedStage.status];
   const SelectedIcon = selectedConfig.icon;
 
@@ -163,11 +165,11 @@ export default function RunStages() {
             {stages.map((stage) => {
               const config = statusConfig[stage.status];
               const Icon = config.icon;
-              const isSelected = stage.name === selectedStage.name;
+              const isSelected = stage.id === selectedStage.id;
               return (
-                <li key={stage.name}>
+                <li key={stage.id}>
                   <Link
-                    to={`/runs/${id}/stages`}
+                    to={`/runs/${id}/stages/${stage.id}`}
                     className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
                       isSelected
                         ? "bg-white/[0.06] text-white"

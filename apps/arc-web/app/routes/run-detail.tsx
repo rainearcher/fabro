@@ -6,7 +6,7 @@ import type { Route } from "./+types/run-detail";
 
 const tabs = [
   { name: "Overview", path: "", count: null },
-  { name: "Stages", path: "/stages", count: 4 },
+  { name: "Stages", path: "/stages/detect-drift", count: 4 },
   { name: "Files Changed", path: "/files", count: 3 },
   { name: "Usage", path: "/usage", count: null },
 ];
@@ -71,7 +71,9 @@ export default function RunDetail({ params }: Route.ComponentProps) {
         <nav className="-mb-px flex gap-6">
           {tabs.map((tab) => {
             const tabPath = `${basePath}${tab.path}`;
-            const isActive = pathname === tabPath;
+            const isActive = tab.name === "Stages"
+              ? pathname.startsWith(`${basePath}/stages`)
+              : pathname === tabPath;
             return (
               <Link
                 key={tab.name}
