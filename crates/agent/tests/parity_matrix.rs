@@ -115,6 +115,9 @@ provider_tests!(parallel_tool_calls);
 provider_tests!(steering);
 provider_tests!(subagent_spawn);
 
+provider_tests!(web_fetch);
+provider_tests!(web_search);
+
 // Scenarios below are only generated for providers where they are supported.
 // - multi_step_read_analyze_edit / provider_specific_editing: gpt-4o-mini is too
 //   weak to reliably apply precise file edits (uses apply_patch, not edit_file).
@@ -389,7 +392,46 @@ async fn scenario_error_recovery(session: &mut Session, dir: &Path) {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 15: provider_specific_editing
+// Scenario 15: web_fetch
+// ---------------------------------------------------------------------------
+async fn scenario_web_fetch(session: &mut Session, dir: &Path) {
+    session
+        .process_input(
+            "Use the web_fetch tool to fetch https://example.com and write its content to a file called fetched.html",
+        )
+        .await
+        .expect("process_input failed");
+    let path = dir.join("fetched.html");
+    assert!(path.exists(), "fetched.html should have been created");
+    let content = std::fs::read_to_string(&path).expect("failed to read fetched.html");
+    assert!(
+        content.contains("Example Domain"),
+        "Expected 'Example Domain' in fetched content, got first 200 chars: {}",
+        &content[..content.len().min(200)]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 16: web_search
+// ---------------------------------------------------------------------------
+async fn scenario_web_search(session: &mut Session, dir: &Path) {
+    session
+        .process_input(
+            "Use the web_search tool to search for 'Rust programming language' and write the first result's title and URL to a file called search_results.txt",
+        )
+        .await
+        .expect("process_input failed");
+    let path = dir.join("search_results.txt");
+    assert!(path.exists(), "search_results.txt should have been created");
+    let content = std::fs::read_to_string(&path).expect("failed to read search_results.txt");
+    assert!(
+        !content.is_empty(),
+        "search_results.txt should not be empty"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 17: provider_specific_editing
 // ---------------------------------------------------------------------------
 async fn scenario_provider_specific_editing(session: &mut Session, dir: &Path) {
     std::fs::write(
