@@ -20,6 +20,7 @@ const user = {
 const navigation = [
   { name: "Start", href: "/start" },
   { name: "Pipeline Runs", href: "/pipelines" },
+  { name: "Insights", href: "/insights" },
   { name: "Settings", href: "/settings" },
 ];
 
