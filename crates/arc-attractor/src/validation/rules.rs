@@ -1201,9 +1201,9 @@ mod tests {
     // built_in_rules tests
 
     #[test]
-    fn built_in_rules_returns_15_rules() {
+    fn built_in_rules_returns_16_rules() {
         let rules = built_in_rules();
-        assert_eq!(rules.len(), 15);
+        assert_eq!(rules.len(), 16);
     }
 
     // direction_valid rule tests
