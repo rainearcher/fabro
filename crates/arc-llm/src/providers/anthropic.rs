@@ -1073,7 +1073,7 @@ fn build_api_request(
     let api_request = ApiRequest {
         model: request.model.clone(),
         messages: api_messages,
-        max_tokens: request.max_tokens.unwrap_or(16384),
+        max_tokens: request.max_tokens.unwrap_or(65536),
         system: system_value,
         temperature: request.temperature,
         top_p: request.top_p,
