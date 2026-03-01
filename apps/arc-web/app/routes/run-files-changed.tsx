@@ -1,6 +1,10 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDownIcon, Cog6ToothIcon } from "@heroicons/react/24/outline";
-import { MultiFileDiff } from "@pierre/diffs/react";
+import {
+  MultiFileDiff,
+  type AnnotationSide,
+  type DiffLineAnnotation,
+} from "@pierre/diffs/react";
 
 export const handle = { wide: true };
 
@@ -234,8 +238,255 @@ function DiffStat({ additions, deletions }: { additions: number; deletions: numb
   );
 }
 
+interface SteerAnnotation {
+  fileName: string;
+  lineNumber: number;
+  side: AnnotationSide;
+}
+
+function steerKey(fileName: string, side: AnnotationSide, lineNumber: number) {
+  return `${fileName}:${side}:${lineNumber}`;
+}
+
+function DiffWithSteer({
+  oldFile,
+  newFile,
+  openSteers,
+  submittedSteers,
+  onSteer,
+  onSubmit,
+  onCancel,
+}: {
+  oldFile: { name: string; contents: string };
+  newFile: { name: string; contents: string };
+  openSteers: Map<string, SteerAnnotation>;
+  submittedSteers: Map<string, SteerAnnotation & { text: string }>;
+  onSteer: (annotation: SteerAnnotation) => void;
+  onSubmit: (annotation: SteerAnnotation, text: string) => void;
+  onCancel: (annotation: SteerAnnotation) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLDivElement>(null);
+  const hoveredRef = useRef<{ lineNumber: number; side: AnnotationSide } | null>(null);
+  const leaveTimeoutRef = useRef<number>(0);
+
+  const showButton = useCallback((lineElement: HTMLElement, lineNumber: number, side: AnnotationSide) => {
+    clearTimeout(leaveTimeoutRef.current);
+    hoveredRef.current = { lineNumber, side };
+
+    const btn = buttonRef.current;
+    const container = containerRef.current;
+    if (!btn || !container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const lineRect = lineElement.getBoundingClientRect();
+
+    btn.style.top = `${lineRect.top - containerRect.top}px`;
+    btn.style.height = `${lineRect.height}px`;
+    btn.style.display = "flex";
+  }, []);
+
+  const hideButton = useCallback(() => {
+    leaveTimeoutRef.current = window.setTimeout(() => {
+      hoveredRef.current = null;
+      if (buttonRef.current) {
+        buttonRef.current.style.display = "none";
+      }
+    }, 100);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative rounded-md overflow-hidden border border-white/[0.06]">
+      <MultiFileDiff<SteerAnnotation & { text?: string }>
+        oldFile={oldFile}
+        newFile={newFile}
+        options={{
+          diffStyle: "split",
+          theme: "pierre-dark",
+          lineDiffType: "word",
+          onLineEnter({ lineNumber, annotationSide, lineElement }) {
+            showButton(lineElement, lineNumber, annotationSide);
+          },
+          onLineLeave() {
+            hideButton();
+          },
+        }}
+        lineAnnotations={buildAnnotationsForFile(
+          newFile.name,
+          openSteers,
+          submittedSteers,
+        )}
+        renderAnnotation={(annotation) => {
+          const meta = annotation.metadata;
+          if ("text" in meta && meta.text != null) {
+            return <SubmittedSteerComment text={meta.text} />;
+          }
+          return (
+            <SteerCommentForm
+              annotation={meta}
+              onSubmit={onSubmit}
+              onCancel={() => onCancel(meta)}
+            />
+          );
+        }}
+      />
+      <div
+        ref={buttonRef}
+        style={{ display: "none" }}
+        className="absolute right-2 z-10 items-center justify-end"
+        onMouseEnter={() => clearTimeout(leaveTimeoutRef.current)}
+        onMouseLeave={() => {
+          hoveredRef.current = null;
+          if (buttonRef.current) {
+            buttonRef.current.style.display = "none";
+          }
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            const h = hoveredRef.current;
+            if (h) {
+              onSteer({
+                fileName: newFile.name,
+                lineNumber: h.lineNumber,
+                side: h.side,
+              });
+            }
+          }}
+          className="flex items-center gap-1.5 rounded bg-teal-600 px-2 py-0.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-teal-500"
+        >
+          Steer
+          <kbd className="rounded bg-teal-500/50 px-1 py-px font-sans text-[10px] text-teal-100">
+            ⌘Y
+          </kbd>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SteerCommentForm({
+  annotation,
+  onSubmit,
+  onCancel,
+}: {
+  annotation: SteerAnnotation;
+  onSubmit: (annotation: SteerAnnotation, text: string) => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-teal-500/30 bg-navy-900/90 p-3">
+      <textarea
+        ref={textareaRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Add steering guidance..."
+        rows={3}
+        className="w-full resize-none rounded border border-white/[0.06] bg-navy-800/80 px-2 py-1.5 text-sm text-ice-100 placeholder:text-navy-600 outline-none focus:border-teal-500/40"
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => onSubmit(annotation, text)}
+          disabled={text.trim().length === 0}
+          className="rounded bg-teal-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-teal-500 disabled:opacity-40 disabled:hover:bg-teal-600"
+        >
+          Submit
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded border border-white/[0.06] bg-navy-800/80 px-3 py-1 text-xs font-medium text-ice-300 transition-colors hover:bg-white/[0.04]"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SubmittedSteerComment({ text }: { text: string }) {
+  return (
+    <div className="rounded-md border border-teal-500/20 bg-teal-950/30 px-3 py-2 text-sm text-ice-200">
+      {text}
+    </div>
+  );
+}
+
+function buildAnnotationsForFile(
+  fileName: string,
+  openSteers: Map<string, SteerAnnotation>,
+  submittedSteers: Map<string, SteerAnnotation & { text: string }>,
+): DiffLineAnnotation<SteerAnnotation & { text?: string }>[] {
+  const annotations: DiffLineAnnotation<SteerAnnotation & { text?: string }>[] = [];
+
+  for (const [, annotation] of openSteers) {
+    if (annotation.fileName === fileName) {
+      annotations.push({
+        side: annotation.side,
+        lineNumber: annotation.lineNumber,
+        metadata: annotation,
+      });
+    }
+  }
+
+  for (const [, annotation] of submittedSteers) {
+    if (annotation.fileName === fileName) {
+      annotations.push({
+        side: annotation.side,
+        lineNumber: annotation.lineNumber,
+        metadata: annotation,
+      });
+    }
+  }
+
+  return annotations;
+}
+
 export default function RunFilesChanged() {
   const [checkpoint, setCheckpoint] = useState(checkpoints[0].id);
+  const [openSteers, setOpenSteers] = useState(
+    () => new Map<string, SteerAnnotation>(),
+  );
+  const [submittedSteers, setSubmittedSteers] = useState(
+    () => new Map<string, SteerAnnotation & { text: string }>(),
+  );
+
+  function handleSteer(annotation: SteerAnnotation) {
+    const key = steerKey(annotation.fileName, annotation.side, annotation.lineNumber);
+    if (openSteers.has(key) || submittedSteers.has(key)) return;
+    setOpenSteers((prev) => new Map(prev).set(key, annotation));
+  }
+
+  function handleSubmit(annotation: SteerAnnotation, text: string) {
+    const key = steerKey(annotation.fileName, annotation.side, annotation.lineNumber);
+    setOpenSteers((prev) => {
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+    setSubmittedSteers((prev) =>
+      new Map(prev).set(key, { ...annotation, text }),
+    );
+    console.log("Steer submitted", { ...annotation, text });
+  }
+
+  function handleCancel(annotation: SteerAnnotation) {
+    const key = steerKey(annotation.fileName, annotation.side, annotation.lineNumber);
+    setOpenSteers((prev) => {
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -265,20 +516,16 @@ export default function RunFilesChanged() {
       </div>
 
       {files.map(({ oldFile, newFile }) => (
-        <div
+        <DiffWithSteer
           key={newFile.name}
-          className="rounded-md overflow-hidden border border-white/[0.06]"
-        >
-          <MultiFileDiff
-            oldFile={oldFile}
-            newFile={newFile}
-            options={{
-              diffStyle: "split",
-              theme: "pierre-dark",
-              lineDiffType: "word",
-            }}
-          />
-        </div>
+          oldFile={oldFile}
+          newFile={newFile}
+          openSteers={openSteers}
+          submittedSteers={submittedSteers}
+          onSteer={handleSteer}
+          onSubmit={handleSubmit}
+          onCancel={handleCancel}
+        />
       ))}
     </div>
   );
