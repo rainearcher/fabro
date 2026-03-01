@@ -287,21 +287,44 @@ impl Session {
             return Err(AgentError::SessionClosed);
         }
 
+        // Spawn wall-clock timeout task if configured
+        let timer_handle = self.config.wall_clock_timeout.map(|duration| {
+            let token = self.cancel_token.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(duration).await;
+                token.cancel();
+            })
+        });
+
         // Process the initial input, then drain any followups
-        self.run_single_input(input).await?;
-        loop {
-            let followup = self
-                .followup_queue
-                .lock()
-                .expect("followup queue lock poisoned")
-                .pop_front();
-            let Some(followup) = followup else { break };
-            self.run_single_input(&followup).await?;
+        let mut result = self.run_single_input(input).await;
+
+        if result.is_ok() {
+            loop {
+                let followup = self
+                    .followup_queue
+                    .lock()
+                    .expect("followup queue lock poisoned")
+                    .pop_front();
+                let Some(followup) = followup else { break };
+                result = self.run_single_input(&followup).await;
+                if result.is_err() {
+                    break;
+                }
+            }
         }
 
-        self.state = SessionState::Idle;
+        // Abort the timer so it doesn't fire after we're done
+        if let Some(handle) = timer_handle {
+            handle.abort();
+        }
 
-        Ok(())
+        // Only transition to Idle if the session wasn't closed by an error
+        if self.state != SessionState::Closed {
+            self.state = SessionState::Idle;
+        }
+
+        result
     }
 
     async fn run_single_input(&mut self, input: &str) -> Result<(), AgentError> {
@@ -2027,5 +2050,65 @@ mod tests {
             tool_completed,
             "ToolCallCompleted should be emitted for MCP tool"
         );
+    }
+
+    #[tokio::test]
+    async fn wall_clock_timeout_aborts_session() {
+        // Register a tool that loops until the cancel token fires
+        let slow_tool = RegisteredTool {
+            definition: ToolDefinition {
+                name: "slow_tool".into(),
+                description: "Waits until cancelled".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            },
+            executor: Arc::new(|_args, ctx| {
+                Box::pin(async move {
+                    ctx.cancel.cancelled().await;
+                    Ok("cancelled".to_string())
+                })
+            }),
+        };
+        let mut registry = ToolRegistry::new();
+        registry.register(slow_tool);
+
+        // LLM will call the slow tool, then (if it ever gets there) respond with text
+        let responses = vec![
+            tool_call_response("slow_tool", "call_1", serde_json::json!({})),
+            text_response("Should not reach this"),
+        ];
+
+        let config = SessionConfig {
+            wall_clock_timeout: Some(std::time::Duration::from_millis(10)),
+            enable_loop_detection: false,
+            ..Default::default()
+        };
+
+        let mut session = make_session_with_tools_and_config(responses, registry, config).await;
+        let result = session.process_input("Do something slow").await;
+
+        assert!(
+            matches!(result, Err(AgentError::Aborted)),
+            "expected Aborted, got {result:?}"
+        );
+        assert_eq!(session.state(), SessionState::Closed);
+    }
+
+    #[tokio::test]
+    async fn wall_clock_timeout_does_not_fire_when_session_completes_in_time() {
+        let responses = vec![text_response("Fast response")];
+
+        let config = SessionConfig {
+            wall_clock_timeout: Some(std::time::Duration::from_secs(10)),
+            ..Default::default()
+        };
+
+        let mut session = make_session_with_config(responses, config).await;
+        let result = session.process_input("Hello").await;
+
+        assert!(result.is_ok());
+        assert_eq!(session.state(), SessionState::Idle);
+        let turns = session.history().turns();
+        assert_eq!(turns.len(), 2);
+        assert!(matches!(&turns[1], Turn::Assistant { content, .. } if content == "Fast response"));
     }
 }

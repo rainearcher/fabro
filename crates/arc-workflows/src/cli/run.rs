@@ -443,8 +443,8 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     }
 
     // 6. Resolve backend, model, and provider
-    let dry_run_mode = if args.dry_run {
-        true
+    let (dry_run_mode, llm_client) = if args.dry_run {
+        (true, None)
     } else {
         match arc_llm::client::Client::from_env().await {
             Ok(c) if c.provider_names().is_empty() => {
@@ -453,15 +453,15 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
                     yellow = styles.yellow,
                     reset = styles.reset,
                 );
-                true
+                (true, None)
             }
-            Ok(_) => false,
+            Ok(c) => (false, Some(c)),
             Err(e) => {
                 eprintln!(
                     "{yellow}Warning:{reset} Failed to initialize LLM client: {e}. Running in dry-run mode.",
                     yellow = styles.yellow, reset = styles.reset,
                 );
-                true
+                (true, None)
             }
         }
     };
@@ -607,56 +607,22 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             ),
             Err(e) => (true, Some(e.to_string())),
         };
-        if let Ok(cp) = Checkpoint::load(&logs_dir.join("checkpoint.json")) {
-            let stage_durations = crate::retro::extract_stage_durations(&logs_dir);
-            let mut retro = crate::retro::derive_retro(
-                &config.run_id,
-                &graph.name,
-                graph.goal(),
-                &cp,
-                failed,
-                failure_reason.as_deref(),
-                run_duration_ms,
-                &stage_durations,
-            );
-            let _ = retro.save(&logs_dir);
-
-            // Run retro agent session (execution_env still alive via _cleanup_guard)
-            let narrative_result = if dry_run_mode {
-                Ok(crate::retro_agent::dry_run_narrative())
-            } else if let Ok(client) = arc_llm::client::Client::from_env().await {
-                crate::retro_agent::run_retro_agent(
-                    &execution_env,
-                    &logs_dir,
-                    &client,
-                    provider_enum,
-                    &model,
-                )
-                .await
-            } else {
-                Err(anyhow::anyhow!("No LLM client available"))
-            };
-
-            match narrative_result {
-                Ok(narrative) => {
-                    retro.apply_narrative(narrative);
-                    let _ = retro.save(&logs_dir);
-                    eprintln!(
-                        "{dim}Retro saved to {}/retro.json{reset}",
-                        logs_dir.display(),
-                        dim = styles.dim,
-                        reset = styles.reset,
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "{dim}Retro agent skipped: {e}{reset}",
-                        dim = styles.dim,
-                        reset = styles.reset,
-                    );
-                }
-            }
-        }
+        generate_retro(
+            &config.run_id,
+            &graph.name,
+            graph.goal(),
+            &logs_dir,
+            failed,
+            failure_reason.as_deref(),
+            run_duration_ms,
+            dry_run_mode,
+            llm_client.as_ref(),
+            &execution_env,
+            provider_enum,
+            &model,
+            styles,
+        )
+        .await;
     }
 
     let outcome = engine_result?;
@@ -955,6 +921,40 @@ async fn run_from_branch(
     let _ = std::env::set_current_dir(&original_cwd);
     let _ = crate::git::remove_worktree(&original_cwd, &worktree_path);
 
+    // Auto-derive retro
+    {
+        let (failed, failure_reason) = match &engine_result {
+            Ok(o) => (
+                o.status == StageStatus::Fail,
+                o.failure_reason.clone(),
+            ),
+            Err(e) => (true, Some(e.to_string())),
+        };
+
+        let llm_client = if dry_run_mode {
+            None
+        } else {
+            arc_llm::client::Client::from_env().await.ok()
+        };
+
+        generate_retro(
+            &config.run_id,
+            &graph.name,
+            graph.goal(),
+            &logs_dir,
+            failed,
+            failure_reason.as_deref(),
+            run_duration_ms,
+            dry_run_mode,
+            llm_client.as_ref(),
+            &execution_env,
+            provider_enum,
+            &model,
+            styles,
+        )
+        .await;
+    }
+
     let outcome = engine_result?;
 
     eprintln!(
@@ -985,6 +985,102 @@ async fn run_from_branch(
     match outcome.status {
         StageStatus::Success | StageStatus::PartialSuccess => Ok(()),
         _ => std::process::exit(1),
+    }
+}
+
+/// Generate a retro report for a completed pipeline run.
+///
+/// Derives a basic retro from the checkpoint, then optionally runs the retro agent
+/// for a richer narrative. Errors are logged as warnings rather than propagated.
+#[allow(clippy::too_many_arguments)]
+async fn generate_retro(
+    run_id: &str,
+    pipeline_name: &str,
+    goal: &str,
+    logs_dir: &std::path::Path,
+    failed: bool,
+    failure_reason: Option<&str>,
+    run_duration_ms: u64,
+    dry_run_mode: bool,
+    llm_client: Option<&arc_llm::client::Client>,
+    execution_env: &Arc<dyn arc_agent::ExecutionEnvironment>,
+    provider_enum: Provider,
+    model: &str,
+    styles: &'static Styles,
+) {
+    let cp = match Checkpoint::load(&logs_dir.join("checkpoint.json")) {
+        Ok(cp) => cp,
+        Err(e) => {
+            eprintln!(
+                "{yellow}Warning:{reset} Could not load checkpoint, skipping retro: {e}",
+                yellow = styles.yellow,
+                reset = styles.reset,
+            );
+            return;
+        }
+    };
+
+    let stage_durations = crate::retro::extract_stage_durations(logs_dir);
+    let mut retro = crate::retro::derive_retro(
+        run_id,
+        pipeline_name,
+        goal,
+        &cp,
+        failed,
+        failure_reason,
+        run_duration_ms,
+        &stage_durations,
+    );
+
+    match retro.save(logs_dir) {
+        Ok(()) => {}
+        Err(e) => {
+            eprintln!(
+                "{yellow}Warning:{reset} Failed to save initial retro: {e}",
+                yellow = styles.yellow,
+                reset = styles.reset,
+            );
+        }
+    }
+
+    // Run retro agent session
+    let narrative_result = if dry_run_mode {
+        Ok(crate::retro_agent::dry_run_narrative())
+    } else if let Some(client) = llm_client {
+        crate::retro_agent::run_retro_agent(execution_env, logs_dir, client, provider_enum, model)
+            .await
+    } else {
+        Err(anyhow::anyhow!("No LLM client available"))
+    };
+
+    match narrative_result {
+        Ok(narrative) => {
+            retro.apply_narrative(narrative);
+            match retro.save(logs_dir) {
+                Ok(()) => {
+                    eprintln!(
+                        "{dim}Retro saved to {}/retro.json{reset}",
+                        logs_dir.display(),
+                        dim = styles.dim,
+                        reset = styles.reset,
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "{yellow}Warning:{reset} Failed to save retro with narrative: {e}",
+                        yellow = styles.yellow,
+                        reset = styles.reset,
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "{dim}Retro agent skipped: {e}{reset}",
+                dim = styles.dim,
+                reset = styles.reset,
+            );
+        }
     }
 }
 

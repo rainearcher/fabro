@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use arc_agent::{
     AnthropicProfile, ExecutionEnvironment, GeminiProfile, OpenAiProfile, ProviderProfile,
@@ -141,7 +142,7 @@ pub async fn run_retro_agent(
             Box::pin(async move {
                 let narrative: RetroNarrative = serde_json::from_value(args)
                     .map_err(|e| format!("Invalid retro submission: {e}"))?;
-                *captured.lock().unwrap() = Some(narrative);
+                *captured.lock().unwrap_or_else(|e| e.into_inner()) = Some(narrative);
                 Ok("Retrospective submitted successfully.".to_string())
             })
         }),
@@ -152,6 +153,7 @@ pub async fn run_retro_agent(
 
     let config = SessionConfig {
         max_tool_rounds_per_input: 10,
+        wall_clock_timeout: Some(Duration::from_secs(120)),
         // Disable features not needed for retro analysis
         enable_context_compaction: false,
         skill_dirs: Some(vec![]),
@@ -183,7 +185,7 @@ pub async fn run_retro_agent(
     // Extract the captured narrative
     let narrative = captured
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .take()
         .ok_or_else(|| anyhow::anyhow!("Retro agent did not call submit_retro"))?;
 

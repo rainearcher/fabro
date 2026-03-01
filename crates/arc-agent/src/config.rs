@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use arc_mcp::config::McpServerConfig;
 
@@ -32,6 +33,9 @@ pub struct SessionConfig {
     pub skill_dirs: Option<Vec<String>>,
     /// MCP server configurations to connect to on session startup.
     pub mcp_servers: Vec<McpServerConfig>,
+    /// Wall-clock timeout for the entire `process_input` call.
+    /// When set, the session's cancel token is triggered after this duration.
+    pub wall_clock_timeout: Option<Duration>,
 }
 
 impl std::fmt::Debug for SessionConfig {
@@ -65,6 +69,7 @@ impl std::fmt::Debug for SessionConfig {
             .field("compaction_preserve_turns", &self.compaction_preserve_turns)
             .field("skill_dirs", &self.skill_dirs)
             .field("mcp_servers", &self.mcp_servers.len())
+            .field("wall_clock_timeout", &self.wall_clock_timeout)
             .finish()
     }
 }
@@ -91,6 +96,7 @@ impl Default for SessionConfig {
             compaction_preserve_turns: 6,
             skill_dirs: None,
             mcp_servers: Vec::new(),
+            wall_clock_timeout: None,
         }
     }
 }
@@ -114,6 +120,7 @@ mod tests {
         assert_eq!(config.max_subagent_depth, 1);
         assert!(config.user_instructions.is_none());
         assert!(config.mcp_servers.is_empty());
+        assert!(config.wall_clock_timeout.is_none());
     }
 
     #[test]
