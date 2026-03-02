@@ -1,0 +1,1786 @@
+openapi: "3.1.0"
+info:
+  title: Arc Run API
+  version: "0.1.0"
+  description: HTTP API for managing Arc workflow run executions.
+
+tags:
+  - name: Runs
+    description: Run management operations
+  - name: Workflows
+    description: Workflow definitions and execution
+  - name: Verifications
+    description: Verification categories and controls
+  - name: Retros
+    description: Run retrospectives
+  - name: Sessions
+    description: Interactive chat sessions
+  - name: Insights
+    description: SQL query editor and history
+  - name: Settings
+    description: Platform configuration
+  - name: Projects
+    description: Project and branch management
+
+paths:
+  # ── Runs ──────────────────────────────────────────────────────────────
+
+  /runs:
+    get:
+      operationId: listRuns
+      tags: [Runs]
+      summary: List all runs (board view)
+      responses:
+        "200":
+          description: Array of runs for the board view
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RunListItem"
+    post:
+      operationId: startRun
+      tags: [Runs]
+      summary: Start a new run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartRunRequest"
+      responses:
+        "201":
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartRunResponse"
+        "400":
+          description: Invalid DOT source
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /runs/{id}:
+    get:
+      operationId: getRunStatus
+      tags: [Runs]
+      summary: Get run status
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Run status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunStatusResponse"
+        "404":
+          description: Run not found
+
+  /runs/{id}/cancel:
+    post:
+      operationId: cancelRun
+      tags: [Runs]
+      summary: Cancel a running run
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Run cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cancelled:
+                    type: boolean
+                required:
+                  - cancelled
+        "404":
+          description: Run not found
+        "409":
+          description: Run is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /runs/{id}/graph:
+    get:
+      operationId: getGraph
+      tags: [Runs]
+      summary: Get run graph as SVG
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: SVG image of the workflow graph
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+        "404":
+          description: Run not found
+        "502":
+          description: Graphviz not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /runs/{id}/checkpoint:
+    get:
+      operationId: getCheckpoint
+      tags: [Runs]
+      summary: Get run checkpoint
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Checkpoint data (null if not yet available)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Run not found
+
+  /runs/{id}/context:
+    get:
+      operationId: getContext
+      tags: [Runs]
+      summary: Get run context
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Context key-value map
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: Run not found
+
+  /runs/{id}/events:
+    get:
+      operationId: getEvents
+      tags: [Runs]
+      summary: Subscribe to run events via SSE
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Server-sent event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "404":
+          description: Run not found
+        "410":
+          description: Event stream closed
+
+  /runs/{id}/questions:
+    get:
+      operationId: getQuestions
+      tags: [Runs]
+      summary: Get pending questions for a run
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Array of pending questions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiQuestion"
+        "404":
+          description: Run not found
+
+  /runs/{id}/questions/{qid}/answer:
+    post:
+      operationId: submitAnswer
+      tags: [Runs]
+      summary: Submit an answer to a question
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitAnswerRequest"
+      responses:
+        "200":
+          description: Answer accepted or rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitAnswerResponse"
+        "400":
+          description: Invalid option key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+
+  /runs/{id}/retro:
+    get:
+      operationId: getRetro
+      tags: [Runs]
+      summary: Get run retrospective
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Retro data (null if not yet available)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Run not found
+
+  /runs/{id}/stages:
+    get:
+      operationId: getRunStages
+      tags: [Runs]
+      summary: List stages with status and duration
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Array of run stages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RunStage"
+        "404":
+          description: Run not found
+
+  /runs/{id}/stages/{stageId}/turns:
+    get:
+      operationId: getStageTurns
+      tags: [Runs]
+      summary: Conversation transcript for a stage
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: stageId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of conversation turns
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StageTurn"
+        "404":
+          description: Run or stage not found
+
+  /runs/{id}/files:
+    get:
+      operationId: getRunFiles
+      tags: [Runs]
+      summary: File diffs grouped by checkpoint
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: checkpoint
+          in: query
+          schema:
+            type: string
+            default: "all"
+      responses:
+        "200":
+          description: File changes with checkpoint metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunFiles"
+        "404":
+          description: Run not found
+
+  /runs/{id}/usage:
+    get:
+      operationId: getRunUsage
+      tags: [Runs]
+      summary: Token and cost breakdown by stage and model
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Usage data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunUsage"
+        "404":
+          description: Run not found
+
+  /runs/{id}/verifications:
+    get:
+      operationId: getRunVerifications
+      tags: [Runs]
+      summary: Verification results for this run
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Array of verification categories with controls
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RunVerification"
+        "404":
+          description: Run not found
+
+  /runs/{id}/configuration:
+    get:
+      operationId: getRunConfiguration
+      tags: [Runs]
+      summary: Run configuration (TOML)
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Configuration content
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          description: Run not found
+
+  /runs/{id}/steer:
+    post:
+      operationId: steerRun
+      tags: [Runs]
+      summary: Submit steering guidance on a file line
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SteerRequest"
+      responses:
+        "200":
+          description: Steering accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted:
+                    type: boolean
+                required:
+                  - accepted
+        "404":
+          description: Run not found
+
+  # ── Workflows ─────────────────────────────────────────────────────────
+
+  /workflows:
+    get:
+      operationId: listWorkflows
+      tags: [Workflows]
+      summary: List all workflows
+      responses:
+        "200":
+          description: Array of workflows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WorkflowListItem"
+
+  /workflows/{name}:
+    get:
+      operationId: getWorkflow
+      tags: [Workflows]
+      summary: Get workflow detail with config and graph
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Workflow detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowDetail"
+        "404":
+          description: Workflow not found
+
+  /workflows/{name}/runs:
+    get:
+      operationId: listWorkflowRuns
+      tags: [Workflows]
+      summary: List runs for this workflow
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RunListItem"
+        "404":
+          description: Workflow not found
+    post:
+      operationId: triggerWorkflowRun
+      tags: [Workflows]
+      summary: Trigger a run for this workflow
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartRunResponse"
+        "404":
+          description: Workflow not found
+
+  # ── Verifications ─────────────────────────────────────────────────────
+
+  /verifications:
+    get:
+      operationId: listVerifications
+      tags: [Verifications]
+      summary: List all verification categories with controls
+      responses:
+        "200":
+          description: Array of verification categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VerificationCategory"
+
+  /verifications/{slug}:
+    get:
+      operationId: getVerificationDetail
+      tags: [Verifications]
+      summary: Control detail with performance and recent results
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Verification control detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationDetailResponse"
+        "404":
+          description: Control not found
+
+  # ── Retros ────────────────────────────────────────────────────────────
+
+  /retros:
+    get:
+      operationId: listRetros
+      tags: [Retros]
+      summary: List all retros across runs
+      responses:
+        "200":
+          description: Array of retros
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RetroListItem"
+
+  # ── Sessions ──────────────────────────────────────────────────────────
+
+  /sessions:
+    get:
+      operationId: listSessions
+      tags: [Sessions]
+      summary: List sessions grouped by recency
+      responses:
+        "200":
+          description: Array of session groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SessionGroup"
+    post:
+      operationId: createSession
+      tags: [Sessions]
+      summary: Create a new session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateSessionResponse"
+
+  /sessions/{id}:
+    get:
+      operationId: getSession
+      tags: [Sessions]
+      summary: Session detail with full turn history
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDetail"
+        "404":
+          description: Session not found
+
+  /sessions/{id}/messages:
+    post:
+      operationId: sendMessage
+      tags: [Sessions]
+      summary: Send a user message
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "200":
+          description: Message accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted:
+                    type: boolean
+                required:
+                  - accepted
+        "404":
+          description: Session not found
+
+  /sessions/{id}/events:
+    get:
+      operationId: getSessionEvents
+      tags: [Sessions]
+      summary: SSE stream for live assistant responses
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Server-sent event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "404":
+          description: Session not found
+
+  # ── Insights ──────────────────────────────────────────────────────────
+
+  /insights/queries:
+    get:
+      operationId: listSavedQueries
+      tags: [Insights]
+      summary: List saved queries
+      responses:
+        "200":
+          description: Array of saved queries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SavedQuery"
+    post:
+      operationId: saveQuery
+      tags: [Insights]
+      summary: Save a query
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveQueryRequest"
+      responses:
+        "201":
+          description: Query saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedQuery"
+
+  /insights/queries/{id}:
+    put:
+      operationId: updateSavedQuery
+      tags: [Insights]
+      summary: Update a saved query
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveQueryRequest"
+      responses:
+        "200":
+          description: Query updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedQuery"
+        "404":
+          description: Query not found
+    delete:
+      operationId: deleteSavedQuery
+      tags: [Insights]
+      summary: Delete a saved query
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Query deleted
+        "404":
+          description: Query not found
+
+  /insights/execute:
+    post:
+      operationId: executeQuery
+      tags: [Insights]
+      summary: Execute a SQL query
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecuteQueryRequest"
+      responses:
+        "200":
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecuteQueryResponse"
+
+  /insights/history:
+    get:
+      operationId: listQueryHistory
+      tags: [Insights]
+      summary: Query execution history
+      responses:
+        "200":
+          description: Array of history entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HistoryEntry"
+
+  # ── Settings ──────────────────────────────────────────────────────────
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [Settings]
+      summary: Get all setting groups with current values
+      responses:
+        "200":
+          description: Array of setting groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SettingGroup"
+
+  # ── Projects ──────────────────────────────────────────────────────────
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [Projects]
+      summary: List available projects
+      responses:
+        "200":
+          description: Array of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+
+  /projects/{id}/branches:
+    get:
+      operationId: listBranches
+      tags: [Projects]
+      summary: List branches for a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of branches
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Branch"
+        "404":
+          description: Project not found
+
+components:
+  parameters:
+    RunId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    # ── Existing Run Schemas ────────────────────────────────────────────
+
+    RunStatus:
+      type: string
+      enum:
+        - running
+        - completed
+        - failed
+        - cancelled
+
+    StartRunRequest:
+      type: object
+      required:
+        - dot_source
+      properties:
+        dot_source:
+          type: string
+
+    StartRunResponse:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+
+    RunStatusResponse:
+      type: object
+      required:
+        - id
+        - status
+      properties:
+        id:
+          type: string
+        status:
+          $ref: "#/components/schemas/RunStatus"
+        error:
+          type: string
+
+    ApiQuestionOption:
+      type: object
+      required:
+        - key
+        - label
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+
+    ApiQuestion:
+      type: object
+      required:
+        - id
+        - text
+        - question_type
+        - options
+        - allow_freeform
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        question_type:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiQuestionOption"
+        allow_freeform:
+          type: boolean
+
+    SubmitAnswerRequest:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+        selected_option_key:
+          type: string
+
+    SubmitAnswerResponse:
+      type: object
+      required:
+        - accepted
+      properties:
+        accepted:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+
+    # ── New Run Schemas ─────────────────────────────────────────────────
+
+    RunListItemStatus:
+      type: string
+      enum:
+        - working
+        - pending
+        - review
+        - merge
+
+    CheckRunStatus:
+      type: string
+      enum:
+        - success
+        - failure
+        - skipped
+        - pending
+        - queued
+
+    CheckRun:
+      type: object
+      required:
+        - name
+        - status
+      properties:
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/CheckRunStatus"
+        duration_secs:
+          type: number
+
+    RunListItem:
+      type: object
+      required:
+        - id
+        - repo
+        - title
+        - workflow
+        - status
+      properties:
+        id:
+          type: string
+        repo:
+          type: string
+        title:
+          type: string
+        workflow:
+          type: string
+        status:
+          $ref: "#/components/schemas/RunListItemStatus"
+        number:
+          type: integer
+        additions:
+          type: integer
+        deletions:
+          type: integer
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckRun"
+        elapsed_secs:
+          type: number
+        elapsed_warning:
+          type: boolean
+        resources:
+          type: string
+        comments:
+          type: integer
+        question:
+          type: string
+        sandbox_id:
+          type: string
+
+    StageStatus:
+      type: string
+      enum:
+        - completed
+        - running
+        - pending
+        - failed
+
+    RunStage:
+      type: object
+      required:
+        - id
+        - name
+        - status
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/StageStatus"
+        duration_secs:
+          type: number
+        dot_id:
+          type: string
+
+    ToolUse:
+      type: object
+      required:
+        - tool_name
+        - args
+        - result
+      properties:
+        tool_name:
+          type: string
+        args:
+          type: string
+        result:
+          type: string
+
+    StageTurn:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - system
+            - assistant
+            - tool
+        content:
+          type: string
+        tools:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolUse"
+
+    FileCheckpoint:
+      type: object
+      required:
+        - id
+        - label
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+
+    DiffFile:
+      type: object
+      required:
+        - name
+        - contents
+      properties:
+        name:
+          type: string
+        contents:
+          type: string
+
+    FileDiff:
+      type: object
+      required:
+        - old_file
+        - new_file
+      properties:
+        old_file:
+          $ref: "#/components/schemas/DiffFile"
+        new_file:
+          $ref: "#/components/schemas/DiffFile"
+
+    DiffStats:
+      type: object
+      required:
+        - additions
+        - deletions
+      properties:
+        additions:
+          type: integer
+        deletions:
+          type: integer
+
+    RunFiles:
+      type: object
+      required:
+        - checkpoints
+        - files
+        - stats
+      properties:
+        checkpoints:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileCheckpoint"
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileDiff"
+        stats:
+          $ref: "#/components/schemas/DiffStats"
+
+    UsageStage:
+      type: object
+      required:
+        - stage
+        - model
+        - input_tokens
+        - output_tokens
+        - runtime_secs
+        - cost
+      properties:
+        stage:
+          type: string
+        model:
+          type: string
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        runtime_secs:
+          type: number
+        cost:
+          type: number
+
+    UsageTotals:
+      type: object
+      required:
+        - runtime_secs
+        - input_tokens
+        - output_tokens
+        - cost
+      properties:
+        runtime_secs:
+          type: number
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        cost:
+          type: number
+
+    UsageByModel:
+      type: object
+      required:
+        - model
+        - stages
+        - input_tokens
+        - output_tokens
+        - cost
+      properties:
+        model:
+          type: string
+        stages:
+          type: integer
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        cost:
+          type: number
+
+    RunUsage:
+      type: object
+      required:
+        - stages
+        - totals
+        - by_model
+      properties:
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageStage"
+        totals:
+          $ref: "#/components/schemas/UsageTotals"
+        by_model:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageByModel"
+
+    VerificationStatus:
+      type: string
+      enum:
+        - pass
+        - fail
+        - na
+
+    VerificationType:
+      type: string
+      enum:
+        - ai
+        - automated
+        - analysis
+        - ai-analysis
+
+    RunVerificationControl:
+      type: object
+      required:
+        - name
+        - description
+        - status
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        type:
+          $ref: "#/components/schemas/VerificationType"
+        status:
+          $ref: "#/components/schemas/VerificationStatus"
+
+    RunVerification:
+      type: object
+      required:
+        - name
+        - question
+        - status
+        - controls
+      properties:
+        name:
+          type: string
+        question:
+          type: string
+        status:
+          $ref: "#/components/schemas/VerificationStatus"
+        controls:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunVerificationControl"
+
+    SteerRequest:
+      type: object
+      required:
+        - file
+        - line
+        - guidance
+      properties:
+        file:
+          type: string
+        line:
+          type: integer
+        guidance:
+          type: string
+
+    # ── Workflow Schemas ─────────────────────────────────────────────────
+
+    WorkflowListItem:
+      type: object
+      required:
+        - name
+        - slug
+        - filename
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        filename:
+          type: string
+        last_run:
+          type: string
+        schedule:
+          type: string
+        next_run:
+          type: string
+
+    WorkflowDetail:
+      type: object
+      required:
+        - title
+        - slug
+        - filename
+        - description
+        - config
+        - graph
+      properties:
+        title:
+          type: string
+        slug:
+          type: string
+        filename:
+          type: string
+        description:
+          type: string
+        config:
+          type: string
+        graph:
+          type: string
+
+    # ── Verification Schemas ────────────────────────────────────────────
+
+    EvaluationResult:
+      type: string
+      enum:
+        - pass
+        - fail
+        - skip
+
+    VerificationMode:
+      type: string
+      enum:
+        - active
+        - evaluate
+        - disabled
+
+    VerificationControl:
+      type: object
+      required:
+        - name
+        - slug
+        - description
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        type:
+          $ref: "#/components/schemas/VerificationType"
+        mode:
+          $ref: "#/components/schemas/VerificationMode"
+        f1:
+          type: number
+        pass_at_1:
+          type: number
+        evaluations:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvaluationResult"
+
+    VerificationCategory:
+      type: object
+      required:
+        - name
+        - question
+        - controls
+      properties:
+        name:
+          type: string
+        question:
+          type: string
+        controls:
+          type: array
+          items:
+            $ref: "#/components/schemas/VerificationControl"
+
+    ControlInfo:
+      type: object
+      required:
+        - name
+        - slug
+        - description
+        - category
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        type:
+          $ref: "#/components/schemas/VerificationType"
+        category:
+          type: string
+
+    ControlPerformance:
+      type: object
+      required:
+        - mode
+        - evaluations
+      properties:
+        mode:
+          $ref: "#/components/schemas/VerificationMode"
+        f1:
+          type: number
+        pass_at_1:
+          type: number
+        evaluations:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvaluationResult"
+
+    ControlDetail:
+      type: object
+      required:
+        - description
+        - checks
+        - pass_example
+        - fail_example
+      properties:
+        description:
+          type: string
+        checks:
+          type: array
+          items:
+            type: string
+        pass_example:
+          type: string
+        fail_example:
+          type: string
+
+    RecentControlResult:
+      type: object
+      required:
+        - run_id
+        - run_title
+        - workflow
+        - result
+        - timestamp
+      properties:
+        run_id:
+          type: string
+        run_title:
+          type: string
+        workflow:
+          type: string
+        result:
+          $ref: "#/components/schemas/VerificationStatus"
+        timestamp:
+          type: string
+
+    SiblingControl:
+      type: object
+      required:
+        - name
+        - slug
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        type:
+          $ref: "#/components/schemas/VerificationType"
+        mode:
+          $ref: "#/components/schemas/VerificationMode"
+
+    VerificationDetailResponse:
+      type: object
+      required:
+        - control
+        - performance
+        - control_detail
+        - recent_results
+        - siblings
+      properties:
+        control:
+          $ref: "#/components/schemas/ControlInfo"
+        performance:
+          $ref: "#/components/schemas/ControlPerformance"
+        control_detail:
+          $ref: "#/components/schemas/ControlDetail"
+        recent_results:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecentControlResult"
+        siblings:
+          type: array
+          items:
+            $ref: "#/components/schemas/SiblingControl"
+
+    # ── Retro Schemas ───────────────────────────────────────────────────
+
+    SmoothnessRating:
+      type: string
+      enum:
+        - effortless
+        - smooth
+        - bumpy
+        - struggled
+        - failed
+
+    RetroStats:
+      type: object
+      required:
+        - total_duration_ms
+        - total_retries
+        - files_touched
+        - stages_completed
+        - stages_failed
+      properties:
+        total_duration_ms:
+          type: integer
+        total_cost:
+          type: number
+        total_retries:
+          type: integer
+        files_touched:
+          type: array
+          items:
+            type: string
+        stages_completed:
+          type: integer
+        stages_failed:
+          type: integer
+
+    RetroListItem:
+      type: object
+      required:
+        - run_id
+        - workflow_name
+        - goal
+        - timestamp
+        - stats
+        - friction_point_count
+      properties:
+        run_id:
+          type: string
+        workflow_name:
+          type: string
+        goal:
+          type: string
+        timestamp:
+          type: string
+        smoothness:
+          $ref: "#/components/schemas/SmoothnessRating"
+        stats:
+          $ref: "#/components/schemas/RetroStats"
+        friction_point_count:
+          type: integer
+
+    # ── Session Schemas ─────────────────────────────────────────────────
+
+    SessionListItem:
+      type: object
+      required:
+        - id
+        - title
+        - repo
+        - time
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        repo:
+          type: string
+        time:
+          type: string
+
+    SessionGroup:
+      type: object
+      required:
+        - label
+        - sessions
+      properties:
+        label:
+          type: string
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionListItem"
+
+    SessionTurn:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - user
+            - assistant
+            - tool
+        content:
+          type: string
+        date:
+          type: string
+        tools:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolUse"
+
+    SessionDetail:
+      type: object
+      required:
+        - id
+        - title
+        - repo
+        - model
+        - turns
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        repo:
+          type: string
+        model:
+          type: string
+        turns:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionTurn"
+
+    CreateSessionRequest:
+      type: object
+      required:
+        - project
+        - branch
+        - prompt
+      properties:
+        project:
+          type: string
+        branch:
+          type: string
+        prompt:
+          type: string
+
+    CreateSessionResponse:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+
+    SendMessageRequest:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: string
+
+    # ── Insights Schemas ────────────────────────────────────────────────
+
+    SavedQuery:
+      type: object
+      required:
+        - id
+        - name
+        - sql
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        sql:
+          type: string
+
+    SaveQueryRequest:
+      type: object
+      required:
+        - name
+        - sql
+      properties:
+        name:
+          type: string
+        sql:
+          type: string
+
+    ExecuteQueryRequest:
+      type: object
+      required:
+        - sql
+      properties:
+        sql:
+          type: string
+
+    ExecuteQueryResponse:
+      type: object
+      required:
+        - columns
+        - rows
+        - elapsed
+        - row_count
+      properties:
+        columns:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: array
+            items: {}
+        elapsed:
+          type: number
+        row_count:
+          type: integer
+
+    HistoryEntry:
+      type: object
+      required:
+        - id
+        - sql
+        - timestamp
+        - elapsed
+        - row_count
+      properties:
+        id:
+          type: string
+        sql:
+          type: string
+        timestamp:
+          type: string
+        elapsed:
+          type: number
+        row_count:
+          type: integer
+
+    # ── Settings Schemas ────────────────────────────────────────────────
+
+    SettingFieldType:
+      type: string
+      enum:
+        - text
+        - select
+        - toggle
+
+    SettingField:
+      type: object
+      required:
+        - key
+        - label
+        - value
+        - type
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        value:
+          type: string
+        type:
+          $ref: "#/components/schemas/SettingFieldType"
+        options:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+
+    SettingGroup:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - fields
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/SettingField"
+
+    # ── Project Schemas ─────────────────────────────────────────────────
+
+    Project:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+
+    Branch:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
