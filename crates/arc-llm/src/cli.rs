@@ -1,4 +1,5 @@
 use std::io::{self, IsTerminal, Read};
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand};
@@ -50,15 +51,15 @@ pub enum ModelsCommand {
         query: Option<String>,
     },
 
-    /// Download model metadata from OpenRouter
-    Sync {
-        /// URL to fetch models from
-        #[arg(long, default_value = "https://openrouter.ai/api/v1/models")]
-        url: String,
+    /// Test model availability by sending a simple prompt
+    Test {
+        /// Filter by provider
+        #[arg(short, long)]
+        provider: Option<String>,
 
-        /// Output file path
-        #[arg(short, long, default_value = "openrouter_models.json")]
-        output: String,
+        /// Test a specific model
+        #[arg(short, long)]
+        model: Option<String>,
     },
 }
 
@@ -233,26 +234,6 @@ pub async fn run_prompt(args: PromptArgs) -> Result<()> {
     Ok(())
 }
 
-async fn sync_models(url: &str, output: &str) -> Result<()> {
-    let body = reqwest::get(url)
-        .await
-        .context("failed to connect to models endpoint")?
-        .error_for_status()
-        .context("models endpoint returned an error")?
-        .text()
-        .await
-        .context("failed to read response body")?;
-
-    let json: serde_json::Value =
-        serde_json::from_str(&body).context("response is not valid JSON")?;
-    let pretty = serde_json::to_string_pretty(&json).context("failed to format JSON")?;
-
-    std::fs::write(output, &pretty).with_context(|| format!("failed to write {output}"))?;
-
-    eprintln!("Saved models to {output}");
-    Ok(())
-}
-
 pub async fn run_models(command: Option<ModelsCommand>) -> Result<()> {
     let command = command.unwrap_or(ModelsCommand::List {
         provider: None,
@@ -276,9 +257,57 @@ pub async fn run_models(command: Option<ModelsCommand>) -> Result<()> {
 
             print_models_table(&models);
         }
-        ModelsCommand::Sync { url, output } => {
-            sync_models(&url, &output).await?;
+        ModelsCommand::Test { provider, model } => {
+            test_models(provider.as_deref(), model.as_deref()).await?;
         }
+    }
+
+    Ok(())
+}
+
+async fn test_models(provider: Option<&str>, model: Option<&str>) -> Result<()> {
+    let models_to_test = if let Some(model_id) = model {
+        match catalog::get_model_info(model_id) {
+            Some(info) => vec![info],
+            None => bail!("Unknown model: {model_id}"),
+        }
+    } else {
+        catalog::list_models(provider)
+    };
+
+    if models_to_test.is_empty() {
+        bail!("No models found");
+    }
+
+    println!("{:<30} {:<12} RESULT", "MODEL", "PROVIDER");
+
+    let mut failures = 0u32;
+    for info in &models_to_test {
+        let params = GenerateParams::new(&info.id)
+            .provider(&info.provider)
+            .prompt("Say OK")
+            .max_tokens(5);
+
+        let result =
+            tokio::time::timeout(Duration::from_secs(10), generate::generate(params)).await;
+
+        let status = match result {
+            Ok(Ok(_)) => "ok".to_string(),
+            Ok(Err(e)) => {
+                failures += 1;
+                format!("error: {e}")
+            }
+            Err(_) => {
+                failures += 1;
+                "error: timeout (10s)".to_string()
+            }
+        };
+
+        println!("{:<30} {:<12} {status}", info.id, info.provider);
+    }
+
+    if failures > 0 {
+        bail!("{failures} model(s) failed");
     }
 
     Ok(())

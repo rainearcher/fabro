@@ -17,32 +17,43 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// LLM prompt and model operations
+    /// LLM prompt operations
     Llm {
         #[command(subcommand)]
         command: LlmCommand,
     },
     /// Run an agentic coding session
     Agent(arc_agent::cli::AgentArgs),
-    /// Launch a pipeline
-    Run(arc_workflows::cli::RunArgs),
+    /// Launch and manage pipeline runs
+    Run {
+        #[command(subcommand)]
+        command: RunCommand,
+    },
     /// Validate a pipeline
     Validate(arc_workflows::cli::ValidateArgs),
-    /// List and manage pipeline runs
-    Runs(arc_workflows::cli::runs::RunsArgs),
+    /// List and test LLM models
+    Models {
+        #[command(subcommand)]
+        command: Option<arc_llm::cli::ModelsCommand>,
+    },
     /// Start the HTTP API server
     Serve(arc_api::serve::ServeArgs),
+}
+
+#[derive(Subcommand)]
+enum RunCommand {
+    /// Launch a pipeline from a .dot or .toml task file
+    Start(arc_workflows::cli::RunArgs),
+    /// List pipeline runs
+    List(arc_workflows::cli::runs::RunsListArgs),
+    /// Delete old pipeline runs
+    Prune(arc_workflows::cli::runs::RunsPruneArgs),
 }
 
 #[derive(Subcommand)]
 enum LlmCommand {
     /// Execute a prompt
     Prompt(arc_llm::cli::PromptArgs),
-    /// Manage models
-    Models {
-        #[command(subcommand)]
-        command: Option<arc_llm::cli::ModelsCommand>,
-    },
 }
 
 #[tokio::main]
@@ -59,9 +70,9 @@ async fn main() -> Result<()> {
     let command_name = match &cli.command {
         Command::Llm { .. } => "llm",
         Command::Agent(_) => "agent",
-        Command::Run(_) => "run",
+        Command::Run { .. } => "run",
         Command::Validate(_) => "validate",
-        Command::Runs(_) => "runs",
+        Command::Models { .. } => "models",
         Command::Serve(_) => "serve",
     };
     debug!(command = %command_name, "CLI command started");
@@ -69,21 +80,26 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Llm { command } => match command {
             LlmCommand::Prompt(args) => arc_llm::cli::run_prompt(args).await?,
-            LlmCommand::Models { command } => arc_llm::cli::run_models(command).await?,
         },
         Command::Agent(args) => arc_agent::cli::run_with_args(args).await?,
-        Command::Run(args) => {
-            let styles: &'static arc_util::terminal::Styles =
-                Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
-            arc_workflows::cli::run::run_command(args, styles).await?;
-        }
+        Command::Run { command } => match command {
+            RunCommand::Start(args) => {
+                let styles: &'static arc_util::terminal::Styles =
+                    Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
+                arc_workflows::cli::run::run_command(args, styles).await?;
+            }
+            RunCommand::List(args) => {
+                arc_workflows::cli::runs::list_command(&args)?;
+            }
+            RunCommand::Prune(args) => {
+                arc_workflows::cli::runs::prune_command(&args)?;
+            }
+        },
         Command::Validate(args) => {
             let styles = arc_util::terminal::Styles::detect_stderr();
             arc_workflows::cli::validate::validate_command(&args, &styles)?;
         }
-        Command::Runs(args) => {
-            arc_workflows::cli::runs::runs_command(args)?;
-        }
+        Command::Models { command } => arc_llm::cli::run_models(command).await?,
         Command::Serve(args) => {
             let styles: &'static arc_util::terminal::Styles =
                 Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));

@@ -2,24 +2,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use clap::{Args, Subcommand};
+use clap::Args;
 use serde::Serialize;
 use tracing::{debug, info};
-
-/// Arguments for the `arc runs` command.
-#[derive(Args)]
-pub struct RunsArgs {
-    #[command(subcommand)]
-    pub command: Option<RunsCommand>,
-}
-
-#[derive(Subcommand)]
-pub enum RunsCommand {
-    /// List pipeline runs
-    List(RunsListArgs),
-    /// Delete old pipeline runs
-    Prune(RunsPruneArgs),
-}
 
 #[derive(Args)]
 pub struct RunsListArgs {
@@ -334,20 +319,6 @@ pub fn prune_from(args: &RunsPruneArgs, base: &Path) -> Result<()> {
         );
     }
     Ok(())
-}
-
-pub fn runs_command(args: RunsArgs) -> Result<()> {
-    match args.command {
-        None => list_command(&RunsListArgs {
-            before: None,
-            pipeline: None,
-            label: Vec::new(),
-            orphans: false,
-            json: false,
-        }),
-        Some(RunsCommand::List(args)) => list_command(&args),
-        Some(RunsCommand::Prune(args)) => prune_command(&args),
-    }
 }
 
 #[cfg(test)]
