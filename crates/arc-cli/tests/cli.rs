@@ -456,10 +456,10 @@ fn dry_run_legacy_tool() {
         .success();
 }
 
-// == NDJSON logging ===========================================================
+// == JSONL logging ============================================================
 
 #[test]
-fn dry_run_writes_ndjson_and_live_json() {
+fn dry_run_writes_jsonl_and_live_json() {
     let tmp = tempfile::tempdir().unwrap();
     let logs_dir = tmp.path().join("logs");
 
@@ -476,14 +476,14 @@ fn dry_run_writes_ndjson_and_live_json() {
         .assert()
         .success();
 
-    // progress.ndjson must exist and contain valid JSON lines
-    let ndjson_path = logs_dir.join("progress.ndjson");
-    assert!(ndjson_path.exists(), "progress.ndjson should exist");
-    let ndjson_content = std::fs::read_to_string(&ndjson_path).unwrap();
-    let lines: Vec<&str> = ndjson_content.lines().collect();
+    // progress.jsonl must exist and contain valid JSON lines
+    let jsonl_path = logs_dir.join("progress.jsonl");
+    assert!(jsonl_path.exists(), "progress.jsonl should exist");
+    let jsonl_content = std::fs::read_to_string(&jsonl_path).unwrap();
+    let lines: Vec<&str> = jsonl_content.lines().collect();
     assert!(
         !lines.is_empty(),
-        "progress.ndjson should have at least one line"
+        "progress.jsonl should have at least one line"
     );
 
     // Every line must be valid JSON with timestamp, run_id, and event keys
@@ -513,7 +513,7 @@ fn dry_run_writes_ndjson_and_live_json() {
     let run_id = last_line["run_id"].as_str().unwrap();
     assert!(!run_id.is_empty(), "run_id should be non-empty");
 
-    // live.json must exist and contain valid JSON matching the last NDJSON line
+    // live.json must exist and contain valid JSON matching the last JSONL line
     let live_path = logs_dir.join("live.json");
     assert!(live_path.exists(), "live.json should exist");
     let live_content: serde_json::Value =

@@ -15,7 +15,7 @@ use crate::retro::RetroNarrative;
 const RETRO_SYSTEM_PROMPT: &str = r#"You are a workflow run retrospective analyst. Your job is to analyze a completed workflow run and generate a structured retrospective.
 
 You have access to the run's data files:
-- `progress.ndjson` — the full event stream (stage starts/completions, agent tool calls, errors, retries)
+- `progress.jsonl` — the full event stream (stage starts/completions, agent tool calls, errors, retries)
 - `checkpoint.json` — final execution state with node outcomes
 - `manifest.json` — run metadata (if available)
 
@@ -109,7 +109,7 @@ const SUBMIT_RETRO_SCHEMA: &str = r#"{
 }"#;
 
 /// Run a retro agent session that analyzes workflow run data and produces
-/// a structured narrative. The agent explores `progress.ndjson` and other
+/// a structured narrative. The agent explores `progress.jsonl` and other
 /// files via tool access, then calls `submit_retro` with its analysis.
 pub async fn run_retro_agent(
     sandbox: &Arc<dyn Sandbox>,
@@ -172,7 +172,7 @@ pub async fn run_retro_agent(
 
     let prompt = format!(
         "Analyze the workflow run data at `{retro_data_dir}/` and generate a retrospective. \
-         The key file is `{retro_data_dir}/progress.ndjson` which contains the full event stream. \
+         The key file is `{retro_data_dir}/progress.jsonl` which contains the full event stream. \
          Also check `{retro_data_dir}/checkpoint.json` for stage outcomes. \
          Use grep to search for interesting signals (failures, retries, errors, approach changes) \
          rather than reading the entire file. When done, call the `submit_retro` tool with your analysis."
@@ -228,7 +228,7 @@ async fn upload_data_files(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create retro data dir: {e}"))?;
 
-    let files = ["progress.ndjson", "checkpoint.json", "manifest.json"];
+    let files = ["progress.jsonl", "checkpoint.json", "manifest.json"];
     for filename in &files {
         let source = logs_root.join(filename);
         if source.exists() {

@@ -195,9 +195,9 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         }
     });
 
-    // NDJSON progress log + live.json snapshot
+    // JSONL progress log + live.json snapshot
     {
-        let ndjson_path = logs_dir.join("progress.ndjson");
+        let jsonl_path = logs_dir.join("progress.jsonl");
         let live_path = logs_dir.join("live.json");
         let run_id = Arc::new(Mutex::new(String::new()));
         let run_id_clone = Arc::clone(&run_id);
@@ -210,14 +210,14 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
                 "run_id": *run_id_clone.lock().unwrap(),
                 "event": event,
             });
-            // Append to progress.ndjson
+            // Append to progress.jsonl
             if let Ok(line) = serde_json::to_string(&envelope) {
                 let line = arc_util::redact::redact_jsonl_line(&line);
                 use std::io::Write;
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(&ndjson_path)
+                    .open(&jsonl_path)
                 {
                     let _ = writeln!(f, "{line}");
                 }

@@ -172,11 +172,11 @@ impl Retro {
     }
 }
 
-/// Extract stage durations from `progress.ndjson` by reading `StageCompleted` events.
+/// Extract stage durations from `progress.jsonl` by reading `StageCompleted` events.
 pub fn extract_stage_durations(logs_root: &Path) -> HashMap<String, u64> {
     let mut durations = HashMap::new();
-    let ndjson_path = logs_root.join("progress.ndjson");
-    let Ok(data) = std::fs::read_to_string(&ndjson_path) else {
+    let jsonl_path = logs_root.join("progress.jsonl");
+    let Ok(data) = std::fs::read_to_string(&jsonl_path) else {
         return durations;
     };
     for line in data.lines() {
@@ -517,9 +517,9 @@ mod tests {
     }
 
     #[test]
-    fn extract_stage_durations_from_ndjson() {
+    fn extract_stage_durations_from_jsonl() {
         let dir = tempfile::tempdir().unwrap();
-        let ndjson = dir.path().join("progress.ndjson");
+        let jsonl = dir.path().join("progress.jsonl");
 
         let event1 = serde_json::json!({
             "timestamp": "2025-01-01T00:00:00.000Z",
@@ -568,7 +568,7 @@ mod tests {
             serde_json::to_string(&event1).unwrap(),
             serde_json::to_string(&event2).unwrap()
         );
-        std::fs::write(&ndjson, content).unwrap();
+        std::fs::write(&jsonl, content).unwrap();
 
         let durations = extract_stage_durations(dir.path());
         assert_eq!(durations.get("plan"), Some(&5000));
