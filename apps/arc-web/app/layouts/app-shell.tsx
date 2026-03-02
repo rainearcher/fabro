@@ -69,7 +69,7 @@ export default function AppShell() {
             <div className="flex items-center">
               <div className="shrink-0">
                 <Link to="/start">
-                  <img alt="Arc" src="/logotype.svg" className="h-8 w-auto" />
+                  <img alt="Arc" src={theme === "dark" ? "/logotype.svg" : "/logotype-light.svg"} className="h-8 w-auto" />
                 </Link>
               </div>
               <div className="hidden md:block">
