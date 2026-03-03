@@ -57,6 +57,26 @@ impl Default for ApiConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum GitProvider {
+    Github,
+}
+
+impl Default for GitProvider {
+    fn default() -> Self {
+        Self::Github
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct GitConfig {
+    #[serde(default)]
+    pub provider: GitProvider,
+    pub app_id: Option<String>,
+    pub client_id: Option<String>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct AppConfig {
     pub data_dir: Option<PathBuf>,
@@ -64,6 +84,8 @@ pub struct AppConfig {
     pub auth: AuthConfig,
     #[serde(default)]
     pub api: ApiConfig,
+    #[serde(default)]
+    pub git: GitConfig,
 }
 
 /// Load app config from `~/.arc/arc.toml`, returning defaults if the file doesn't exist.
@@ -138,6 +160,11 @@ allowed_usernames = ["brynary", "alice"]
 [api]
 base_url = "http://example.com:8080"
 authentication_strategy = "jwt"
+
+[git]
+provider = "github"
+app_id = "12345"
+client_id = "Iv1.abc123"
 "#;
         let config: AppConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.auth.provider, AuthProvider::Github);
@@ -147,6 +174,9 @@ authentication_strategy = "jwt"
             config.api.authentication_strategy,
             ApiAuthenticationStrategy::Jwt
         );
+        assert_eq!(config.git.provider, GitProvider::Github);
+        assert_eq!(config.git.app_id.as_deref(), Some("12345"));
+        assert_eq!(config.git.client_id.as_deref(), Some("Iv1.abc123"));
     }
 
     #[test]
@@ -166,6 +196,29 @@ authentication_strategy = "jwt"
             config.api.authentication_strategy,
             ApiAuthenticationStrategy::Jwt
         );
+    }
+
+    #[test]
+    fn parse_git_config() {
+        let toml = r#"
+[git]
+provider = "github"
+app_id = "12345"
+client_id = "Iv1.abc123"
+"#;
+        let config: AppConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.git.provider, GitProvider::Github);
+        assert_eq!(config.git.app_id.as_deref(), Some("12345"));
+        assert_eq!(config.git.client_id.as_deref(), Some("Iv1.abc123"));
+    }
+
+    #[test]
+    fn parse_git_defaults() {
+        let toml = "";
+        let config: AppConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.git.provider, GitProvider::Github);
+        assert_eq!(config.git.app_id, None);
+        assert_eq!(config.git.client_id, None);
     }
 
     #[test]

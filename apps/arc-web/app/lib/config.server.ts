@@ -13,9 +13,16 @@ interface ApiConfig {
   authentication_strategy: "jwt" | "insecure_disabled";
 }
 
+interface GitConfig {
+  provider: "github";
+  app_id: string | null;
+  client_id: string | null;
+}
+
 export interface AppConfig {
   auth: AuthConfig;
   api: ApiConfig;
+  git: GitConfig;
 }
 
 const AUTH_DEFAULTS: AuthConfig = {
@@ -26,6 +33,12 @@ const AUTH_DEFAULTS: AuthConfig = {
 const API_DEFAULTS: ApiConfig = {
   base_url: "http://localhost:3000",
   authentication_strategy: "jwt",
+};
+
+const GIT_DEFAULTS: GitConfig = {
+  provider: "github",
+  app_id: null,
+  client_id: null,
 };
 
 function loadAppConfig(): AppConfig {
@@ -40,10 +53,12 @@ function loadAppConfig(): AppConfig {
 
   const rawAuth = (raw.auth ?? {}) as Partial<AuthConfig>;
   const rawApi = (raw.api ?? {}) as Partial<ApiConfig>;
+  const rawGit = (raw.git ?? {}) as Partial<GitConfig>;
 
   return {
     auth: { ...AUTH_DEFAULTS, ...rawAuth },
     api: { ...API_DEFAULTS, ...rawApi },
+    git: { ...GIT_DEFAULTS, ...rawGit },
   };
 }
 

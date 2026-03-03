@@ -1,10 +1,13 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { redirect } from "react-router";
+import { parse, stringify } from "smol-toml";
 import type { Route } from "./+types/setup-callback";
 
 const ENV_PATH = resolve(import.meta.dirname, "../../../../.env");
+const TOML_PATH = resolve(homedir(), ".arc", "arc.toml");
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
@@ -33,6 +36,23 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const sessionSecret = randomBytes(32).toString("hex");
 
+  // Write non-secrets to TOML config
+  let tomlConfig: Record<string, unknown> = {};
+  try {
+    tomlConfig = parse(await readFile(TOML_PATH, "utf-8")) as Record<string, unknown>;
+  } catch {
+    // file doesn't exist yet
+  }
+  tomlConfig.git = {
+    ...((tomlConfig.git as Record<string, unknown>) ?? {}),
+    provider: "github",
+    app_id: String(data.id),
+    client_id: data.client_id,
+  };
+  await mkdir(resolve(homedir(), ".arc"), { recursive: true });
+  await writeFile(TOML_PATH, stringify(tomlConfig), "utf-8");
+
+  // Write secrets to .env
   let existing = "";
   try {
     existing = await readFile(ENV_PATH, "utf-8");
@@ -42,8 +62,6 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const newVars = [
     `export SESSION_SECRET=${sessionSecret}`,
-    `export GITHUB_APP_ID=${data.id}`,
-    `export GITHUB_APP_CLIENT_ID=${data.client_id}`,
     `export GITHUB_APP_CLIENT_SECRET=${data.client_secret}`,
     `export GITHUB_APP_WEBHOOK_SECRET=${data.webhook_secret}`,
     `export GITHUB_APP_PRIVATE_KEY=${Buffer.from(data.pem).toString("base64")}`,
@@ -53,8 +71,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   await writeFile(ENV_PATH, envContent, "utf-8");
 
   process.env.SESSION_SECRET = sessionSecret;
-  process.env.GITHUB_APP_ID = String(data.id);
-  process.env.GITHUB_APP_CLIENT_ID = data.client_id;
   process.env.GITHUB_APP_CLIENT_SECRET = data.client_secret;
   process.env.GITHUB_APP_WEBHOOK_SECRET = data.webhook_secret;
   process.env.GITHUB_APP_PRIVATE_KEY = Buffer.from(data.pem).toString("base64");
