@@ -53,6 +53,7 @@
         "groups": [
           {
             "group": "Runs",
+            "icon": "play",
             "pages": [
               "GET /runs",
               "POST /runs",
@@ -64,6 +65,7 @@
           },
           {
             "group": "Human-in-the-Loop",
+            "icon": "hand",
             "pages": [
               "GET /runs/{id}/questions",
               "POST /runs/{id}/questions/{qid}/answer",
@@ -73,6 +75,7 @@
           },
           {
             "group": "Run Outputs",
+            "icon": "file-export",
             "pages": [
               "GET /runs/{id}/files",
               "GET /runs/{id}/usage",
@@ -81,6 +84,7 @@
           },
           {
             "group": "Run Internals",
+            "icon": "microchip",
             "pages": [
               "GET /runs/{id}/checkpoint",
               "GET /runs/{id}/context",
@@ -91,6 +95,7 @@
           },
           {
             "group": "Workflows",
+            "icon": "diagram-project",
             "pages": [
               "GET /workflows",
               "GET /workflows/{name}",
@@ -100,6 +105,7 @@
           },
           {
             "group": "Verifications",
+            "icon": "shield-check",
             "pages": [
               "GET /verifications",
               "GET /verifications/{slug}"
@@ -107,6 +113,7 @@
           },
           {
             "group": "Insights",
+            "icon": "magnifying-glass-chart",
             "pages": [
               "GET /insights/queries",
               "POST /insights/queries",
@@ -118,6 +125,7 @@
           },
           {
             "group": "Sessions",
+            "icon": "comments",
             "pages": [
               "GET /sessions",
               "POST /sessions",
@@ -128,6 +136,7 @@
           },
           {
             "group": "Retros",
+            "icon": "clock-rotate-left",
             "pages": [
               "GET /runs/{id}/retro",
               "GET /retros"
@@ -135,6 +144,7 @@
           },
           {
             "group": "Projects",
+            "icon": "folder",
             "pages": [
               "GET /projects",
               "GET /projects/{id}/branches"
@@ -142,6 +152,7 @@
           },
           {
             "group": "Settings",
+            "icon": "gear",
             "pages": [
               "GET /settings"
             ]
