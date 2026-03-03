@@ -91,13 +91,13 @@ fn format_cost(cost: Option<f64>) -> String {
 
 fn print_models_table(models: &[crate::types::ModelInfo]) {
     println!(
-        "{:<30} {:<12} {:<30} {:>10}  {:>7} {:>7}",
-        "ID", "PROVIDER", "ALIASES", "CONTEXT", "COST", ""
+        "{:<24} {:<12} {:<24} {:>10}  {:>7} {:>7}",
+        "MODEL", "PROVIDER", "ALIASES", "CONTEXT", "COST", ""
     );
     for model in models {
         let aliases = model.aliases.join(", ");
         println!(
-            "{:<30} {:<12} {:<30} {:>10}  {:>7} / {:<7}",
+            "{:<24} {:<12} {:<24} {:>10}  {:>7} / {:<7}",
             model.id,
             model.provider,
             aliases,
@@ -365,7 +365,10 @@ async fn test_models(provider: Option<&str>, model: Option<&str>) -> Result<()> 
         bail!("No models found");
     }
 
-    println!("{:<30} {:<12} RESULT", "MODEL", "PROVIDER");
+    println!(
+        "{:<24} {:<12} {:>10}  {:>7}   {:>7}  {}",
+        "MODEL", "PROVIDER", "CONTEXT", "COST", "", "RESULT"
+    );
 
     let mut failures = 0u32;
     for info in &models_to_test {
@@ -389,7 +392,14 @@ async fn test_models(provider: Option<&str>, model: Option<&str>) -> Result<()> 
             }
         };
 
-        println!("{:<30} {:<12} {status}", info.id, info.provider);
+        println!(
+            "{:<24} {:<12} {:>10}  {:>7} / {:<7}  {status}",
+            info.id,
+            info.provider,
+            format_context_window(info.context_window),
+            format_cost(info.input_cost_per_million),
+            format_cost(info.output_cost_per_million)
+        );
     }
 
     if failures > 0 {
