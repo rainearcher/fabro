@@ -528,11 +528,11 @@ fn dry_run_writes_jsonl_and_live_json() {
         "progress.jsonl should have at least one line"
     );
 
-    // Every line must be valid JSON with timestamp, run_id, and event keys
+    // Every line must be valid JSON with ts, run_id, and event keys
     let first_line: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
     assert!(
-        first_line.get("timestamp").is_some(),
-        "line should have timestamp"
+        first_line.get("ts").is_some(),
+        "line should have ts"
     );
     assert!(
         first_line.get("run_id").is_some(),
@@ -560,7 +560,7 @@ fn dry_run_writes_jsonl_and_live_json() {
     assert!(live_path.exists(), "live.json should exist");
     let live_content: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&live_path).unwrap()).unwrap();
-    assert!(live_content.get("timestamp").is_some());
+    assert!(live_content.get("ts").is_some());
     assert!(live_content.get("run_id").is_some());
     assert!(live_content.get("event").is_some());
 }

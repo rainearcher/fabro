@@ -33,6 +33,7 @@ pub enum WorkflowRunEvent {
         git_commit_sha: Option<String>,
     },
     StageStarted {
+        node_id: String,
         name: String,
         index: usize,
         handler_type: Option<String>,
@@ -40,6 +41,7 @@ pub enum WorkflowRunEvent {
         max_attempts: usize,
     },
     StageCompleted {
+        node_id: String,
         name: String,
         index: usize,
         duration_ms: u64,
@@ -55,6 +57,7 @@ pub enum WorkflowRunEvent {
         failure_class: Option<String>,
     },
     StageFailed {
+        node_id: String,
         name: String,
         index: usize,
         error: String,
@@ -63,6 +66,7 @@ pub enum WorkflowRunEvent {
         failure_class: Option<String>,
     },
     StageRetrying {
+        node_id: String,
         name: String,
         index: usize,
         attempt: usize,
@@ -199,6 +203,7 @@ impl WorkflowRunEvent {
                 error!(error, duration_ms, "Workflow run failed");
             }
             Self::StageStarted {
+                node_id,
                 name,
                 index,
                 handler_type,
@@ -206,6 +211,7 @@ impl WorkflowRunEvent {
                 max_attempts,
             } => {
                 debug!(
+                    node_id,
                     stage = name.as_str(),
                     index,
                     handler_type = handler_type.as_deref().unwrap_or(""),
@@ -215,6 +221,7 @@ impl WorkflowRunEvent {
                 );
             }
             Self::StageCompleted {
+                node_id,
                 name,
                 index,
                 duration_ms,
@@ -224,6 +231,7 @@ impl WorkflowRunEvent {
                 ..
             } => {
                 debug!(
+                    node_id,
                     stage = name.as_str(),
                     index,
                     duration_ms,
@@ -234,6 +242,7 @@ impl WorkflowRunEvent {
                 );
             }
             Self::StageFailed {
+                node_id,
                 name,
                 index,
                 error,
@@ -242,6 +251,7 @@ impl WorkflowRunEvent {
             } => {
                 if *will_retry {
                     warn!(
+                        node_id,
                         stage = name.as_str(),
                         index,
                         error,
@@ -250,6 +260,7 @@ impl WorkflowRunEvent {
                     );
                 } else {
                     error!(
+                        node_id,
                         stage = name.as_str(),
                         index,
                         error,
@@ -259,6 +270,7 @@ impl WorkflowRunEvent {
                 }
             }
             Self::StageRetrying {
+                node_id,
                 name,
                 index,
                 attempt,
@@ -266,6 +278,7 @@ impl WorkflowRunEvent {
                 delay_ms,
             } => {
                 warn!(
+                    node_id,
                     stage = name.as_str(),
                     index,
                     attempt,
@@ -450,7 +463,7 @@ pub fn flatten_event(
     event: &WorkflowRunEvent,
 ) -> (String, serde_json::Map<String, serde_json::Value>) {
     let value = serde_json::to_value(event).expect("WorkflowRunEvent must serialize");
-    match value {
+    let (event_name, mut fields) = match value {
         serde_json::Value::Object(map) => {
             // Externally-tagged enum: { "VariantName": { fields } }
             let (variant_name, inner) = map.into_iter().next().expect("enum must have one key");
@@ -469,7 +482,9 @@ pub fn flatten_event(
         // Unit variants serialize as strings
         serde_json::Value::String(name) => (name, serde_json::Map::new()),
         _ => ("Unknown".to_string(), serde_json::Map::new()),
-    }
+    };
+    rename_fields(&event_name, &mut fields);
+    (event_name, fields)
 }
 
 fn flatten_agent(inner: serde_json::Value) -> (String, serde_json::Map<String, serde_json::Value>) {
@@ -580,6 +595,74 @@ fn flatten_sub_agent_event(
     (event_name, fields)
 }
 
+/// Rename flattened event fields for clarity in progress.jsonl output.
+///
+/// Applied as a post-processing step after `flatten_event` serialization to
+/// give fields self-describing names without changing the Rust enum.
+fn rename_fields(event_name: &str, fields: &mut serde_json::Map<String, serde_json::Value>) {
+    /// Move a key from `old` to `new` if present.
+    fn rename(fields: &mut serde_json::Map<String, serde_json::Value>, old: &str, new: &str) {
+        if let Some(v) = fields.remove(old) {
+            fields.insert(new.to_string(), v);
+        }
+    }
+
+    /// Insert `node_label` defaulting to the value of `node_id`, if not already present.
+    fn default_node_label(fields: &mut serde_json::Map<String, serde_json::Value>) {
+        if !fields.contains_key("node_label") {
+            if let Some(id) = fields.get("node_id").cloned() {
+                fields.insert("node_label".to_string(), id);
+            }
+        }
+    }
+
+    if event_name.starts_with("Stage") {
+        // name → node_label, index → stage_index, node_id stays
+        rename(fields, "name", "node_label");
+        rename(fields, "index", "stage_index");
+        // node_id already present from Rust enum
+    } else if event_name == "WorkflowRunStarted" {
+        rename(fields, "name", "workflow_name");
+    } else if event_name.starts_with("Agent.") || event_name == "Agent" {
+        rename(fields, "stage", "node_id");
+        default_node_label(fields);
+    } else if event_name.starts_with("Sandbox.Snapshot") {
+        // Must check before generic Sandbox.* to catch Snapshot* first
+        rename(fields, "name", "snapshot_name");
+        rename(fields, "provider", "sandbox_provider");
+    } else if event_name.starts_with("Sandbox.") {
+        rename(fields, "provider", "sandbox_provider");
+    } else if event_name.starts_with("ParallelBranch") {
+        rename(fields, "branch", "node_id");
+        default_node_label(fields);
+        rename(fields, "index", "branch_index");
+    } else if event_name.starts_with("SetupCommand") || event_name == "SetupFailed" {
+        rename(fields, "index", "command_index");
+    } else if event_name == "EdgeSelected" || event_name == "LoopRestart" {
+        rename(fields, "from_node", "from_node_id");
+        rename(fields, "to_node", "to_node_id");
+    } else if event_name == "StallWatchdogTimeout" {
+        rename(fields, "node", "node_id");
+        default_node_label(fields);
+    } else if event_name == "Prompt" {
+        rename(fields, "stage", "node_id");
+        default_node_label(fields);
+        rename(fields, "text", "prompt_text");
+    } else if event_name.starts_with("Interview") && event_name != "InterviewCompleted" {
+        // InterviewStarted, InterviewTimeout have `stage`
+        rename(fields, "stage", "node_id");
+        default_node_label(fields);
+    } else if event_name == "SubgraphStarted" {
+        default_node_label(fields);
+        rename(fields, "start_node", "start_node_id");
+    } else if event_name == "SubgraphCompleted"
+        || event_name == "CheckpointSaved"
+        || event_name == "GitCheckpoint"
+    {
+        default_node_label(fields);
+    }
+}
+
 /// Current time as epoch milliseconds.
 fn epoch_millis() -> i64 {
     std::time::SystemTime::now()
@@ -685,6 +768,7 @@ mod tests {
     #[test]
     fn workflow_run_event_serialization() {
         let event = WorkflowRunEvent::StageStarted {
+            node_id: "plan".to_string(),
             name: "plan".to_string(),
             index: 0,
             handler_type: Some("codergen".to_string()),
@@ -700,6 +784,7 @@ mod tests {
 
         // None handler_type serializes as null
         let event_none = WorkflowRunEvent::StageStarted {
+            node_id: "plan".to_string(),
             name: "plan".to_string(),
             index: 0,
             handler_type: None,
@@ -800,6 +885,7 @@ mod tests {
     #[test]
     fn stage_completed_event_serialization_with_new_fields() {
         let event = WorkflowRunEvent::StageCompleted {
+            node_id: "plan".to_string(),
             name: "plan".to_string(),
             index: 0,
             duration_ms: 1500,
@@ -823,6 +909,7 @@ mod tests {
         assert!(json.contains("\"failure_class\":null"));
 
         let event_none = WorkflowRunEvent::StageCompleted {
+            node_id: "plan".to_string(),
             name: "plan".to_string(),
             index: 0,
             duration_ms: 1500,
@@ -845,6 +932,7 @@ mod tests {
     #[test]
     fn stage_failed_event_serialization() {
         let event = WorkflowRunEvent::StageFailed {
+            node_id: "plan".to_string(),
             name: "plan".to_string(),
             index: 0,
             error: "timeout".to_string(),
@@ -862,6 +950,7 @@ mod tests {
         );
 
         let event_none = WorkflowRunEvent::StageFailed {
+            node_id: "plan".to_string(),
             name: "plan".to_string(),
             index: 0,
             error: "timeout".to_string(),
@@ -1006,6 +1095,7 @@ mod tests {
     #[test]
     fn stage_retrying_event_serialization() {
         let event = WorkflowRunEvent::StageRetrying {
+            node_id: "lint".to_string(),
             name: "lint".to_string(),
             index: 2,
             attempt: 3,
@@ -1177,7 +1267,8 @@ mod tests {
     #[test]
     fn flatten_event_simple_variant() {
         let event = WorkflowRunEvent::StageStarted {
-            name: "plan".to_string(),
+            node_id: "plan".to_string(),
+            name: "Plan Stage".to_string(),
             index: 0,
             handler_type: Some("codergen".to_string()),
             attempt: 1,
@@ -1185,11 +1276,15 @@ mod tests {
         };
         let (name, fields) = flatten_event(&event);
         assert_eq!(name, "StageStarted");
-        assert_eq!(fields["name"], "plan");
-        assert_eq!(fields["index"], 0);
+        assert_eq!(fields["node_id"], "plan");
+        assert_eq!(fields["node_label"], "Plan Stage");
+        assert_eq!(fields["stage_index"], 0);
         assert_eq!(fields["handler_type"], "codergen");
         assert_eq!(fields["attempt"], 1);
         assert_eq!(fields["max_attempts"], 3);
+        // Old keys should not be present
+        assert!(!fields.contains_key("name"));
+        assert!(!fields.contains_key("index"));
     }
 
     #[test]
@@ -1204,9 +1299,11 @@ mod tests {
         };
         let (name, fields) = flatten_event(&event);
         assert_eq!(name, "Agent.ToolCallStarted");
-        assert_eq!(fields["stage"], "code");
+        assert_eq!(fields["node_id"], "code");
+        assert_eq!(fields["node_label"], "code");
         assert_eq!(fields["tool_name"], "read_file");
         assert_eq!(fields["tool_call_id"], "call_1");
+        assert!(!fields.contains_key("stage"));
     }
 
     #[test]
@@ -1218,7 +1315,8 @@ mod tests {
         };
         let (name, fields) = flatten_event(&event);
         assert_eq!(name, "Sandbox.Initializing");
-        assert_eq!(fields["provider"], "docker");
+        assert_eq!(fields["sandbox_provider"], "docker");
+        assert!(!fields.contains_key("provider"));
     }
 
     #[test]
@@ -1237,9 +1335,11 @@ mod tests {
         };
         let (name, fields) = flatten_event(&event);
         assert_eq!(name, "Agent.SubAgentEvent.ToolCallStarted");
-        assert_eq!(fields["stage"], "code");
+        assert_eq!(fields["node_id"], "code");
+        assert_eq!(fields["node_label"], "code");
         assert_eq!(fields["agent_id"], "sub_1");
         assert_eq!(fields["depth"], 1);
+        assert!(!fields.contains_key("stage"));
         // Inner event preserved as nested_event JSON (not flattened)
         let nested = fields["nested_event"].as_object().unwrap();
         let tool_call = nested["ToolCallStarted"].as_object().unwrap();
@@ -1269,7 +1369,9 @@ mod tests {
         // Outer SubAgentEvent fields at top level
         assert_eq!(fields["agent_id"], "sub_1");
         assert_eq!(fields["depth"], 1);
-        assert_eq!(fields["stage"], "code");
+        assert_eq!(fields["node_id"], "code");
+        assert_eq!(fields["node_label"], "code");
+        assert!(!fields.contains_key("stage"));
         // Inner SubAgentEvent preserved in nested_event with all data intact
         let nested = fields["nested_event"].as_object().unwrap();
         let inner_sub = nested["SubAgentEvent"].as_object().unwrap();
@@ -1288,7 +1390,188 @@ mod tests {
         };
         let (name, fields) = flatten_event(&event);
         assert_eq!(name, "Agent.SessionStarted");
-        assert_eq!(fields["stage"], "plan");
+        assert_eq!(fields["node_id"], "plan");
+        assert_eq!(fields["node_label"], "plan");
+        assert!(!fields.contains_key("stage"));
+    }
+
+    #[test]
+    fn rename_fields_workflow_run_started() {
+        let event = WorkflowRunEvent::WorkflowRunStarted {
+            name: "my_pipeline".to_string(),
+            run_id: "r1".to_string(),
+            base_sha: None,
+            run_branch: None,
+            worktree_dir: None,
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "WorkflowRunStarted");
+        assert_eq!(fields["workflow_name"], "my_pipeline");
+        assert!(!fields.contains_key("name"));
+    }
+
+    #[test]
+    fn rename_fields_parallel_branch_started() {
+        let event = WorkflowRunEvent::ParallelBranchStarted {
+            branch: "lint".to_string(),
+            index: 0,
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "ParallelBranchStarted");
+        assert_eq!(fields["node_id"], "lint");
+        assert_eq!(fields["node_label"], "lint");
+        assert_eq!(fields["branch_index"], 0);
+        assert!(!fields.contains_key("branch"));
+        assert!(!fields.contains_key("index"));
+    }
+
+    #[test]
+    fn rename_fields_parallel_branch_completed() {
+        let event = WorkflowRunEvent::ParallelBranchCompleted {
+            branch: "lint".to_string(),
+            index: 0,
+            duration_ms: 1000,
+            status: "success".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "ParallelBranchCompleted");
+        assert_eq!(fields["node_id"], "lint");
+        assert_eq!(fields["node_label"], "lint");
+        assert_eq!(fields["branch_index"], 0);
+    }
+
+    #[test]
+    fn rename_fields_setup_command_started() {
+        let event = WorkflowRunEvent::SetupCommandStarted {
+            command: "npm install".to_string(),
+            index: 2,
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "SetupCommandStarted");
+        assert_eq!(fields["command_index"], 2);
+        assert!(!fields.contains_key("index"));
+    }
+
+    #[test]
+    fn rename_fields_setup_failed() {
+        let event = WorkflowRunEvent::SetupFailed {
+            command: "npm test".to_string(),
+            index: 1,
+            exit_code: 1,
+            stderr: "fail".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "SetupFailed");
+        assert_eq!(fields["command_index"], 1);
+        assert!(!fields.contains_key("index"));
+    }
+
+    #[test]
+    fn rename_fields_edge_selected() {
+        let event = WorkflowRunEvent::EdgeSelected {
+            from_node: "plan".to_string(),
+            to_node: "code".to_string(),
+            label: Some("success".to_string()),
+            condition: None,
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "EdgeSelected");
+        assert_eq!(fields["from_node_id"], "plan");
+        assert_eq!(fields["to_node_id"], "code");
+        assert!(!fields.contains_key("from_node"));
+        assert!(!fields.contains_key("to_node"));
+    }
+
+    #[test]
+    fn rename_fields_loop_restart() {
+        let event = WorkflowRunEvent::LoopRestart {
+            from_node: "review".to_string(),
+            to_node: "code".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "LoopRestart");
+        assert_eq!(fields["from_node_id"], "review");
+        assert_eq!(fields["to_node_id"], "code");
+    }
+
+    #[test]
+    fn rename_fields_stall_watchdog_timeout() {
+        let event = WorkflowRunEvent::StallWatchdogTimeout {
+            node: "work".to_string(),
+            idle_seconds: 600,
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "StallWatchdogTimeout");
+        assert_eq!(fields["node_id"], "work");
+        assert_eq!(fields["node_label"], "work");
+        assert!(!fields.contains_key("node"));
+    }
+
+    #[test]
+    fn rename_fields_prompt() {
+        let event = WorkflowRunEvent::Prompt {
+            stage: "gate".to_string(),
+            text: "Approve?".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "Prompt");
+        assert_eq!(fields["node_id"], "gate");
+        assert_eq!(fields["node_label"], "gate");
+        assert_eq!(fields["prompt_text"], "Approve?");
+        assert!(!fields.contains_key("stage"));
+        assert!(!fields.contains_key("text"));
+    }
+
+    #[test]
+    fn rename_fields_interview_started() {
+        let event = WorkflowRunEvent::InterviewStarted {
+            question: "OK?".to_string(),
+            stage: "gate".to_string(),
+            question_type: "yes_no".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "InterviewStarted");
+        assert_eq!(fields["node_id"], "gate");
+        assert_eq!(fields["node_label"], "gate");
+        assert!(!fields.contains_key("stage"));
+    }
+
+    #[test]
+    fn rename_fields_subgraph_started() {
+        let event = WorkflowRunEvent::SubgraphStarted {
+            node_id: "sub_1".to_string(),
+            start_node: "start".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "SubgraphStarted");
+        assert_eq!(fields["node_id"], "sub_1");
+        assert_eq!(fields["node_label"], "sub_1");
+        assert_eq!(fields["start_node_id"], "start");
+        assert!(!fields.contains_key("start_node"));
+    }
+
+    #[test]
+    fn rename_fields_checkpoint_saved() {
+        let event = WorkflowRunEvent::CheckpointSaved {
+            node_id: "plan".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "CheckpointSaved");
+        assert_eq!(fields["node_id"], "plan");
+        assert_eq!(fields["node_label"], "plan");
+    }
+
+    #[test]
+    fn rename_fields_sandbox_snapshot_pulling() {
+        let event = WorkflowRunEvent::Sandbox {
+            event: SandboxEvent::SnapshotPulling {
+                name: "base-image".into(),
+            },
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "Sandbox.SnapshotPulling");
+        assert_eq!(fields["snapshot_name"], "base-image");
+        assert!(!fields.contains_key("name"));
     }
 
     #[test]

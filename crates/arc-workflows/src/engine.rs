@@ -885,6 +885,7 @@ impl WorkflowRunEngine {
                     if attempt < policy.max_attempts && handler.should_retry(&e) {
                         let delay = policy.backoff.delay_for_attempt(attempt);
                         self.services.emitter.emit(&WorkflowRunEvent::StageFailed {
+                            node_id: node.id.clone(),
                             name: node.label().to_string(),
                             index: stage_index,
                             error: e.to_string(),
@@ -893,6 +894,7 @@ impl WorkflowRunEngine {
                             failure_class: Some(e.failure_class().to_string()),
                         });
                         self.services.emitter.emit(&WorkflowRunEvent::StageRetrying {
+                            node_id: node.id.clone(),
                             name: node.label().to_string(),
                             index: stage_index,
                             attempt: usize::try_from(attempt).unwrap_or(usize::MAX),
@@ -918,6 +920,7 @@ impl WorkflowRunEngine {
                     if attempt < policy.max_attempts {
                         let delay = policy.backoff.delay_for_attempt(attempt);
                         self.services.emitter.emit(&WorkflowRunEvent::StageRetrying {
+                            node_id: node.id.clone(),
                             name: node.label().to_string(),
                             index: stage_index,
                             attempt: usize::try_from(attempt).unwrap_or(usize::MAX),
@@ -1274,6 +1277,7 @@ impl WorkflowRunEngine {
             let retry_policy = build_retry_policy(node, graph);
 
             self.services.emitter.emit(&WorkflowRunEvent::StageStarted {
+                node_id: node.id.clone(),
                 name: node.label().to_string(),
                 index: stage_index,
                 handler_type: node.handler_type().map(String::from),
@@ -1362,6 +1366,7 @@ impl WorkflowRunEngine {
 
             if outcome.status == StageStatus::Fail {
                 self.services.emitter.emit(&WorkflowRunEvent::StageFailed {
+                    node_id: node.id.clone(),
                     name: node.label().to_string(),
                     index: stage_index,
                     error: outcome
@@ -1375,6 +1380,7 @@ impl WorkflowRunEngine {
                 });
             } else {
                 self.services.emitter.emit(&WorkflowRunEvent::StageCompleted {
+                    node_id: node.id.clone(),
                     name: node.label().to_string(),
                     index: stage_index,
                     duration_ms: stage_duration_ms,

@@ -185,7 +185,7 @@ pub fn extract_stage_durations(logs_root: &Path) -> HashMap<String, u64> {
         if envelope.get("event").and_then(|v| v.as_str()) != Some("StageCompleted") {
             continue;
         }
-        let Some(name) = envelope.get("name").and_then(|v| v.as_str()) else {
+        let Some(name) = envelope.get("node_label").and_then(|v| v.as_str()) else {
             continue;
         };
         let Some(duration_ms) = envelope.get("duration_ms").and_then(|v| v.as_u64()) else {
@@ -519,11 +519,12 @@ mod tests {
         let jsonl = dir.path().join("progress.jsonl");
 
         let event1 = serde_json::json!({
-            "timestamp": "2025-01-01T00:00:00.000Z",
+            "ts": "2025-01-01T00:00:00.000Z",
             "run_id": "r1",
             "event": "StageCompleted",
-            "name": "plan",
-            "index": 0,
+            "node_id": "plan",
+            "node_label": "plan",
+            "stage_index": 0,
             "duration_ms": 5000,
             "status": "success",
             "preferred_label": null,
@@ -537,11 +538,12 @@ mod tests {
             "failure_class": null
         });
         let event2 = serde_json::json!({
-            "timestamp": "2025-01-01T00:00:05.000Z",
+            "ts": "2025-01-01T00:00:05.000Z",
             "run_id": "r1",
             "event": "StageCompleted",
-            "name": "code",
-            "index": 1,
+            "node_id": "code",
+            "node_label": "code",
+            "stage_index": 1,
             "duration_ms": 15000,
             "status": "success",
             "preferred_label": null,

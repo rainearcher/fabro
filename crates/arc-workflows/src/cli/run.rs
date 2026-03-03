@@ -208,7 +208,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             let (event_name, event_fields) = crate::event::flatten_event(event);
             let mut envelope = serde_json::Map::new();
             envelope.insert(
-                "timestamp".to_string(),
+                "ts".to_string(),
                 serde_json::Value::String(
                     Utc::now()
                         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -223,7 +223,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
                 serde_json::Value::String(event_name),
             );
             for (k, v) in event_fields {
-                if k != "timestamp" && k != "run_id" && k != "event" {
+                if k != "ts" && k != "run_id" && k != "event" {
                     envelope.insert(k, v);
                 }
             }
@@ -259,7 +259,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
                 duration_ms,
                 status,
                 usage,
-                ..
+                ..  // node_id and other fields
             } => {
                 let mut line = format!(
                     "{dim}Stage \"{name}\" completed ({status}) in {duration}",

@@ -217,13 +217,14 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
             format!("[WORKFLOW_RUN_FAILED] error=\"{error}\" duration={duration_ms}ms")
         }
         WorkflowRunEvent::StageStarted {
+            node_id,
             name,
             index,
             handler_type,
             attempt,
             max_attempts,
         } => {
-            let mut s = format!("[STAGE_STARTED] name={name} index={index}");
+            let mut s = format!("[STAGE_STARTED] node_id={node_id} name={name} index={index}");
             if let Some(ht) = handler_type {
                 s.push_str(&format!(" handler_type={ht}"));
             }
@@ -231,6 +232,7 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
             s
         }
         WorkflowRunEvent::StageCompleted {
+            node_id,
             name,
             index,
             duration_ms,
@@ -245,7 +247,7 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
             max_attempts,
             failure_class,
         } => {
-            let mut s = format!("[STAGE_COMPLETED] name={name} index={index} duration={duration_ms}ms status={status}");
+            let mut s = format!("[STAGE_COMPLETED] node_id={node_id} name={name} index={index} duration={duration_ms}ms status={status}");
             if let Some(label) = preferred_label {
                 s.push_str(&format!(" preferred_label=\"{label}\""));
             }
@@ -280,6 +282,7 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
             s
         }
         WorkflowRunEvent::StageFailed {
+            node_id,
             name,
             index,
             error,
@@ -288,7 +291,7 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
             failure_class,
         } => {
             let mut s = format!(
-                "[STAGE_FAILED] name={name} index={index} error=\"{error}\" will_retry={will_retry}"
+                "[STAGE_FAILED] node_id={node_id} name={name} index={index} error=\"{error}\" will_retry={will_retry}"
             );
             if let Some(reason) = failure_reason {
                 s.push_str(&format!(" failure_reason=\"{reason}\""));
@@ -299,6 +302,7 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
             s
         }
         WorkflowRunEvent::StageRetrying {
+            node_id,
             name,
             index,
             attempt,
@@ -306,7 +310,7 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
             delay_ms,
         } => {
             format!(
-                "[STAGE_RETRYING] name={name} index={index} attempt={attempt}/{max_attempts} delay={delay_ms}ms"
+                "[STAGE_RETRYING] node_id={node_id} name={name} index={index} attempt={attempt}/{max_attempts} delay={delay_ms}ms"
             )
         }
         WorkflowRunEvent::ParallelStarted {
