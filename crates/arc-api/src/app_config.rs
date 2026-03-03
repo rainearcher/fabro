@@ -72,12 +72,11 @@ pub fn load_app_config() -> anyhow::Result<AppConfig> {
         return Ok(AppConfig::default());
     };
     let path = home.join(".arc").join("arc.toml");
-    if !path.exists() {
-        return Ok(AppConfig::default());
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => Ok(toml::from_str(&contents)?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(AppConfig::default()),
+        Err(e) => Err(e.into()),
     }
-    let contents = std::fs::read_to_string(&path)?;
-    let config: AppConfig = toml::from_str(&contents)?;
-    Ok(config)
 }
 
 /// Resolve the data directory: config value > default `~/.arc`.

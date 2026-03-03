@@ -28,11 +28,7 @@ const API_DEFAULTS: ApiConfig = {
   authentication_strategy: "jwt",
 };
 
-let cached: AppConfig | null = null;
-
-export function getAppConfig(): AppConfig {
-  if (cached) return cached;
-
+function loadAppConfig(): AppConfig {
   const configPath = join(homedir(), ".arc", "arc.toml");
 
   let raw: Record<string, unknown> = {};
@@ -45,15 +41,15 @@ export function getAppConfig(): AppConfig {
   const rawAuth = (raw.auth ?? {}) as Partial<AuthConfig>;
   const rawApi = (raw.api ?? {}) as Partial<ApiConfig>;
 
-  cached = {
+  return {
     auth: { ...AUTH_DEFAULTS, ...rawAuth },
     api: { ...API_DEFAULTS, ...rawApi },
   };
-
-  return cached;
 }
 
-/** Reset cached config (for testing). */
-export function resetAppConfigCache(): void {
-  cached = null;
+/** Loaded once at module init; restart the server to pick up changes. */
+const appConfig: AppConfig = loadAppConfig();
+
+export function getAppConfig(): AppConfig {
+  return appConfig;
 }
