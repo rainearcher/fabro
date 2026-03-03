@@ -1,4 +1,417 @@
 // ===========================================================================
+// mTLS end-to-end tests
+// ===========================================================================
+
+mod mtls_e2e {
+    use std::path::Path;
+    use std::process::{Command, Stdio};
+    use std::sync::Arc;
+
+    use arc_api::jwt_auth::{AuthMode, AuthStrategy, PeerCertificates};
+    use arc_api::server::{build_router, create_app_state};
+    use arc_api::server_config::TlsConfig;
+    use arc_api::tls::build_rustls_config;
+    use arc_workflows::handler::codergen::CodergenHandler;
+    use arc_workflows::handler::exit::ExitHandler;
+    use arc_workflows::handler::start::StartHandler;
+    use arc_workflows::handler::HandlerRegistry;
+    use arc_workflows::interviewer::Interviewer;
+    use rustls;
+    use tokio::net::TcpListener;
+
+    fn simple_registry(_interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
+        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+        registry.register("start", Box::new(StartHandler));
+        registry.register("exit", Box::new(ExitHandler));
+        registry.register("codergen", Box::new(CodergenHandler::new(None)));
+        registry
+    }
+
+    async fn test_db() -> sqlx::SqlitePool {
+        let pool = arc_db::connect_memory().await.unwrap();
+        arc_db::initialize_db(&pool).await.unwrap();
+        pool
+    }
+
+    /// Generate a complete CA + server cert + client cert PKI in `dir`.
+    /// Returns paths: (ca_cert, server_cert, server_key, client_cert_pem, client_key_pem)
+    fn generate_pki(dir: &Path, ca_cn: &str, server_cn: &str, client_cn: &str) -> PkiPaths {
+        // CA key
+        let ca_key_path = dir.join("ca.key");
+        let ca_cert_path = dir.join("ca.crt");
+        run_openssl(&["genpkey", "-algorithm", "Ed25519", "-out", ca_key_path.to_str().unwrap()]);
+        run_openssl(&[
+            "req", "-new", "-x509",
+            "-key", ca_key_path.to_str().unwrap(),
+            "-out", ca_cert_path.to_str().unwrap(),
+            "-days", "1",
+            "-subj", &format!("/CN={ca_cn}"),
+        ]);
+
+        // Server key + cert signed by CA
+        let server_key_path = dir.join("server.key");
+        let server_csr_path = dir.join("server.csr");
+        let server_cert_path = dir.join("server.crt");
+        run_openssl(&["genpkey", "-algorithm", "Ed25519", "-out", server_key_path.to_str().unwrap()]);
+        run_openssl(&[
+            "req", "-new",
+            "-key", server_key_path.to_str().unwrap(),
+            "-out", server_csr_path.to_str().unwrap(),
+            "-subj", &format!("/CN={server_cn}"),
+        ]);
+
+        // Create extension file for SAN (reqwest validates server cert hostname)
+        let ext_path = dir.join("server.ext");
+        std::fs::write(&ext_path, "subjectAltName=IP:127.0.0.1").unwrap();
+
+        run_openssl(&[
+            "x509", "-req",
+            "-in", server_csr_path.to_str().unwrap(),
+            "-CA", ca_cert_path.to_str().unwrap(),
+            "-CAkey", ca_key_path.to_str().unwrap(),
+            "-CAcreateserial",
+            "-out", server_cert_path.to_str().unwrap(),
+            "-days", "1",
+            "-extfile", ext_path.to_str().unwrap(),
+        ]);
+
+        // Client key + cert signed by CA
+        let client_key_path = dir.join("client.key");
+        let client_csr_path = dir.join("client.csr");
+        let client_cert_path = dir.join("client.crt");
+        run_openssl(&["genpkey", "-algorithm", "Ed25519", "-out", client_key_path.to_str().unwrap()]);
+        run_openssl(&[
+            "req", "-new",
+            "-key", client_key_path.to_str().unwrap(),
+            "-out", client_csr_path.to_str().unwrap(),
+            "-subj", &format!("/CN={client_cn}"),
+        ]);
+        run_openssl(&[
+            "x509", "-req",
+            "-in", client_csr_path.to_str().unwrap(),
+            "-CA", ca_cert_path.to_str().unwrap(),
+            "-CAkey", ca_key_path.to_str().unwrap(),
+            "-CAcreateserial",
+            "-out", client_cert_path.to_str().unwrap(),
+            "-days", "1",
+        ]);
+
+        PkiPaths {
+            ca_cert: ca_cert_path,
+            server_cert: server_cert_path,
+            server_key: server_key_path,
+            client_cert: client_cert_path,
+            client_key: client_key_path,
+        }
+    }
+
+    struct PkiPaths {
+        ca_cert: std::path::PathBuf,
+        server_cert: std::path::PathBuf,
+        server_key: std::path::PathBuf,
+        client_cert: std::path::PathBuf,
+        client_key: std::path::PathBuf,
+    }
+
+    fn run_openssl(args: &[&str]) {
+        let output = Command::new("openssl")
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .expect("openssl command failed to execute");
+        assert!(
+            output.status.success(),
+            "openssl {} failed: {}",
+            args[0],
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// Start a TLS server on a random port, returning the bound address.
+    /// `mtls_optional`: if true, client certs are requested but not required (for multi-strategy).
+    /// `auth_mode`: the authentication mode to use for the router.
+    async fn start_tls_server(
+        tls_config: &TlsConfig,
+        mtls_optional: bool,
+        auth_mode: AuthMode,
+    ) -> std::net::SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let rustls_config = build_rustls_config(tls_config, true, mtls_optional);
+        let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
+
+        let state = create_app_state(test_db().await, simple_registry);
+        let router = build_router(state, auth_mode);
+
+        tokio::spawn(async move {
+            use hyper_util::rt::{TokioExecutor, TokioIo};
+            use hyper_util::server::conn::auto::Builder;
+            use tower_service::Service;
+
+            let builder = Builder::new(TokioExecutor::new());
+
+            loop {
+                let (tcp_stream, _remote_addr) = match listener.accept().await {
+                    Ok(s) => s,
+                    Err(_) => return,
+                };
+
+                let tls_acceptor = tls_acceptor.clone();
+                let router = router.clone();
+                let builder = builder.clone();
+
+                tokio::spawn(async move {
+                    let tls_stream = match tls_acceptor.accept(tcp_stream).await {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    };
+
+                    let peer_certs = tls_stream
+                        .get_ref()
+                        .1
+                        .peer_certificates()
+                        .map(|certs| certs.to_vec());
+
+                    let io = TokioIo::new(tls_stream);
+
+                    let service = hyper::service::service_fn(
+                        move |mut req: hyper::Request<hyper::body::Incoming>| {
+                            req.extensions_mut()
+                                .insert(PeerCertificates(peer_certs.clone()));
+                            let mut router = router.clone();
+                            async move { router.call(req).await }
+                        },
+                    );
+
+                    let _ = builder.serve_connection(io, service).await;
+                });
+            }
+        });
+
+        addr
+    }
+
+    /// Build a reqwest client with the given CA cert and optional client identity.
+    fn build_client(
+        ca_cert_path: &Path,
+        client_cert_path: Option<&Path>,
+        client_key_path: Option<&Path>,
+    ) -> reqwest::Client {
+        let ca_pem = std::fs::read(ca_cert_path).unwrap();
+        let ca_cert = reqwest::tls::Certificate::from_pem(&ca_pem).unwrap();
+
+        let mut builder = reqwest::Client::builder()
+            .add_root_certificate(ca_cert)
+            .use_rustls_tls();
+
+        if let (Some(cert_path), Some(key_path)) = (client_cert_path, client_key_path) {
+            let cert_pem = std::fs::read(cert_path).unwrap();
+            let key_pem = std::fs::read(key_path).unwrap();
+            let mut identity_pem = cert_pem;
+            identity_pem.extend_from_slice(&key_pem);
+            let identity = reqwest::tls::Identity::from_pem(&identity_pem).unwrap();
+            builder = builder.identity(identity);
+        }
+
+        builder.build().unwrap()
+    }
+
+    fn install_crypto_provider() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
+    #[tokio::test]
+    async fn mtls_accepts_valid_client_cert() {
+        install_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
+
+        let tls_config = TlsConfig {
+            cert: pki.server_cert.clone(),
+            key: pki.server_key.clone(),
+            ca: pki.ca_cert.clone(),
+        };
+
+        let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls]);
+        let addr = start_tls_server(&tls_config, false, auth_mode).await;
+
+        let client = build_client(
+            &pki.ca_cert,
+            Some(&pki.client_cert),
+            Some(&pki.client_key),
+        );
+
+        let response = client
+            .get(format!("https://127.0.0.1:{}/runs", addr.port()))
+            .send()
+            .await
+            .expect("request with valid client cert should succeed");
+
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn mtls_only_rejects_wrong_ca_client_cert() {
+        install_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
+
+        let tls_config = TlsConfig {
+            cert: pki.server_cert.clone(),
+            key: pki.server_key.clone(),
+            ca: pki.ca_cert.clone(),
+        };
+
+        let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls]);
+        let addr = start_tls_server(&tls_config, false, auth_mode).await;
+
+        // Generate a DIFFERENT CA and client cert signed by it
+        let wrong_dir = dir.path().join("wrong_ca");
+        std::fs::create_dir_all(&wrong_dir).unwrap();
+        let wrong_pki = generate_pki(&wrong_dir, "WrongCA", "localhost", "intruder");
+
+        // Client trusts the REAL server CA, but presents a cert from the WRONG CA
+        let client = build_client(
+            &pki.ca_cert,
+            Some(&wrong_pki.client_cert),
+            Some(&wrong_pki.client_key),
+        );
+
+        let result = client
+            .get(format!("https://127.0.0.1:{}/runs", addr.port()))
+            .send()
+            .await;
+
+        // Server should reject the TLS handshake — the wrong CA client cert
+        // will cause a connection error (not an HTTP error)
+        assert!(
+            result.is_err(),
+            "request with wrong-CA client cert should fail at TLS level, but got: {:?}",
+            result.unwrap().status()
+        );
+    }
+
+    #[tokio::test]
+    async fn mtls_only_rejects_no_client_cert() {
+        install_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
+
+        let tls_config = TlsConfig {
+            cert: pki.server_cert.clone(),
+            key: pki.server_key.clone(),
+            ca: pki.ca_cert.clone(),
+        };
+
+        // mTLS is the ONLY strategy → client cert is required at TLS level
+        let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls]);
+        let addr = start_tls_server(&tls_config, false, auth_mode).await;
+
+        // Client trusts the server CA but presents NO client cert
+        let client = build_client(&pki.ca_cert, None, None);
+
+        let result = client
+            .get(format!("https://127.0.0.1:{}/runs", addr.port()))
+            .send()
+            .await;
+
+        // Server requires client cert → TLS handshake should fail
+        assert!(
+            result.is_err(),
+            "request without client cert should fail when mTLS is the only strategy, but got: {:?}",
+            result.unwrap().status()
+        );
+    }
+
+    /// Generate an Ed25519 JWT keypair. Returns (encoding_key, decoding_key).
+    fn generate_jwt_keypair() -> (jsonwebtoken::EncodingKey, jsonwebtoken::DecodingKey) {
+        let output = Command::new("openssl")
+            .args(["genpkey", "-algorithm", "Ed25519"])
+            .output()
+            .expect("openssl must be available for tests");
+        let private_pem = output.stdout;
+
+        let output = Command::new("openssl")
+            .args(["pkey", "-pubout"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write;
+                child.stdin.take().unwrap().write_all(&private_pem).unwrap();
+                child.wait_with_output()
+            })
+            .expect("openssl pkey failed");
+        let public_pem = output.stdout;
+
+        let encoding =
+            jsonwebtoken::EncodingKey::from_ed_pem(&private_pem).expect("invalid private key");
+        let decoding =
+            jsonwebtoken::DecodingKey::from_ed_pem(&public_pem).expect("invalid public key");
+        (encoding, decoding)
+    }
+
+    fn sign_jwt(key: &jsonwebtoken::EncodingKey, sub: &str) -> String {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let claims = serde_json::json!({
+            "iss": "arc-web",
+            "iat": now,
+            "exp": now + 60,
+            "sub": sub,
+        });
+        let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::EdDSA);
+        jsonwebtoken::encode(&header, &claims, key).expect("failed to sign token")
+    }
+
+    #[tokio::test]
+    async fn mtls_and_jwt_accepts_valid_jwt_without_client_cert() {
+        install_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
+
+        let tls_config = TlsConfig {
+            cert: pki.server_cert.clone(),
+            key: pki.server_key.clone(),
+            ca: pki.ca_cert.clone(),
+        };
+
+        let (encoding_key, decoding_key) = generate_jwt_keypair();
+
+        // Both mTLS and JWT strategies; mTLS is optional since JWT is also present
+        let auth_mode = AuthMode::Strategies(vec![
+            AuthStrategy::Mtls,
+            AuthStrategy::Jwt {
+                key: Arc::new(decoding_key),
+                allowed_usernames: vec!["brynary".to_string()],
+            },
+        ]);
+        let addr = start_tls_server(&tls_config, true, auth_mode).await;
+
+        // Client trusts the server CA but presents NO client cert
+        let client = build_client(&pki.ca_cert, None, None);
+
+        let token = sign_jwt(&encoding_key, "https://github.com/brynary");
+
+        let response = client
+            .get(format!("https://127.0.0.1:{}/runs", addr.port()))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .expect("request with valid JWT and no client cert should succeed");
+
+        assert_eq!(
+            response.status(),
+            200,
+            "valid JWT should be accepted when strategies = [mtls, jwt]"
+        );
+    }
+}
+
+// ===========================================================================
 // Full HTTP server lifecycle (TS Scenario 4)
 // ===========================================================================
 

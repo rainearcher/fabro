@@ -3,11 +3,13 @@ use std::sync::Arc;
 use arc_llm::provider::Provider;
 use arc_util::terminal::Styles;
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{error, info};
 
 use clap::Args;
 
+use crate::jwt_auth::PeerCertificates;
 use crate::server::{build_router, create_app_state_with_options};
+use crate::server_config::ApiAuthStrategy;
 use arc_workflows::cli::backend::AgentApiBackend;
 use arc_workflows::cli::SandboxProvider;
 use arc_workflows::handler::default_registry;
@@ -147,7 +149,77 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         eprintln!("{}", styles.dim.apply_to("(dry-run mode)"));
     }
 
-    axum::serve(listener, router).await?;
+    // Branch: TLS or plain HTTP
+    if let Some(ref tls_config) = server_config.api.tls {
+        let mtls_enabled = server_config
+            .api
+            .authentication_strategies
+            .contains(&ApiAuthStrategy::Mtls);
+        let mtls_optional = mtls_enabled && server_config.api.authentication_strategies.len() > 1;
+
+        let rustls_config =
+            crate::tls::build_rustls_config(tls_config, mtls_enabled, mtls_optional);
+        let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
+
+        info!("TLS enabled (mTLS {})", if mtls_enabled { "on" } else { "off" });
+
+        serve_tls(listener, tls_acceptor, router).await?;
+    } else {
+        axum::serve(listener, router).await?;
+    }
 
     Ok(())
+}
+
+/// Serve requests over TLS, extracting peer certificates into request extensions.
+async fn serve_tls(
+    listener: TcpListener,
+    tls_acceptor: tokio_rustls::TlsAcceptor,
+    router: axum::Router,
+) -> anyhow::Result<()> {
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use hyper_util::server::conn::auto::Builder;
+    use tower_service::Service;
+
+    let builder = Builder::new(TokioExecutor::new());
+
+    loop {
+        let (tcp_stream, remote_addr) = listener.accept().await?;
+
+        let tls_acceptor = tls_acceptor.clone();
+        let router = router.clone();
+        let builder = builder.clone();
+
+        tokio::spawn(async move {
+            let tls_stream = match tls_acceptor.accept(tcp_stream).await {
+                Ok(s) => s,
+                Err(e) => {
+                    error!(%remote_addr, "TLS handshake failed: {e}");
+                    return;
+                }
+            };
+
+            // Extract peer certificates from the TLS connection
+            let peer_certs = tls_stream
+                .get_ref()
+                .1
+                .peer_certificates()
+                .map(|certs| certs.to_vec());
+
+            let io = TokioIo::new(tls_stream);
+
+            let service = hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+                // Insert peer certificates into request extensions
+                req.extensions_mut()
+                    .insert(PeerCertificates(peer_certs.clone()));
+
+                let mut router = router.clone();
+                async move { router.call(req).await }
+            });
+
+            if let Err(e) = builder.serve_connection(io, service).await {
+                error!(%remote_addr, "connection error: {e}");
+            }
+        });
+    }
 }

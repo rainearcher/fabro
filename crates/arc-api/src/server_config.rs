@@ -19,12 +19,18 @@ pub struct AuthConfig {
     pub allowed_usernames: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum ApiAuthenticationStrategy {
-    #[default]
+pub enum ApiAuthStrategy {
     Jwt,
-    InsecureDisabled,
+    Mtls,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct TlsConfig {
+    pub cert: PathBuf,
+    pub key: PathBuf,
+    pub ca: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -32,7 +38,8 @@ pub struct ApiConfig {
     #[serde(default = "default_base_url")]
     pub base_url: String,
     #[serde(default)]
-    pub authentication_strategy: ApiAuthenticationStrategy,
+    pub authentication_strategies: Vec<ApiAuthStrategy>,
+    pub tls: Option<TlsConfig>,
 }
 
 fn default_base_url() -> String {
@@ -43,7 +50,8 @@ impl Default for ApiConfig {
     fn default() -> Self {
         Self {
             base_url: default_base_url(),
-            authentication_strategy: ApiAuthenticationStrategy::default(),
+            authentication_strategies: Vec::new(),
+            tls: None,
         }
     }
 }
@@ -171,7 +179,7 @@ allowed_usernames = ["brynary", "alice"]
 
 [api]
 base_url = "http://example.com:8080"
-authentication_strategy = "jwt"
+authentication_strategies = ["jwt"]
 
 [git]
 provider = "github"
@@ -183,10 +191,7 @@ client_id = "Iv1.abc123"
         assert_eq!(config.web.auth.provider, AuthProvider::Github);
         assert_eq!(config.web.auth.allowed_usernames, vec!["brynary", "alice"]);
         assert_eq!(config.api.base_url, "http://example.com:8080");
-        assert_eq!(
-            config.api.authentication_strategy,
-            ApiAuthenticationStrategy::Jwt
-        );
+        assert_eq!(config.api.authentication_strategies, vec![ApiAuthStrategy::Jwt]);
         assert_eq!(config.git.provider, GitProvider::Github);
         assert_eq!(config.git.app_id.as_deref(), Some("12345"));
         assert_eq!(config.git.client_id.as_deref(), Some("Iv1.abc123"));
@@ -206,10 +211,8 @@ client_id = "Iv1.abc123"
         let toml = "";
         let config: ServerConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.api.base_url, "http://localhost:3000");
-        assert_eq!(
-            config.api.authentication_strategy,
-            ApiAuthenticationStrategy::Jwt
-        );
+        assert!(config.api.authentication_strategies.is_empty());
+        assert!(config.api.tls.is_none());
     }
 
     #[test]
@@ -279,19 +282,55 @@ model = "gpt-4"
     }
 
     #[test]
-    fn parse_insecure_disabled_values() {
+    fn parse_insecure_disabled_auth_provider() {
         let toml = r#"
 [web.auth]
 provider = "insecure_disabled"
-
-[api]
-authentication_strategy = "insecure_disabled"
 "#;
         let config: ServerConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.web.auth.provider, AuthProvider::InsecureDisabled);
+    }
+
+    #[test]
+    fn parse_jwt_and_mtls_strategies() {
+        let toml = r#"
+[api]
+authentication_strategies = ["jwt", "mtls"]
+
+[api.tls]
+cert = "~/.arc/certs/server.crt"
+key = "~/.arc/certs/server.key"
+ca = "~/.arc/certs/ca.crt"
+"#;
+        let config: ServerConfig = toml::from_str(toml).unwrap();
         assert_eq!(
-            config.api.authentication_strategy,
-            ApiAuthenticationStrategy::InsecureDisabled
+            config.api.authentication_strategies,
+            vec![ApiAuthStrategy::Jwt, ApiAuthStrategy::Mtls]
         );
+        let tls = config.api.tls.unwrap();
+        assert_eq!(tls.cert, PathBuf::from("~/.arc/certs/server.crt"));
+        assert_eq!(tls.key, PathBuf::from("~/.arc/certs/server.key"));
+        assert_eq!(tls.ca, PathBuf::from("~/.arc/certs/ca.crt"));
+    }
+
+    #[test]
+    fn parse_empty_strategies() {
+        let toml = r#"
+[api]
+authentication_strategies = []
+"#;
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        assert!(config.api.authentication_strategies.is_empty());
+    }
+
+    #[test]
+    fn parse_jwt_only_strategy() {
+        let toml = r#"
+[api]
+authentication_strategies = ["jwt"]
+"#;
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.api.authentication_strategies, vec![ApiAuthStrategy::Jwt]);
+        assert!(config.api.tls.is_none());
     }
 }

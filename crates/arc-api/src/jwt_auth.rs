@@ -4,6 +4,7 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
+use rustls_pki_types::CertificateDer;
 use serde::Deserialize;
 use tracing::warn;
 
@@ -19,17 +20,28 @@ struct Claims {
     sub: Option<String>,
 }
 
-/// Authentication mode resolved at startup.
+/// A single authentication strategy resolved at startup.
 #[derive(Clone)]
-pub enum AuthMode {
-    /// JWT verification is enabled with the given decoding key and allowed users.
+pub enum AuthStrategy {
     Jwt {
         key: Arc<DecodingKey>,
         allowed_usernames: Vec<String>,
     },
-    /// Authentication is explicitly disabled (insecure, for development only).
+    Mtls,
+}
+
+/// Authentication mode resolved at startup.
+#[derive(Clone)]
+pub enum AuthMode {
+    /// One or more strategies to try in order.
+    Strategies(Vec<AuthStrategy>),
+    /// Authentication is explicitly disabled (--demo flag only).
     Disabled,
 }
+
+/// Peer certificates extracted from the TLS connection, inserted as a request extension.
+#[derive(Clone)]
+pub struct PeerCertificates(pub Option<Vec<CertificateDer<'static>>>);
 
 /// Decode a PEM env var that may be raw PEM or base64-encoded PEM.
 fn decode_pem_env(name: &str, value: &str) -> String {
@@ -44,41 +56,122 @@ fn decode_pem_env(name: &str, value: &str) -> String {
 /// Resolve the authentication mode from the API config section.
 ///
 /// Call this once at startup before serving requests. Panics if the
-/// configuration is invalid (JWT strategy but no public key).
+/// configuration is invalid (JWT strategy but no public key, or mTLS without TLS config).
 pub fn resolve_auth_mode(
     api_config: &crate::server_config::ApiConfig,
     allowed_usernames: Vec<String>,
 ) -> AuthMode {
-    use crate::server_config::ApiAuthenticationStrategy;
+    use crate::server_config::ApiAuthStrategy;
 
-    match api_config.authentication_strategy {
-        ApiAuthenticationStrategy::InsecureDisabled => {
-            warn!("JWT authentication disabled");
-            AuthMode::Disabled
-        }
-        ApiAuthenticationStrategy::Jwt => {
-            let raw = std::env::var("ARC_JWT_PUBLIC_KEY").unwrap_or_else(|_| {
-                panic!(
-                    "ARC_JWT_PUBLIC_KEY is not set. Either provide an Ed25519 public key in PEM \
-                     format (or base64-encoded PEM) or set authentication_strategy = \
-                     \"insecure_disabled\" in ~/.arc/arc.toml to allow unauthenticated access \
-                     (development only)."
-                )
-            });
-            let pem = decode_pem_env("ARC_JWT_PUBLIC_KEY", &raw);
-            let key = DecodingKey::from_ed_pem(pem.as_bytes())
-                .expect("ARC_JWT_PUBLIC_KEY contains an invalid Ed25519 PEM public key");
-            AuthMode::Jwt {
-                key: Arc::new(key),
-                allowed_usernames,
-            }
-        }
+    if api_config.authentication_strategies.is_empty() {
+        warn!("No authentication strategies configured; all requests will be rejected");
     }
+
+    let strategies = api_config
+        .authentication_strategies
+        .iter()
+        .map(|s| match s {
+            ApiAuthStrategy::Jwt => {
+                let raw = std::env::var("ARC_JWT_PUBLIC_KEY").unwrap_or_else(|_| {
+                    panic!(
+                        "ARC_JWT_PUBLIC_KEY is not set. Provide an Ed25519 public key in PEM \
+                         format (or base64-encoded PEM) for JWT authentication."
+                    )
+                });
+                let pem = decode_pem_env("ARC_JWT_PUBLIC_KEY", &raw);
+                let key = DecodingKey::from_ed_pem(pem.as_bytes())
+                    .expect("ARC_JWT_PUBLIC_KEY contains an invalid Ed25519 PEM public key");
+                AuthStrategy::Jwt {
+                    key: Arc::new(key),
+                    allowed_usernames: allowed_usernames.clone(),
+                }
+            }
+            ApiAuthStrategy::Mtls => {
+                assert!(
+                    api_config.tls.is_some(),
+                    "mTLS authentication strategy requires [api.tls] configuration with cert, key, and ca"
+                );
+                AuthStrategy::Mtls
+            }
+        })
+        .collect();
+
+    AuthMode::Strategies(strategies)
 }
 
-/// Axum extractor that enforces JWT authentication on a route.
+/// Try to authenticate via JWT. Returns the subject (username) on success.
+fn try_jwt(
+    parts: &Parts,
+    key: &DecodingKey,
+    allowed_usernames: &[String],
+) -> Result<String, StatusCode> {
+    let header = parts
+        .headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let token = header
+        .strip_prefix("Bearer ")
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let mut validation = Validation::new(Algorithm::EdDSA);
+    validation.set_required_spec_claims(&["iss", "iat", "exp"]);
+    validation.set_issuer(&["arc-web"]);
+
+    let token_data = jsonwebtoken::decode::<Claims>(token, key, &validation)
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    // Fail closed: if no usernames are allowed, reject all requests
+    if allowed_usernames.is_empty() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Extract GitHub username from sub claim URL (last path segment)
+    let username = token_data
+        .claims
+        .sub
+        .as_deref()
+        .and_then(|s| s.rsplit('/').next())
+        .ok_or(StatusCode::FORBIDDEN)?;
+
+    if !allowed_usernames.iter().any(|u| u == username) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    Ok(username.to_string())
+}
+
+/// Try to authenticate via mTLS peer certificates. Returns the CN on success.
+fn try_mtls(parts: &Parts) -> Result<String, StatusCode> {
+    let peer_certs = parts
+        .extensions
+        .get::<PeerCertificates>()
+        .and_then(|pc| pc.0.as_ref())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if peer_certs.is_empty() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // Extract CN from the first (leaf) certificate
+    let cert = &peer_certs[0];
+    let (_, parsed) = x509_parser::parse_x509_certificate(cert)
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let cn = parsed
+        .subject()
+        .iter_common_name()
+        .next()
+        .and_then(|cn| cn.as_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    Ok(cn.to_string())
+}
+
+/// Axum extractor that enforces authentication on a route.
 ///
-/// Add this as a parameter to any handler to require a valid JWT.
+/// Tries each configured strategy in order. The first successful match wins.
 /// The `AuthMode` must be added to the router as an Extension.
 /// When auth is disabled, the extractor accepts all requests.
 pub struct AuthenticatedService;
@@ -92,49 +185,34 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedService {
             .get::<AuthMode>()
             .expect("AuthMode extension must be added to the router");
 
-        let (key, allowed_usernames) = match auth_mode {
+        let strategies = match auth_mode {
             AuthMode::Disabled => return Ok(AuthenticatedService),
-            AuthMode::Jwt {
-                key,
-                allowed_usernames,
-            } => (key, allowed_usernames),
+            AuthMode::Strategies(strategies) => strategies,
         };
 
-        let header = parts
-            .headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .ok_or(StatusCode::UNAUTHORIZED)?;
-
-        let token = header
-            .strip_prefix("Bearer ")
-            .ok_or(StatusCode::UNAUTHORIZED)?;
-
-        let mut validation = Validation::new(Algorithm::EdDSA);
-        validation.set_required_spec_claims(&["iss", "iat", "exp"]);
-        validation.set_issuer(&["arc-web"]);
-
-        let token_data = jsonwebtoken::decode::<Claims>(token, key, &validation)
-            .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-        // Fail closed: if no usernames are allowed, reject all requests
-        if allowed_usernames.is_empty() {
-            return Err(StatusCode::FORBIDDEN);
+        if strategies.is_empty() {
+            return Err(StatusCode::UNAUTHORIZED);
         }
 
-        // Extract GitHub username from sub claim URL (last path segment)
-        let username = token_data
-            .claims
-            .sub
-            .as_deref()
-            .and_then(|s| s.rsplit('/').next())
-            .ok_or(StatusCode::FORBIDDEN)?;
+        let mut last_err = StatusCode::UNAUTHORIZED;
 
-        if !allowed_usernames.iter().any(|u| u == username) {
-            return Err(StatusCode::FORBIDDEN);
+        for strategy in strategies {
+            match strategy {
+                AuthStrategy::Mtls => match try_mtls(parts) {
+                    Ok(_subject) => return Ok(AuthenticatedService),
+                    Err(e) => last_err = e,
+                },
+                AuthStrategy::Jwt {
+                    key,
+                    allowed_usernames,
+                } => match try_jwt(parts, key, allowed_usernames) {
+                    Ok(_subject) => return Ok(AuthenticatedService),
+                    Err(e) => last_err = e,
+                },
+            }
         }
 
-        Ok(AuthenticatedService)
+        Err(last_err)
     }
 }
 
@@ -207,11 +285,108 @@ mod tests {
     }
 
     fn jwt_mode(decoding: DecodingKey, allowed_usernames: Vec<&str>) -> AuthMode {
-        AuthMode::Jwt {
+        AuthMode::Strategies(vec![AuthStrategy::Jwt {
             key: Arc::new(decoding),
             allowed_usernames: allowed_usernames.into_iter().map(String::from).collect(),
-        }
+        }])
     }
+
+    /// Build a test request with PeerCertificates extension pre-inserted.
+    fn request_with_peer_certs(
+        uri: &str,
+        certs: Option<Vec<CertificateDer<'static>>>,
+    ) -> Request<Body> {
+        let mut req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+        req.extensions_mut().insert(PeerCertificates(certs));
+        req
+    }
+
+    /// Generate a self-signed CA + client cert for mTLS testing.
+    /// Returns (ca_cert_der, client_cert_der) where client_cert_der has the given CN.
+    fn generate_test_client_cert(cn: &str) -> CertificateDer<'static> {
+        use std::process::{Command, Stdio};
+
+        // Generate CA key + self-signed cert
+        let ca_key = Command::new("openssl")
+            .args(["genpkey", "-algorithm", "Ed25519"])
+            .output()
+            .expect("openssl genpkey failed")
+            .stdout;
+
+        let ca_cert = {
+            let mut child = Command::new("openssl")
+                .args([
+                    "req", "-new", "-x509", "-key", "/dev/stdin", "-days", "1",
+                    "-subj", "/CN=TestCA",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("openssl req failed");
+            std::io::Write::write_all(&mut child.stdin.take().unwrap(), &ca_key).unwrap();
+            child.wait_with_output().unwrap().stdout
+        };
+
+        // Generate client key
+        let client_key = Command::new("openssl")
+            .args(["genpkey", "-algorithm", "Ed25519"])
+            .output()
+            .expect("openssl genpkey failed")
+            .stdout;
+
+        // Generate client CSR
+        let subj = format!("/CN={cn}");
+        let client_csr = {
+            let mut child = Command::new("openssl")
+                .args([
+                    "req", "-new", "-key", "/dev/stdin", "-subj", &subj,
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("openssl req failed");
+            std::io::Write::write_all(&mut child.stdin.take().unwrap(), &client_key).unwrap();
+            child.wait_with_output().unwrap().stdout
+        };
+
+        // Sign client cert with CA
+        let dir = tempfile::tempdir().unwrap();
+        let ca_cert_path = dir.path().join("ca.crt");
+        let ca_key_path = dir.path().join("ca.key");
+        let csr_path = dir.path().join("client.csr");
+        std::fs::write(&ca_cert_path, &ca_cert).unwrap();
+        std::fs::write(&ca_key_path, &ca_key).unwrap();
+        std::fs::write(&csr_path, &client_csr).unwrap();
+
+        let client_cert_pem = Command::new("openssl")
+            .args([
+                "x509", "-req",
+                "-in", csr_path.to_str().unwrap(),
+                "-CA", ca_cert_path.to_str().unwrap(),
+                "-CAkey", ca_key_path.to_str().unwrap(),
+                "-CAcreateserial",
+                "-days", "1",
+            ])
+            .output()
+            .expect("openssl x509 failed")
+            .stdout;
+
+        // Convert PEM to DER
+        let client_cert_der = {
+            let mut child = Command::new("openssl")
+                .args(["x509", "-outform", "DER"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .expect("openssl x509 DER conversion failed");
+            std::io::Write::write_all(&mut child.stdin.take().unwrap(), &client_cert_pem).unwrap();
+            child.wait_with_output().unwrap().stdout
+        };
+
+        CertificateDer::from(client_cert_der)
+    }
+
+    // --- JWT tests (updated for Strategies wrapper) ---
 
     #[tokio::test]
     async fn rejects_missing_auth_header() {
@@ -372,25 +547,117 @@ mod tests {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
-    #[test]
-    fn resolve_auth_mode_insecure_disabled() {
-        use crate::server_config::{ApiAuthenticationStrategy, ApiConfig};
-
-        let config = ApiConfig {
-            authentication_strategy: ApiAuthenticationStrategy::InsecureDisabled,
-            ..ApiConfig::default()
-        };
-        assert!(matches!(
-            resolve_auth_mode(&config, vec![]),
-            AuthMode::Disabled
-        ));
-    }
-
     #[tokio::test]
     async fn disabled_mode_allows_all_requests() {
         let app = test_router(AuthMode::Disabled);
 
         let req = Request::builder().uri("/test").body(Body::empty()).unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn empty_strategies_rejects() {
+        let app = test_router(AuthMode::Strategies(vec![]));
+
+        let req = Request::builder().uri("/test").body(Body::empty()).unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // --- mTLS tests ---
+
+    #[tokio::test]
+    async fn mtls_accepts_valid_peer_cert() {
+        let app = test_router(AuthMode::Strategies(vec![AuthStrategy::Mtls]));
+
+        let cert = generate_test_client_cert("testuser");
+        let req = request_with_peer_certs("/test", Some(vec![cert]));
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn mtls_rejects_no_peer_certs() {
+        let app = test_router(AuthMode::Strategies(vec![AuthStrategy::Mtls]));
+
+        let req = request_with_peer_certs("/test", None);
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn mtls_rejects_empty_peer_certs() {
+        let app = test_router(AuthMode::Strategies(vec![AuthStrategy::Mtls]));
+
+        let req = request_with_peer_certs("/test", Some(vec![]));
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn mtls_rejects_when_no_peer_certs_extension() {
+        let app = test_router(AuthMode::Strategies(vec![AuthStrategy::Mtls]));
+
+        // No PeerCertificates extension at all (plain HTTP path)
+        let req = Request::builder().uri("/test").body(Body::empty()).unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // --- Multi-strategy tests ---
+
+    #[tokio::test]
+    async fn jwt_and_mtls_accepts_valid_cert_no_jwt() {
+        let (_, decoding) = generate_test_keypair();
+        let mode = AuthMode::Strategies(vec![
+            AuthStrategy::Jwt {
+                key: Arc::new(decoding),
+                allowed_usernames: vec!["brynary".to_string()],
+            },
+            AuthStrategy::Mtls,
+        ]);
+        let app = test_router(mode);
+
+        let cert = generate_test_client_cert("brynary");
+        let req = request_with_peer_certs("/test", Some(vec![cert]));
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn mtls_and_jwt_falls_back_to_jwt() {
+        let (encoding, decoding) = generate_test_keypair();
+        let mode = AuthMode::Strategies(vec![
+            AuthStrategy::Mtls,
+            AuthStrategy::Jwt {
+                key: Arc::new(decoding),
+                allowed_usernames: vec!["brynary".to_string()],
+            },
+        ]);
+        let app = test_router(mode);
+
+        let token = sign_token(
+            &encoding,
+            "arc-web",
+            60,
+            Some("https://github.com/brynary"),
+        );
+
+        // No peer certs, but valid JWT
+        let mut req = Request::builder()
+            .uri("/test")
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(PeerCertificates(None));
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
