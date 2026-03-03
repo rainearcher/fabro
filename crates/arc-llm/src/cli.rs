@@ -103,22 +103,23 @@ fn format_speed(tps: Option<f64>) -> String {
 
 fn print_models_table(models: &[crate::types::ModelInfo], s: &Styles) {
     println!(
-        "{b}{d}{:<24} {:<12} {:<24} {:>10}  {:>7} {:>7}   {:>10}{r}",
-        "MODEL", "PROVIDER", "ALIASES", "CONTEXT", "COST", "", "SPEED",
-        b = s.bold, d = s.dim, r = s.reset,
+        "{}",
+        s.bold_dim.apply_to(format!(
+            "{:<24} {:<12} {:<24} {:>10}  {:>7} {:>7}   {:>10}",
+            "MODEL", "PROVIDER", "ALIASES", "CONTEXT", "COST", "", "SPEED",
+        )),
     );
     for model in models {
         let aliases = model.aliases.join(", ");
         println!(
-            "{b}{:<24}{r} {d}{:<12}{r} {d}{:<24}{r} {:>10}  {:>7} / {:<7}  {c}{:>10}{r}",
-            model.id,
-            model.provider,
-            aliases,
+            "{} {} {} {:>10}  {:>7} / {:<7}  {}",
+            s.bold.apply_to(format!("{:<24}", model.id)),
+            s.dim.apply_to(format!("{:<12}", model.provider)),
+            s.dim.apply_to(format!("{:<24}", aliases)),
             format_context_window(model.context_window),
             format_cost(model.input_cost_per_million),
             format_cost(model.output_cost_per_million),
-            format_speed(model.estimated_output_tps),
-            b = s.bold, d = s.dim, c = s.cyan, r = s.reset,
+            s.cyan.apply_to(format!("{:>10}", format_speed(model.estimated_output_tps))),
         );
     }
 }
@@ -394,9 +395,11 @@ async fn test_models(provider: Option<&str>, model: Option<&str>, s: &Styles) ->
     }
 
     println!(
-        "{b}{d}{:<24} {:<12} {:>10}  {:>7}   {:>7}  {:>10}  RESULT{r}",
-        "MODEL", "PROVIDER", "CONTEXT", "COST", "", "SPEED",
-        b = s.bold, d = s.dim, r = s.reset,
+        "{}",
+        s.bold_dim.apply_to(format!(
+            "{:<24} {:<12} {:>10}  {:>7}   {:>7}  {:>10}  RESULT",
+            "MODEL", "PROVIDER", "CONTEXT", "COST", "", "SPEED",
+        )),
     );
 
     let mut failures = 0u32;
@@ -410,26 +413,26 @@ async fn test_models(provider: Option<&str>, model: Option<&str>, s: &Styles) ->
             tokio::time::timeout(Duration::from_secs(30), generate::generate(params)).await;
 
         let (status_color, status) = match result {
-            Ok(Ok(_)) => (s.green, "ok".to_string()),
+            Ok(Ok(_)) => (&s.green, "ok".to_string()),
             Ok(Err(e)) => {
                 failures += 1;
-                (s.red, format!("error: {e}"))
+                (&s.red, format!("error: {e}"))
             }
             Err(_) => {
                 failures += 1;
-                (s.red, "error: timeout (30s)".to_string())
+                (&s.red, "error: timeout (30s)".to_string())
             }
         };
 
         println!(
-            "{b}{:<24}{r} {d}{:<12}{r} {:>10}  {:>7} / {:<7}  {c}{:>10}{r}  {sc}{status}{r}",
-            info.id,
-            info.provider,
+            "{} {} {:>10}  {:>7} / {:<7}  {}  {}",
+            s.bold.apply_to(format!("{:<24}", info.id)),
+            s.dim.apply_to(format!("{:<12}", info.provider)),
             format_context_window(info.context_window),
             format_cost(info.input_cost_per_million),
             format_cost(info.output_cost_per_million),
-            format_speed(info.estimated_output_tps),
-            b = s.bold, d = s.dim, c = s.cyan, r = s.reset, sc = status_color,
+            s.cyan.apply_to(format!("{:>10}", format_speed(info.estimated_output_tps))),
+            status_color.apply_to(&status),
         );
     }
 

@@ -555,6 +555,15 @@ fn doctor_checks_arc_web() {
         .stdout(predicate::str::contains("Arc Web"));
 }
 
+#[test]
+fn doctor_live_flag_accepted() {
+    arc()
+        .args(["--no-dotenv", "doctor", "--live"])
+        .env_clear()
+        .assert()
+        .stdout(predicate::str::contains("Arc Doctor"));
+}
+
 // == JSONL logging ============================================================
 
 #[test]

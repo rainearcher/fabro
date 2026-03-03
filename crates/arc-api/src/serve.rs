@@ -57,17 +57,16 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         match arc_llm::client::Client::from_env().await {
             Ok(c) if c.provider_names().is_empty() => {
                 eprintln!(
-                    "{yellow}Warning:{reset} No LLM providers configured. Running in dry-run mode.",
-                    yellow = styles.yellow,
-                    reset = styles.reset,
+                    "{} No LLM providers configured. Running in dry-run mode.",
+                    styles.yellow.apply_to("Warning:"),
                 );
                 true
             }
             Ok(_) => false,
             Err(e) => {
                 eprintln!(
-                    "{yellow}Warning:{reset} Failed to initialize LLM client: {e}. Running in dry-run mode.",
-                    yellow = styles.yellow, reset = styles.reset,
+                    "{} Failed to initialize LLM client: {e}. Running in dry-run mode.",
+                    styles.yellow.apply_to("Warning:"),
                 );
                 true
             }
@@ -135,17 +134,14 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     info!(host = %args.host, port = args.port, dry_run = dry_run_mode, "API server started");
 
     eprintln!(
-        "{bold}Arc server listening on {green}{addr}{reset}",
-        bold = styles.bold,
-        green = styles.green,
-        reset = styles.reset,
+        "{}",
+        styles.bold.apply_to(format!(
+            "Arc server listening on {}",
+            styles.green.apply_to(&addr)
+        )),
     );
     if dry_run_mode {
-        eprintln!(
-            "{dim}(dry-run mode){reset}",
-            dim = styles.dim,
-            reset = styles.reset,
-        );
+        eprintln!("{}", styles.dim.apply_to("(dry-run mode)"));
     }
 
     axum::serve(listener, router).await?;

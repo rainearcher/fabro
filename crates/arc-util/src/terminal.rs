@@ -1,44 +1,30 @@
-use std::io::IsTerminal;
+use console::Style;
 
-/// Pre-resolved ANSI escape codes for styled terminal output.
-/// All fields are empty strings when color is disabled (non-TTY or `NO_COLOR`).
+/// Pre-built [`console::Style`] instances for styled terminal output.
+/// Each style is forced on/off based on the `use_color` flag passed to [`Styles::new`].
 pub struct Styles {
-    pub bold: &'static str,
-    pub dim: &'static str,
-    pub cyan: &'static str,
-    pub green: &'static str,
-    pub yellow: &'static str,
-    pub red: &'static str,
-    pub reset: &'static str,
+    pub bold: Style,
+    pub dim: Style,
+    pub cyan: Style,
+    pub green: Style,
+    pub yellow: Style,
+    pub red: Style,
+    pub bold_dim: Style,
+    pub bold_cyan: Style,
 }
-
-// SAFETY: Styles contains only `&'static str` fields, which are inherently Send + Sync.
-unsafe impl Send for Styles {}
-unsafe impl Sync for Styles {}
 
 impl Styles {
     #[must_use]
-    pub const fn new(use_color: bool) -> Self {
-        if use_color {
-            Self {
-                bold: "\x1b[1m",
-                dim: "\x1b[2m",
-                cyan: "\x1b[36m",
-                green: "\x1b[32m",
-                yellow: "\x1b[33m",
-                red: "\x1b[31m",
-                reset: "\x1b[0m",
-            }
-        } else {
-            Self {
-                bold: "",
-                dim: "",
-                cyan: "",
-                green: "",
-                yellow: "",
-                red: "",
-                reset: "",
-            }
+    pub fn new(use_color: bool) -> Self {
+        Self {
+            bold: Style::new().bold().force_styling(use_color),
+            dim: Style::new().dim().force_styling(use_color),
+            cyan: Style::new().cyan().force_styling(use_color),
+            green: Style::new().green().force_styling(use_color),
+            yellow: Style::new().yellow().force_styling(use_color),
+            red: Style::new().red().force_styling(use_color),
+            bold_dim: Style::new().bold().dim().force_styling(use_color),
+            bold_cyan: Style::new().bold().cyan().force_styling(use_color),
         }
     }
 
@@ -46,16 +32,14 @@ impl Styles {
     /// Respects `NO_COLOR` environment variable.
     #[must_use]
     pub fn detect_stderr() -> Self {
-        let use_color = std::io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none();
-        Self::new(use_color)
+        Self::new(console::colors_enabled_stderr())
     }
 
     /// Create styles based on whether stdout is a TTY.
     /// Respects `NO_COLOR` environment variable.
     #[must_use]
     pub fn detect_stdout() -> Self {
-        let use_color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
-        Self::new(use_color)
+        Self::new(console::colors_enabled())
     }
 }
 
@@ -64,34 +48,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn styles_with_color() {
+    fn styles_with_color_produces_ansi() {
         let s = Styles::new(true);
-        assert_eq!(s.bold, "\x1b[1m");
-        assert_eq!(s.dim, "\x1b[2m");
-        assert_eq!(s.cyan, "\x1b[36m");
-        assert_eq!(s.green, "\x1b[32m");
-        assert_eq!(s.yellow, "\x1b[33m");
-        assert_eq!(s.red, "\x1b[31m");
-        assert_eq!(s.reset, "\x1b[0m");
+        let output = format!("{}", s.bold.apply_to("text"));
+        assert!(output.contains("\x1b["), "bold should contain ANSI codes");
+        assert!(output.contains("text"));
+
+        let output = format!("{}", s.green.apply_to("ok"));
+        assert!(output.contains("\x1b["), "green should contain ANSI codes");
+        assert!(output.contains("ok"));
     }
 
     #[test]
-    fn styles_without_color() {
+    fn styles_without_color_produces_plain_text() {
         let s = Styles::new(false);
-        assert!(s.bold.is_empty());
-        assert!(s.dim.is_empty());
-        assert!(s.cyan.is_empty());
-        assert!(s.green.is_empty());
-        assert!(s.yellow.is_empty());
-        assert!(s.red.is_empty());
-        assert!(s.reset.is_empty());
+        assert_eq!(format!("{}", s.bold.apply_to("text")), "text");
+        assert_eq!(format!("{}", s.dim.apply_to("text")), "text");
+        assert_eq!(format!("{}", s.cyan.apply_to("text")), "text");
+        assert_eq!(format!("{}", s.green.apply_to("text")), "text");
+        assert_eq!(format!("{}", s.yellow.apply_to("text")), "text");
+        assert_eq!(format!("{}", s.red.apply_to("text")), "text");
     }
 
-    static NO_COLOR: Styles = Styles::new(false);
+    #[test]
+    fn combined_styles_work() {
+        let s = Styles::new(true);
+        let output = format!("{}", s.bold_dim.apply_to("header"));
+        assert!(output.contains("\x1b["), "bold_dim should contain ANSI codes");
+        assert!(output.contains("header"));
+
+        let output = format!("{}", s.bold_cyan.apply_to("tool"));
+        assert!(output.contains("\x1b["), "bold_cyan should contain ANSI codes");
+        assert!(output.contains("tool"));
+    }
 
     #[test]
-    fn no_color_static_is_empty() {
-        assert!(NO_COLOR.bold.is_empty());
-        assert!(NO_COLOR.reset.is_empty());
+    fn no_color_lazy_is_plain() {
+        let styles = Styles::new(false);
+        assert_eq!(format!("{}", styles.bold.apply_to("x")), "x");
     }
 }

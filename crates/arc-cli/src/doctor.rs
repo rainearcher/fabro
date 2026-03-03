@@ -32,6 +32,7 @@ pub struct CheckResult {
 
 pub struct DoctorReport {
     pub checks: Vec<CheckResult>,
+    pub live: bool,
 }
 
 impl DoctorReport {
@@ -51,24 +52,22 @@ impl DoctorReport {
     pub fn render(&self, s: &Styles, verbose: bool) -> String {
         let mut out = String::new();
 
-        writeln!(out, "{b}Arc Doctor{r}", b = s.bold, r = s.reset).unwrap();
+        writeln!(out, "{}", s.bold.apply_to("Arc Doctor")).unwrap();
         writeln!(out).unwrap();
 
         for check in &self.checks {
             let (icon, color) = match check.status {
-                CheckStatus::Pass => ("[✓]", s.green),
-                CheckStatus::Warning => ("[!]", s.yellow),
-                CheckStatus::Error => ("[✗]", s.red),
+                CheckStatus::Pass => ("[✓]", &s.green),
+                CheckStatus::Warning => ("[!]", &s.yellow),
+                CheckStatus::Error => ("[✗]", &s.red),
             };
 
             writeln!(
                 out,
-                "  {color}{icon}{r} {b}{name}{r} ({summary})",
-                color = color,
-                r = s.reset,
-                b = s.bold,
-                name = check.name,
-                summary = check.summary,
+                "  {} {} ({})",
+                color.apply_to(icon),
+                s.bold.apply_to(&check.name),
+                check.summary,
             )
             .unwrap();
 
@@ -99,7 +98,7 @@ impl DoctorReport {
                 .collect();
             if !errors.is_empty() {
                 writeln!(out).unwrap();
-                writeln!(out, "{b}Errors:{r}", b = s.bold, r = s.reset).unwrap();
+                writeln!(out, "{}", s.bold.apply_to("Errors:")).unwrap();
                 for check in &errors {
                     write!(out, "  • {}", check.name).unwrap();
                     if let Some(ref rem) = check.remediation {
@@ -116,7 +115,7 @@ impl DoctorReport {
                 .collect();
             if !warnings.is_empty() {
                 writeln!(out).unwrap();
-                writeln!(out, "{b}Warnings:{r}", b = s.bold, r = s.reset).unwrap();
+                writeln!(out, "{}", s.bold.apply_to("Warnings:")).unwrap();
                 for check in &warnings {
                     write!(out, "  • {}", check.name).unwrap();
                     if let Some(ref rem) = check.remediation {
@@ -125,6 +124,11 @@ impl DoctorReport {
                     writeln!(out).unwrap();
                 }
             }
+        }
+
+        if !self.live {
+            writeln!(out).unwrap();
+            writeln!(out, "Run with --live to probe service connectivity.").unwrap();
         }
 
         out
@@ -158,12 +162,15 @@ pub fn check_config(path: Option<PathBuf>) -> CheckResult {
     }
 }
 
-pub fn check_llm_providers(statuses: &[(Provider, bool)]) -> CheckResult {
+pub fn check_llm_providers(
+    statuses: &[(Provider, bool)],
+    live_results: Option<&[(Provider, Result<(), String>)]>,
+) -> CheckResult {
     let configured: Vec<_> = statuses.iter().filter(|(_, set)| *set).collect();
     let total = statuses.len();
     let count = configured.len();
 
-    let details: Vec<CheckDetail> = statuses
+    let mut details: Vec<CheckDetail> = statuses
         .iter()
         .map(|(provider, set)| {
             let env_vars = provider.api_key_env_vars().join(" or ");
@@ -174,6 +181,23 @@ pub fn check_llm_providers(statuses: &[(Provider, bool)]) -> CheckResult {
         })
         .collect();
 
+    let mut has_live_error = false;
+    if let Some(results) = live_results {
+        for (provider, result) in results {
+            match result {
+                Ok(()) => details.push(CheckDetail {
+                    text: format!("{provider} connectivity: OK"),
+                }),
+                Err(e) => {
+                    has_live_error = true;
+                    details.push(CheckDetail {
+                        text: format!("{provider} connectivity: {e}"),
+                    });
+                }
+            }
+        }
+    }
+
     if count == 0 {
         CheckResult {
             name: "LLM providers".to_string(),
@@ -182,6 +206,14 @@ pub fn check_llm_providers(statuses: &[(Provider, bool)]) -> CheckResult {
             details,
             remediation: Some("Set at least one provider API key".to_string()),
         }
+    } else if has_live_error {
+        CheckResult {
+            name: "LLM providers".to_string(),
+            status: CheckStatus::Warning,
+            summary: format!("{count} of {total} configured (connectivity issues)"),
+            details,
+            remediation: Some("Check provider API keys and network connectivity".to_string()),
+        }
     } else {
         CheckResult {
             name: "LLM providers".to_string(),
@@ -193,41 +225,76 @@ pub fn check_llm_providers(statuses: &[(Provider, bool)]) -> CheckResult {
     }
 }
 
-pub fn check_brave_search(api_key_set: bool) -> CheckResult {
-    if api_key_set {
-        CheckResult {
-            name: "Brave Search".to_string(),
-            status: CheckStatus::Pass,
-            summary: "API key set".to_string(),
-            details: vec![CheckDetail {
-                text: "BRAVE_SEARCH_API_KEY is set".to_string(),
-            }],
-            remediation: None,
-        }
+pub fn check_brave_search(
+    api_key_set: bool,
+    live_result: Option<&Result<(), String>>,
+) -> CheckResult {
+    let mut details = vec![CheckDetail {
+        text: format!(
+            "BRAVE_SEARCH_API_KEY is {}",
+            if api_key_set { "set" } else { "not set" }
+        ),
+    }];
+
+    let mut status = if api_key_set {
+        CheckStatus::Pass
     } else {
-        CheckResult {
-            name: "Brave Search".to_string(),
-            status: CheckStatus::Warning,
-            summary: "not configured".to_string(),
-            details: vec![CheckDetail {
-                text: "BRAVE_SEARCH_API_KEY is not set".to_string(),
-            }],
-            remediation: Some("Set BRAVE_SEARCH_API_KEY to enable web search".to_string()),
+        CheckStatus::Warning
+    };
+    let mut remediation: Option<String> = if api_key_set {
+        None
+    } else {
+        Some("Set BRAVE_SEARCH_API_KEY to enable web search".to_string())
+    };
+
+    if let Some(result) = live_result {
+        match result {
+            Ok(()) => details.push(CheckDetail {
+                text: "Connectivity: OK".to_string(),
+            }),
+            Err(e) => {
+                status = CheckStatus::Warning;
+                details.push(CheckDetail {
+                    text: format!("Connectivity: {e}"),
+                });
+                remediation = Some("Check BRAVE_SEARCH_API_KEY and network connectivity".to_string());
+            }
         }
+    }
+
+    let summary = match (api_key_set, live_result) {
+        (true, Some(Ok(()))) => "API key set, connected".to_string(),
+        (true, Some(Err(_))) => "API key set, connectivity error".to_string(),
+        (true, None) => "API key set".to_string(),
+        (false, _) => "not configured".to_string(),
+    };
+
+    CheckResult {
+        name: "Brave Search".to_string(),
+        status,
+        summary,
+        details,
+        remediation,
     }
 }
 
 pub struct SandboxStatus {
-    pub daytona: Option<Result<(), String>>,
-    pub docker: Option<Result<(), String>>,
+    pub daytona_configured: bool,
+    pub daytona_probe: Option<Result<(), String>>,
+    pub docker_probe: Option<Result<(), String>>,
 }
 
 pub fn check_sandbox(status: &SandboxStatus) -> CheckResult {
+    let mut configured = Vec::new();
     let mut available = Vec::new();
     let mut details = Vec::new();
     let mut errors = Vec::new();
 
-    match &status.daytona {
+    if status.daytona_configured {
+        configured.push("Daytona");
+    }
+
+    match &status.daytona_probe {
         Some(Ok(())) => {
             available.push("Daytona");
             details.push(CheckDetail {
@@ -240,6 +307,11 @@ pub fn check_sandbox(status: &SandboxStatus) -> CheckResult {
                 text: format!("Daytona (DAYTONA_API_KEY): error — {e}"),
             });
         }
+        None if status.daytona_configured => {
+            details.push(CheckDetail {
+                text: "Daytona (DAYTONA_API_KEY): configured".to_string(),
+            });
+        }
         None => {
             details.push(CheckDetail {
                 text: "Daytona (DAYTONA_API_KEY): not configured".to_string(),
@@ -247,7 +319,7 @@ pub fn check_sandbox(status: &SandboxStatus) -> CheckResult {
         }
     }
 
-    match &status.docker {
+    match &status.docker_probe {
         Some(Ok(())) => {
             available.push("Docker");
             details.push(CheckDetail {
@@ -262,7 +334,7 @@ pub fn check_sandbox(status: &SandboxStatus) -> CheckResult {
         }
         None => {
             details.push(CheckDetail {
-                text: "Docker: not available".to_string(),
+                text: "Docker: not probed".to_string(),
             });
         }
     }
@@ -275,21 +347,26 @@ pub fn check_sandbox(status: &SandboxStatus) -> CheckResult {
             details,
             remediation: Some("Fix sandbox configuration errors".to_string()),
         }
-    } else if available.is_empty() {
+    } else if configured.is_empty() && available.is_empty() {
         CheckResult {
             name: "Sandbox".to_string(),
             status: CheckStatus::Warning,
-            summary: "no sandbox available".to_string(),
+            summary: "no sandbox configured".to_string(),
             details,
             remediation: Some(
                 "Install Docker or set DAYTONA_API_KEY to enable sandboxed execution".to_string(),
             ),
         }
     } else {
+        let summary = if available.is_empty() {
+            format!("{} configured", configured.join(" + "))
+        } else {
+            format!("{} available", available.join(" + "))
+        };
         CheckResult {
             name: "Sandbox".to_string(),
             status: CheckStatus::Pass,
-            summary: format!("{} available", available.join(" + ")),
+            summary,
             details,
             remediation: None,
         }
@@ -378,20 +455,44 @@ pub struct ApiStatus {
     pub authentication_strategy: String,
 }
 
-pub fn check_api(status: &ApiStatus) -> CheckResult {
+pub fn check_api(
+    status: &ApiStatus,
+    live_result: Option<&Result<(), String>>,
+) -> CheckResult {
+    let mut details = vec![
+        CheckDetail {
+            text: format!("Base URL: {}", status.base_url),
+        },
+        CheckDetail {
+            text: format!("Authentication: {}", status.authentication_strategy),
+        },
+    ];
+
+    let mut check_status = CheckStatus::Pass;
+    let mut remediation = None;
+
+    if let Some(result) = live_result {
+        match result {
+            Ok(()) => details.push(CheckDetail {
+                text: "Connectivity: OK".to_string(),
+            }),
+            Err(e) => {
+                check_status = CheckStatus::Warning;
+                details.push(CheckDetail {
+                    text: format!("Connectivity: {e}"),
+                });
+                remediation =
+                    Some("Check that the API server is running and reachable".to_string());
+            }
+        }
+    }
+
     CheckResult {
         name: "Arc API".to_string(),
-        status: CheckStatus::Pass,
+        status: check_status,
         summary: status.base_url.clone(),
-        details: vec![
-            CheckDetail {
-                text: format!("Base URL: {}", status.base_url),
-            },
-            CheckDetail {
-                text: format!("Authentication: {}", status.authentication_strategy),
-            },
-        ],
-        remediation: None,
+        details,
+        remediation,
     }
 }
 
@@ -401,23 +502,47 @@ pub struct WebStatus {
     pub allowed_usernames_count: usize,
 }
 
-pub fn check_web(status: &WebStatus) -> CheckResult {
+pub fn check_web(
+    status: &WebStatus,
+    live_result: Option<&Result<(), String>>,
+) -> CheckResult {
+    let mut details = vec![
+        CheckDetail {
+            text: format!("URL: {}", status.url),
+        },
+        CheckDetail {
+            text: format!("Auth provider: {}", status.auth_provider),
+        },
+        CheckDetail {
+            text: format!("Allowed usernames: {}", status.allowed_usernames_count),
+        },
+    ];
+
+    let mut check_status = CheckStatus::Pass;
+    let mut remediation = None;
+
+    if let Some(result) = live_result {
+        match result {
+            Ok(()) => details.push(CheckDetail {
+                text: "Connectivity: OK".to_string(),
+            }),
+            Err(e) => {
+                check_status = CheckStatus::Warning;
+                details.push(CheckDetail {
+                    text: format!("Connectivity: {e}"),
+                });
+                remediation =
+                    Some("Check that the web app is running and reachable".to_string());
+            }
+        }
+    }
+
     CheckResult {
         name: "Arc Web".to_string(),
-        status: CheckStatus::Pass,
+        status: check_status,
         summary: status.url.clone(),
-        details: vec![
-            CheckDetail {
-                text: format!("URL: {}", status.url),
-            },
-            CheckDetail {
-                text: format!("Auth provider: {}", status.auth_provider),
-            },
-            CheckDetail {
-                text: format!("Allowed usernames: {}", status.allowed_usernames_count),
-            },
-        ],
-        remediation: None,
+        details,
+        remediation,
     }
 }
 
@@ -444,7 +569,80 @@ async fn probe_docker() -> Option<Result<(), String>> {
     Some(docker.ping().await.map(|_| ()).map_err(|e| e.to_string()))
 }
 
-pub async fn run_doctor(verbose: bool) -> i32 {
+fn cheapest_model(provider: Provider) -> String {
+    let models = arc_llm::catalog::list_models(Some(provider.as_str()));
+    models
+        .iter()
+        .min_by(|a, b| {
+            let cost_a = a.input_cost_per_million.unwrap_or(f64::MAX);
+            let cost_b = b.input_cost_per_million.unwrap_or(f64::MAX);
+            cost_a.total_cmp(&cost_b)
+        })
+        .map(|m| m.id.clone())
+        .unwrap_or_else(|| format!("unknown-{}", provider.as_str()))
+}
+
+async fn probe_llm_provider(
+    client: &arc_llm::client::Client,
+    provider: Provider,
+) -> (Provider, Result<(), String>) {
+    let request = arc_llm::types::Request {
+        model: cheapest_model(provider),
+        messages: vec![arc_llm::types::Message::user("hi")],
+        provider: Some(provider.as_str().to_string()),
+        tools: None,
+        tool_choice: None,
+        response_format: None,
+        temperature: None,
+        top_p: None,
+        max_tokens: Some(16),
+        stop_sequences: None,
+        reasoning_effort: None,
+        metadata: None,
+        provider_options: None,
+    };
+    let result = client.complete(&request).await.map(|_| ()).map_err(|e| e.to_string());
+    (provider, result)
+}
+
+async fn probe_brave_search() -> Result<(), String> {
+    let api_key = std::env::var("BRAVE_SEARCH_API_KEY")
+        .map_err(|_| "BRAVE_SEARCH_API_KEY not set".to_string())?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get("https://api.search.brave.com/res/v1/web/search?q=test&count=1")
+        .header("X-Subscription-Token", api_key)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("HTTP {}", resp.status()))
+    }
+}
+
+async fn probe_api(base_url: &str) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{base_url}/runs"))
+        .send()
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+async fn probe_web(url: &str) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    client
+        .get(url)
+        .send()
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
     let styles = Styles::detect_stdout();
 
     // Gather state
@@ -488,21 +686,77 @@ pub async fn run_doctor(verbose: bool) -> i32 {
         private_key: std::env::var("GITHUB_APP_PRIVATE_KEY").is_ok(),
     };
 
-    // Probe sandboxes concurrently
-    let (daytona_result, docker_result) = tokio::join!(probe_daytona(), probe_docker());
-    let sandbox_status = SandboxStatus {
-        daytona: daytona_result,
-        docker: docker_result,
-    };
+    // Live probes (only when --live is set)
+    let sandbox_status;
+    let llm_live_results: Option<Vec<(Provider, Result<(), String>)>>;
+    let brave_live_result: Option<Result<(), String>>;
+    let api_live_result: Option<Result<(), String>>;
+    let web_live_result: Option<Result<(), String>>;
+
+    if live {
+        // Build LLM client — may fail if no keys are set
+        let llm_client = arc_llm::client::Client::from_env().await.ok();
+
+        let configured_providers: Vec<Provider> = llm_statuses
+            .iter()
+            .filter(|(_, set)| *set)
+            .map(|(p, _)| *p)
+            .collect();
+
+        let llm_fut = async {
+            if let Some(client) = &llm_client {
+                let mut results = Vec::new();
+                for provider in &configured_providers {
+                    results.push(probe_llm_provider(client, *provider).await);
+                }
+                Some(results)
+            } else {
+                None
+            }
+        };
+
+        let daytona_configured = std::env::var("DAYTONA_API_KEY").is_ok();
+        let sandbox_fut = async {
+            let (daytona_probe, docker_probe) = tokio::join!(probe_daytona(), probe_docker());
+            SandboxStatus {
+                daytona_configured,
+                daytona_probe,
+                docker_probe,
+            }
+        };
+        let brave_fut = probe_brave_search();
+        let api_fut = probe_api(&server_config.api.base_url);
+        let web_fut = probe_web(&server_config.web.url);
+
+        let (sandbox, llm, brave, api, web) =
+            tokio::join!(sandbox_fut, llm_fut, brave_fut, api_fut, web_fut);
+
+        sandbox_status = sandbox;
+        llm_live_results = llm;
+        brave_live_result = Some(brave);
+        api_live_result = Some(api);
+        web_live_result = Some(web);
+    } else {
+        sandbox_status = SandboxStatus {
+            daytona_configured: std::env::var("DAYTONA_API_KEY").is_ok(),
+            daytona_probe: None,
+            docker_probe: None,
+        };
+        llm_live_results = None;
+        brave_live_result = None;
+        api_live_result = None;
+        web_live_result = None;
+    }
 
     // Run pure checks
     let report = DoctorReport {
+        live,
         checks: vec![
             check_config(if config_exists { config_path } else { None }),
-            check_api(&api_status),
-            check_web(&web_status),
-            check_llm_providers(&llm_statuses),
-            check_brave_search(brave_key_set),
+            check_api(&api_status, api_live_result.as_ref()),
+            check_web(&web_status, web_live_result.as_ref()),
+            check_llm_providers(&llm_statuses, llm_live_results.as_deref()),
+            check_brave_search(brave_key_set, brave_live_result.as_ref()),
             check_sandbox(&sandbox_status),
             check_github_app(&github_status),
         ],
@@ -562,6 +816,7 @@ mod tests {
     #[test]
     fn render_all_pass_no_color() {
         let report = DoctorReport {
+            live: false,
             checks: vec![pass_check("Test")],
         };
         let out = report.render(&Styles::new(false), false);
@@ -575,6 +830,7 @@ mod tests {
     #[test]
     fn render_warning_footer() {
         let report = DoctorReport {
+            live: false,
             checks: vec![warning_check("Optional")],
         };
         let out = report.render(&Styles::new(false), false);
@@ -589,6 +845,7 @@ mod tests {
     #[test]
     fn render_error_footer() {
         let report = DoctorReport {
+            live: false,
             checks: vec![error_check("Broken")],
         };
         let out = report.render(&Styles::new(false), false);
@@ -602,6 +859,7 @@ mod tests {
     #[test]
     fn render_verbose_shows_details() {
         let report = DoctorReport {
+            live: false,
             checks: vec![pass_check("Verbose")],
         };
         let out = report.render(&Styles::new(false), true);
@@ -612,6 +870,7 @@ mod tests {
     #[test]
     fn render_default_hides_details() {
         let report = DoctorReport {
+            live: false,
             checks: vec![pass_check("Verbose")],
         };
         let out = report.render(&Styles::new(false), false);
@@ -623,6 +882,7 @@ mod tests {
     #[test]
     fn render_color_pass_green() {
         let report = DoctorReport {
+            live: false,
             checks: vec![pass_check("Color")],
         };
         let out = report.render(&Styles::new(true), false);
@@ -632,6 +892,7 @@ mod tests {
     #[test]
     fn render_color_warning_yellow() {
         let report = DoctorReport {
+            live: false,
             checks: vec![warning_check("Color")],
         };
         let out = report.render(&Styles::new(true), false);
@@ -641,6 +902,7 @@ mod tests {
     #[test]
     fn render_color_error_red() {
         let report = DoctorReport {
+            live: false,
             checks: vec![error_check("Color")],
         };
         let out = report.render(&Styles::new(true), false);
@@ -652,6 +914,7 @@ mod tests {
     #[test]
     fn has_errors_false_for_warnings_only() {
         let report = DoctorReport {
+            live: false,
             checks: vec![pass_check("OK"), warning_check("Warn")],
         };
         assert!(!report.has_errors());
@@ -660,6 +923,7 @@ mod tests {
     #[test]
     fn has_errors_true_when_error_present() {
         let report = DoctorReport {
+            live: false,
             checks: vec![pass_check("OK"), error_check("Broken")],
         };
         assert!(report.has_errors());
@@ -668,6 +932,7 @@ mod tests {
     #[test]
     fn issue_count_counts_warnings_and_errors() {
         let report = DoctorReport {
+            live: false,
             checks: vec![
                 pass_check("OK"),
                 warning_check("Warn"),
@@ -699,7 +964,7 @@ mod tests {
     fn check_llm_all_configured() {
         let statuses: Vec<(Provider, bool)> =
             Provider::ALL.iter().map(|p| (*p, true)).collect();
-        let result = check_llm_providers(&statuses);
+        let result = check_llm_providers(&statuses, None);
         assert_eq!(result.status, CheckStatus::Pass);
         assert!(result.summary.contains("7 of 7"));
     }
@@ -713,7 +978,7 @@ mod tests {
         statuses[2].1 = true; // Gemini
         statuses[3].1 = true; // Kimi
         statuses[4].1 = true; // Zai
-        let result = check_llm_providers(&statuses);
+        let result = check_llm_providers(&statuses, None);
         assert_eq!(result.status, CheckStatus::Pass);
         assert!(result.summary.contains("5 of 7"));
     }
@@ -722,33 +987,68 @@ mod tests {
     fn check_llm_none_configured() {
         let statuses: Vec<(Provider, bool)> =
             Provider::ALL.iter().map(|p| (*p, false)).collect();
-        let result = check_llm_providers(&statuses);
+        let result = check_llm_providers(&statuses, None);
         assert_eq!(result.status, CheckStatus::Error);
         assert!(result.summary.contains("0 of 7"));
+    }
+
+    #[test]
+    fn check_llm_live_ok() {
+        let statuses = vec![(Provider::Anthropic, true)];
+        let live = vec![(Provider::Anthropic, Ok(()))];
+        let result = check_llm_providers(&statuses, Some(&live));
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert!(result.details.iter().any(|d| d.text.contains("connectivity: OK")));
+    }
+
+    #[test]
+    fn check_llm_live_error() {
+        let statuses = vec![(Provider::Anthropic, true)];
+        let live = vec![(Provider::Anthropic, Err("timeout".to_string()))];
+        let result = check_llm_providers(&statuses, Some(&live));
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert!(result.details.iter().any(|d| d.text.contains("timeout")));
     }
 
     // -- check_brave_search --
 
     #[test]
     fn check_brave_configured() {
-        let result = check_brave_search(true);
+        let result = check_brave_search(true, None);
         assert_eq!(result.status, CheckStatus::Pass);
     }
 
     #[test]
     fn check_brave_not_configured() {
-        let result = check_brave_search(false);
+        let result = check_brave_search(false, None);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.remediation.is_some());
+    }
+
+    #[test]
+    fn check_brave_live_ok() {
+        let live = Ok(());
+        let result = check_brave_search(true, Some(&live));
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert!(result.summary.contains("connected"));
+    }
+
+    #[test]
+    fn check_brave_live_error() {
+        let live = Err("HTTP 401".to_string());
+        let result = check_brave_search(true, Some(&live));
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert!(result.details.iter().any(|d| d.text.contains("HTTP 401")));
     }
 
     // -- check_sandbox --
 
     #[test]
-    fn check_sandbox_daytona_ok() {
+    fn check_sandbox_daytona_probed_ok() {
         let status = SandboxStatus {
-            daytona: Some(Ok(())),
-            docker: None,
+            daytona_configured: true,
+            daytona_probe: Some(Ok(())),
+            docker_probe: None,
         };
         let result = check_sandbox(&status);
         assert_eq!(result.status, CheckStatus::Pass);
@@ -756,10 +1056,11 @@ mod tests {
     }
 
     #[test]
-    fn check_sandbox_docker_ok() {
+    fn check_sandbox_docker_probed_ok() {
         let status = SandboxStatus {
-            daytona: None,
-            docker: Some(Ok(())),
+            daytona_configured: false,
+            daytona_probe: None,
+            docker_probe: Some(Ok(())),
         };
         let result = check_sandbox(&status);
         assert_eq!(result.status, CheckStatus::Pass);
@@ -767,10 +1068,11 @@ mod tests {
     }
 
     #[test]
-    fn check_sandbox_both_ok() {
+    fn check_sandbox_both_probed_ok() {
         let status = SandboxStatus {
-            daytona: Some(Ok(())),
-            docker: Some(Ok(())),
+            daytona_configured: true,
+            daytona_probe: Some(Ok(())),
+            docker_probe: Some(Ok(())),
         };
         let result = check_sandbox(&status);
         assert_eq!(result.status, CheckStatus::Pass);
@@ -778,20 +1080,36 @@ mod tests {
     }
 
     #[test]
-    fn check_sandbox_both_unavailable() {
+    fn check_sandbox_nothing_configured() {
         let status = SandboxStatus {
-            daytona: None,
-            docker: None,
+            daytona_configured: false,
+            daytona_probe: None,
+            docker_probe: None,
         };
         let result = check_sandbox(&status);
         assert_eq!(result.status, CheckStatus::Warning);
+        assert!(result.summary.contains("no sandbox configured"));
+    }
+
+    #[test]
+    fn check_sandbox_daytona_configured_not_probed() {
+        let status = SandboxStatus {
+            daytona_configured: true,
+            daytona_probe: None,
+            docker_probe: None,
+        };
+        let result = check_sandbox(&status);
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert!(result.summary.contains("Daytona configured"));
+        assert!(result.details.iter().any(|d| d.text.contains("configured")));
     }
 
     #[test]
     fn check_sandbox_configured_but_broken() {
         let status = SandboxStatus {
-            daytona: Some(Err("connection refused".to_string())),
-            docker: None,
+            daytona_configured: true,
+            daytona_probe: Some(Err("connection refused".to_string())),
+            docker_probe: None,
         };
         let result = check_sandbox(&status);
         assert_eq!(result.status, CheckStatus::Error);
@@ -850,7 +1168,7 @@ mod tests {
             base_url: "http://localhost:3000".to_string(),
             authentication_strategy: "jwt".to_string(),
         };
-        let result = check_api(&status);
+        let result = check_api(&status, None);
         assert_eq!(result.status, CheckStatus::Pass);
         assert_eq!(result.summary, "http://localhost:3000");
     }
@@ -861,12 +1179,36 @@ mod tests {
             base_url: "https://api.example.com".to_string(),
             authentication_strategy: "jwt".to_string(),
         };
-        let result = check_api(&status);
+        let result = check_api(&status, None);
         assert!(result.details.iter().any(|d| d.text.contains("jwt")));
         assert!(result
             .details
             .iter()
             .any(|d| d.text.contains("https://api.example.com")));
+    }
+
+    #[test]
+    fn check_api_live_ok() {
+        let status = ApiStatus {
+            base_url: "http://localhost:3000".to_string(),
+            authentication_strategy: "jwt".to_string(),
+        };
+        let live = Ok(());
+        let result = check_api(&status, Some(&live));
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert!(result.details.iter().any(|d| d.text.contains("Connectivity: OK")));
+    }
+
+    #[test]
+    fn check_api_live_error() {
+        let status = ApiStatus {
+            base_url: "http://localhost:3000".to_string(),
+            authentication_strategy: "jwt".to_string(),
+        };
+        let live = Err("connection refused".to_string());
+        let result = check_api(&status, Some(&live));
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert!(result.details.iter().any(|d| d.text.contains("connection refused")));
     }
 
     // -- check_web --
@@ -878,7 +1220,7 @@ mod tests {
             auth_provider: "github".to_string(),
             allowed_usernames_count: 0,
         };
-        let result = check_web(&status);
+        let result = check_web(&status, None);
         assert_eq!(result.status, CheckStatus::Pass);
         assert_eq!(result.summary, "http://localhost:5173");
     }
@@ -890,7 +1232,7 @@ mod tests {
             auth_provider: "github".to_string(),
             allowed_usernames_count: 3,
         };
-        let result = check_web(&status);
+        let result = check_web(&status, None);
         assert!(result.details.iter().any(|d| d.text.contains("github")));
         assert!(result
             .details
@@ -902,11 +1244,38 @@ mod tests {
             .any(|d| d.text.contains("Allowed usernames: 3")));
     }
 
+    #[test]
+    fn check_web_live_ok() {
+        let status = WebStatus {
+            url: "http://localhost:5173".to_string(),
+            auth_provider: "github".to_string(),
+            allowed_usernames_count: 0,
+        };
+        let live = Ok(());
+        let result = check_web(&status, Some(&live));
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert!(result.details.iter().any(|d| d.text.contains("Connectivity: OK")));
+    }
+
+    #[test]
+    fn check_web_live_error() {
+        let status = WebStatus {
+            url: "http://localhost:5173".to_string(),
+            auth_provider: "github".to_string(),
+            allowed_usernames_count: 0,
+        };
+        let live = Err("connection refused".to_string());
+        let result = check_web(&status, Some(&live));
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert!(result.details.iter().any(|d| d.text.contains("connection refused")));
+    }
+
     // -- render: multiple issues --
 
     #[test]
     fn render_multiple_issues_pluralizes() {
         let report = DoctorReport {
+            live: false,
             checks: vec![warning_check("A"), error_check("B")],
         };
         let out = report.render(&Styles::new(false), false);

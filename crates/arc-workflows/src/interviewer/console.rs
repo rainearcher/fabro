@@ -15,7 +15,7 @@ pub struct ConsoleInterviewer {
 
 impl ConsoleInterviewer {
     #[must_use]
-    pub const fn new(styles: &'static Styles) -> Self {
+    pub fn new(styles: &'static Styles) -> Self {
         Self { styles }
     }
 }
@@ -164,24 +164,21 @@ impl Interviewer for ConsoleInterviewer {
         // Non-TTY fallback: line-based stdin reading
         let s = self.styles;
         eprintln!(
-            "{bold}{cyan}?{reset} {}",
+            "{} {}",
+            s.bold_cyan.apply_to("?"),
             question.text,
-            bold = s.bold,
-            cyan = s.cyan,
-            reset = s.reset,
         );
 
         match question.question_type {
             QuestionType::MultipleChoice | QuestionType::MultiSelect => {
                 for (i, opt) in question.options.iter().enumerate() {
                     eprintln!(
-                        "  {dim}[{reset}{bold}{}{reset}{dim}]{reset} {} - {}",
-                        i + 1,
+                        "  {}{}{}  {} - {}",
+                        s.dim.apply_to("["),
+                        s.bold.apply_to(i + 1),
+                        s.dim.apply_to("]"),
                         opt.key,
                         opt.label,
-                        dim = s.dim,
-                        bold = s.bold,
-                        reset = s.reset,
                     );
                 }
                 if question.allow_freeform {
@@ -215,11 +212,7 @@ impl Interviewer for ConsoleInterviewer {
 
     async fn inform(&self, message: &str, stage: &str) {
         let s = self.styles;
-        eprintln!(
-            "{dim}[{stage}]{reset} {message}",
-            dim = s.dim,
-            reset = s.reset,
-        );
+        eprintln!("{} {message}", s.dim.apply_to(format!("[{stage}]")));
     }
 }
 

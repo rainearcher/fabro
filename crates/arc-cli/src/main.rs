@@ -48,6 +48,10 @@ enum Command {
         /// Show detailed information for each check
         #[arg(short, long)]
         verbose: bool,
+
+        /// Probe live services (LLM, sandbox, API, web, Brave Search)
+        #[arg(short, long)]
+        live: bool,
     },
 }
 
@@ -122,8 +126,8 @@ async fn main() -> Result<()> {
                 Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
             arc_api::serve::serve_command(args, styles).await?;
         }
-        Command::Doctor { verbose } => {
-            let exit_code = doctor::run_doctor(verbose).await;
+        Command::Doctor { verbose, live } => {
+            let exit_code = doctor::run_doctor(verbose, live).await;
             std::process::exit(exit_code);
         }
     }

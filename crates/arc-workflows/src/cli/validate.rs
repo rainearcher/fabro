@@ -16,13 +16,10 @@ pub fn validate_command(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<
     let (graph, diagnostics) = WorkflowBuilder::new().prepare(&source)?;
 
     eprintln!(
-        "{bold}Parsed workflow:{reset} {} ({dim}{} nodes, {} edges{reset})",
-        graph.name,
+        "{} ({} nodes, {} edges)",
+        styles.bold.apply_to(format!("Parsed workflow: {}", graph.name)),
         graph.nodes.len(),
         graph.edges.len(),
-        bold = styles.bold,
-        dim = styles.dim,
-        reset = styles.reset,
     );
 
     print_diagnostics(&diagnostics, styles);
@@ -31,10 +28,6 @@ pub fn validate_command(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<
         bail!("Validation failed");
     }
 
-    eprintln!(
-        "Validation: {green}OK{reset}",
-        green = styles.green,
-        reset = styles.reset,
-    );
+    eprintln!("Validation: {}", styles.green.apply_to("OK"));
     Ok(())
 }

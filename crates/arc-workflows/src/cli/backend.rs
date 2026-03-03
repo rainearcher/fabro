@@ -291,20 +291,18 @@ impl CodergenBackend for AgentApiBackend {
                             ..
                         } => {
                             eprintln!(
-                                "{dim}[{node_id}]{reset}   {dim}\u{25cf}{reset} {bold}{cyan}{tool_name}{reset}{dim}({args}){reset}",
-                                dim = styles.dim,
-                                reset = styles.reset,
-                                bold = styles.bold,
-                                cyan = styles.cyan,
-                                args = format_tool_args(arguments),
+                                "{} {} {}{}",
+                                styles.dim.apply_to(format!("[{node_id}]")),
+                                styles.dim.apply_to("\u{25cf}"),
+                                styles.bold_cyan.apply_to(tool_name),
+                                styles.dim.apply_to(format!("({})", format_tool_args(arguments))),
                             );
                         }
                         AgentEvent::Error { error } => {
                             eprintln!(
-                                "{dim}[{node_id}]{reset}   {red}\u{2717} {error}{reset}",
-                                dim = styles.dim,
-                                red = styles.red,
-                                reset = styles.reset,
+                                "{} {}",
+                                styles.dim.apply_to(format!("[{node_id}]")),
+                                styles.red.apply_to(format!("\u{2717} {error}")),
                             );
                         }
                         _ => {}
@@ -373,10 +371,11 @@ impl CodergenBackend for AgentApiBackend {
             };
             let reuse_label = if is_reused { " (reused session)" } else { "" };
             eprintln!(
-                "{dim}[{node_id}] Done ({turn_count} turns, {tool_call_count} tool calls, {token_str}{reuse_label}){reset}",
-                node_id = node.id,
-                dim = self.styles.dim,
-                reset = self.styles.reset,
+                "{}",
+                self.styles.dim.apply_to(format!(
+                    "[{}] Done ({turn_count} turns, {tool_call_count} tool calls, {token_str}{reuse_label})",
+                    node.id,
+                )),
             );
         }
 

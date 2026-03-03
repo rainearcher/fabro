@@ -126,8 +126,8 @@ fn build_tool_approval(
         // Interactive prompt on stderr
         let category = tool_category(tool_name);
         eprint!(
-            "Allow {}{tool_name}{} ({category})? [y]es / [n]o / [a]lways: ",
-            styles.bold, styles.reset,
+            "Allow {} ({category})? [y]es / [n]o / [a]lways: ",
+            styles.bold.apply_to(tool_name),
         );
         std::io::stderr().flush().ok();
 
@@ -245,8 +245,10 @@ fn print_summary(session: &Session, styles: &Styles) {
         format!("{total_tokens} tokens")
     };
     eprintln!(
-        "{}Done ({turn_count} turns, {tool_call_count} tool calls, {token_str}){}",
-        styles.dim, styles.reset,
+        "{}",
+        styles.dim.apply_to(format!(
+            "Done ({turn_count} turns, {tool_call_count} tool calls, {token_str})"
+        )),
     );
 }
 
@@ -264,23 +266,25 @@ impl arc_llm::middleware::Middleware for DebugMiddleware {
     ) -> Result<arc_llm::types::Response, arc_llm::error::SdkError> {
         let s = self.styles;
         eprintln!(
-            "{}[debug] request: model={} messages={} tools={}{}",
-            s.dim,
-            request.model,
-            request.messages.len(),
-            request.tools.as_ref().map_or(0, Vec::len),
-            s.reset,
+            "{}",
+            s.dim.apply_to(format!(
+                "[debug] request: model={} messages={} tools={}",
+                request.model,
+                request.messages.len(),
+                request.tools.as_ref().map_or(0, Vec::len),
+            )),
         );
         let response = next(request).await?;
         eprintln!(
-            "{}[debug] response: model={} finish={:?} usage=({}/{}/{}){}",
-            s.dim,
-            response.model,
-            response.finish_reason,
-            response.usage.input_tokens,
-            response.usage.output_tokens,
-            response.usage.total_tokens,
-            s.reset,
+            "{}",
+            s.dim.apply_to(format!(
+                "[debug] response: model={} finish={:?} usage=({}/{}/{})",
+                response.model,
+                response.finish_reason,
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+                response.usage.total_tokens,
+            )),
         );
         Ok(response)
     }
@@ -308,17 +312,15 @@ impl arc_llm::middleware::Middleware for VerboseMiddleware {
     ) -> Result<arc_llm::types::Response, arc_llm::error::SdkError> {
         let s = self.styles;
         eprintln!(
-            "{}[verbose] request:{}\n{}",
-            s.dim,
-            s.reset,
+            "{}\n{}",
+            s.dim.apply_to("[verbose] request:"),
             serde_json::to_string_pretty(&request)
                 .unwrap_or_else(|e| format!("<serialize error: {e}>"))
         );
         let response = next(request).await?;
         eprintln!(
-            "{}[verbose] response:{}\n{}",
-            s.dim,
-            s.reset,
+            "{}\n{}",
+            s.dim.apply_to("[verbose] response:"),
             serde_json::to_string_pretty(&response)
                 .unwrap_or_else(|e| format!("<serialize error: {e}>"))
         );
@@ -365,7 +367,7 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
         .model
         .as_deref()
         .unwrap_or_else(|| default_model(provider));
-    eprintln!("{}Using model: {model}{}", styles.dim, styles.reset,);
+    eprintln!("{}", styles.dim.apply_to(format!("Using model: {model}")));
     let mut profile = build_profile(provider, model, Some(client.clone()));
 
     // Build sandbox
@@ -465,12 +467,13 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                             ..
                         } => {
                             eprintln!(
-                                "  {dim}\u{25cf}{reset} {bold}{cyan}{tool_name}{reset}{dim}({args}){reset}",
-                                dim = s.dim,
-                                reset = s.reset,
-                                bold = s.bold,
-                                cyan = s.cyan,
-                                args = format_tool_args(arguments, &cwd_str),
+                                "  {} {}{}",
+                                s.dim.apply_to("\u{25cf}"),
+                                s.bold_cyan.apply_to(tool_name),
+                                s.dim.apply_to(format!(
+                                    "({})",
+                                    format_tool_args(arguments, &cwd_str)
+                                )),
                             );
                         }
                         AgentEvent::ToolCallCompleted {
@@ -485,18 +488,16 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                                 "tool result"
                             };
                             eprintln!(
-                                "  {}[{label}] {tool_name}:{}\n{}",
-                                s.dim,
-                                s.reset,
+                                "  {}\n{}",
+                                s.dim.apply_to(format!("[{label}] {tool_name}:")),
                                 serde_json::to_string_pretty(output)
                                     .unwrap_or_else(|_| output.to_string()),
                             );
                         }
                         AgentEvent::Error { error } => {
                             eprintln!(
-                                "  {red}\u{2717} {error}{reset}",
-                                red = s.red,
-                                reset = s.reset,
+                                "  {}",
+                                s.red.apply_to(format!("\u{2717} {error}")),
                             );
                         }
                         AgentEvent::SubAgentSpawned {
@@ -508,8 +509,10 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                             let short_id = &agent_id[..8.min(agent_id.len())];
                             let task_preview = if task.len() > 60 { &task[..60] } else { task };
                             eprintln!(
-                                "  {dim}\u{25b6} subagent {short_id} spawned (depth={depth}) task={task_preview:?}{reset}",
-                                dim = s.dim, reset = s.reset,
+                                "  {}",
+                                s.dim.apply_to(format!(
+                                    "\u{25b6} subagent {short_id} spawned (depth={depth}) task={task_preview:?}"
+                                )),
                             );
                         }
                         AgentEvent::SubAgentCompleted {
@@ -520,8 +523,10 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                         } => {
                             let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
-                                "  {dim}\u{25a0} subagent {short_id} completed (depth={depth}, success={success}, turns={turns_used}){reset}",
-                                dim = s.dim, reset = s.reset,
+                                "  {}",
+                                s.dim.apply_to(format!(
+                                    "\u{25a0} subagent {short_id} completed (depth={depth}, success={success}, turns={turns_used})"
+                                )),
                             );
                         }
                         AgentEvent::SubAgentFailed {
@@ -531,16 +536,19 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                         } => {
                             let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
-                                "  {red}\u{2717} subagent {short_id} failed (depth={depth}): {error}{reset}",
-                                red = s.red, reset = s.reset,
+                                "  {}",
+                                s.red.apply_to(format!(
+                                    "\u{2717} subagent {short_id} failed (depth={depth}): {error}"
+                                )),
                             );
                         }
                         AgentEvent::SubAgentClosed { agent_id, depth } => {
                             let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
-                                "  {dim}\u{25a0} subagent {short_id} closed (depth={depth}){reset}",
-                                dim = s.dim,
-                                reset = s.reset,
+                                "  {}",
+                                s.dim.apply_to(format!(
+                                    "\u{25a0} subagent {short_id} closed (depth={depth})"
+                                )),
                             );
                         }
                         AgentEvent::SubAgentEvent {
@@ -550,9 +558,10 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                         } if verbose => {
                             let short_id = &agent_id[..8.min(agent_id.len())];
                             eprintln!(
-                                "  {dim}[subagent {short_id}] {child_event:?}{reset}",
-                                dim = s.dim,
-                                reset = s.reset,
+                                "  {}",
+                                s.dim.apply_to(format!(
+                                    "[subagent {short_id}] {child_event:?}"
+                                )),
                             );
                         }
                         _ => {}
@@ -591,7 +600,7 @@ mod tests {
     use arc_llm::provider::Provider;
     use serde_json::json;
 
-    static NO_COLOR: Styles = Styles::new(false);
+    static NO_COLOR: std::sync::LazyLock<Styles> = std::sync::LazyLock::new(|| Styles::new(false));
 
     // tool_category tests
 

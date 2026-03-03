@@ -149,27 +149,20 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
         };
         match d.severity {
             Severity::Error => eprintln!(
-                "{red}error{reset}{location}: {} ({dim}{}{reset})",
+                "{}{location}: {} ({})",
+                styles.red.apply_to("error"),
                 d.message,
-                d.rule,
-                red = styles.red,
-                dim = styles.dim,
-                reset = styles.reset,
+                styles.dim.apply_to(&d.rule),
             ),
             Severity::Warning => eprintln!(
-                "{yellow}warning{reset}{location}: {} ({dim}{}{reset})",
+                "{}{location}: {} ({})",
+                styles.yellow.apply_to("warning"),
                 d.message,
-                d.rule,
-                yellow = styles.yellow,
-                dim = styles.dim,
-                reset = styles.reset,
+                styles.dim.apply_to(&d.rule),
             ),
             Severity::Info => eprintln!(
-                "{dim}info{location}: {} ({}){reset}",
-                d.message,
-                d.rule,
-                dim = styles.dim,
-                reset = styles.reset,
+                "{}",
+                styles.dim.apply_to(format!("info{location}: {} ({})", d.message, d.rule)),
             ),
         }
     }
@@ -568,7 +561,7 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
             format!("[ASSETS_CAPTURED] node={node_id} files_copied={files_copied} total_bytes={total_bytes} files_skipped={files_skipped}")
         }
     };
-    format!("{dim}{body}{reset}", dim = styles.dim, reset = styles.reset)
+    format!("{}", styles.dim.apply_to(body))
 }
 
 /// Compute the dollar cost for a stage's token usage, if pricing is available.
@@ -637,7 +630,8 @@ mod tests {
     }
 
     fn test_styles() -> &'static Styles {
-        Box::leak(Box::new(Styles::new(false)))
+        static STYLES: std::sync::LazyLock<Styles> = std::sync::LazyLock::new(|| Styles::new(false));
+        &STYLES
     }
 
     #[test]

@@ -7168,7 +7168,7 @@ fn parse_tool_hooks_from_dot_syntax() {
 // E2E test with real LLM
 // ---------------------------------------------------------------------------
 
-static TEST_STYLES: Styles = Styles::new(false);
+static TEST_STYLES: std::sync::LazyLock<Styles> = std::sync::LazyLock::new(|| Styles::new(false));
 
 #[tokio::test]
 #[ignore = "requires ANTHROPIC_API_KEY"]

@@ -29,6 +29,7 @@ jsonschema = "0.42"
 chrono = { version = "0.4", features = ["clock"] }
 bollard = "0.18"
 tar = "0.4"
+console = "0.15"
 dialoguer = "0.12"
 git2 = "0.19"
 tracing = "0.1"

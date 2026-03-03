@@ -218,22 +218,15 @@ pub async fn run_command(
     let (graph, diagnostics) = WorkflowBuilder::new().prepare(&source)?;
 
     eprintln!(
-        "{bold}Parsed workflow:{reset} {} ({dim}{} nodes, {} edges{reset})",
+        "{} {} ({})",
+        styles.bold.apply_to("Parsed workflow:"),
         graph.name,
-        graph.nodes.len(),
-        graph.edges.len(),
-        bold = styles.bold,
-        dim = styles.dim,
-        reset = styles.reset,
+        styles.dim.apply_to(format!("{} nodes, {} edges", graph.nodes.len(), graph.edges.len())),
     );
 
     let goal = graph.goal();
     if !goal.is_empty() {
-        eprintln!(
-            "{bold}Goal:{reset} {goal}",
-            bold = styles.bold,
-            reset = styles.reset
-        );
+        eprintln!("{} {goal}", styles.bold.apply_to("Goal:"));
     }
 
     print_diagnostics(&diagnostics, styles);
@@ -276,10 +269,8 @@ pub async fn run_command(
 
     if args.verbose {
         eprintln!(
-            "{dim}Logs: {}{reset}",
-            logs_dir.display(),
-            dim = styles.dim,
-            reset = styles.reset,
+            "{}",
+            styles.dim.apply_to(format!("Logs: {}", logs_dir.display())),
         );
     }
 
@@ -382,9 +373,8 @@ pub async fn run_command(
                 ..  // node_id and other fields
             } => {
                 let mut line = format!(
-                    "{dim}Stage \"{name}\" completed ({status}) in {duration}",
+                    "Stage \"{name}\" completed ({status}) in {duration}",
                     duration = format_duration_human(*duration_ms),
-                    dim = styles.dim,
                 );
                 if let Some(u) = usage {
                     let total = u.input_tokens + u.output_tokens;
@@ -398,13 +388,12 @@ pub async fn run_command(
                         line.push_str(&format!(" \u{2014} {tokens_str} tokens"));
                     }
                 }
-                eprintln!("{line}{reset}", reset = styles.reset);
+                eprintln!("{}", styles.dim.apply_to(line));
             }
             crate::event::WorkflowRunEvent::StageFailed { name, .. } => {
                 eprintln!(
-                    "{dim}Stage \"{name}\" failed{reset}",
-                    dim = styles.dim,
-                    reset = styles.reset,
+                    "{}",
+                    styles.dim.apply_to(format!("Stage \"{name}\" failed")),
                 );
             }
             _ => {}
@@ -427,8 +416,8 @@ pub async fn run_command(
                 }
                 Err(e) => {
                     eprintln!(
-                    "{yellow}Warning:{reset} Git worktree setup failed ({e}), running without worktree.",
-                    yellow = styles.yellow, reset = styles.reset,
+                    "{} Git worktree setup failed ({e}), running without worktree.",
+                    styles.yellow.apply_to("Warning:"),
                 );
                     (None, None, None, None, None)
                 }
@@ -509,8 +498,8 @@ pub async fn run_command(
             Ok((rid, base, branch)) => (Some(rid), Some(base), Some(branch)),
             Err(e) => {
                 eprintln!(
-                    "{yellow}Warning:{reset} Daytona git setup failed ({e}), running without git checkpoints.",
-                    yellow = styles.yellow, reset = styles.reset,
+                    "{} Daytona git setup failed ({e}), running without git checkpoints.",
+                    styles.yellow.apply_to("Warning:"),
                 );
                 (None, None, None)
             }
@@ -569,17 +558,16 @@ pub async fn run_command(
         match arc_llm::client::Client::from_env().await {
             Ok(c) if c.provider_names().is_empty() => {
                 eprintln!(
-                    "{yellow}Warning:{reset} No LLM providers configured. Running in dry-run mode.",
-                    yellow = styles.yellow,
-                    reset = styles.reset,
+                    "{} No LLM providers configured. Running in dry-run mode.",
+                    styles.yellow.apply_to("Warning:"),
                 );
                 (true, None)
             }
             Ok(c) => (false, Some(c)),
             Err(e) => {
                 eprintln!(
-                    "{yellow}Warning:{reset} Failed to initialize LLM client: {e}. Running in dry-run mode.",
-                    yellow = styles.yellow, reset = styles.reset,
+                    "{} Failed to initialize LLM client: {e}. Running in dry-run mode.",
+                    styles.yellow.apply_to("Warning:"),
                 );
                 (true, None)
             }
@@ -717,19 +705,18 @@ pub async fn run_command(
 
     // 8. Print result
     eprintln!(
-        "\n{bold}=== Run Result ==={reset}",
-        bold = styles.bold,
-        reset = styles.reset,
+        "\n{}",
+        styles.bold.apply_to("=== Run Result ==="),
     );
 
     let status_str = outcome.status.to_string().to_uppercase();
     let status_color = match outcome.status {
-        StageStatus::Success | StageStatus::PartialSuccess => styles.green,
-        _ => styles.red,
+        StageStatus::Success | StageStatus::PartialSuccess => &styles.green,
+        _ => &styles.red,
     };
     eprintln!(
-        "Status: {status_color}{status_str}{reset}",
-        reset = styles.reset
+        "Status: {}",
+        status_color.apply_to(&status_str),
     );
     eprintln!("Duration: {}", format_duration_human(run_duration_ms));
 
@@ -747,19 +734,21 @@ pub async fn run_command(
         }
         if acc.total_cache_read_tokens > 0 {
             eprintln!(
-                "{dim}Cache: {} read, {} write{reset}",
-                format_tokens_human(acc.total_cache_read_tokens),
-                format_tokens_human(acc.total_cache_write_tokens),
-                dim = styles.dim,
-                reset = styles.reset,
+                "{}",
+                styles.dim.apply_to(format!(
+                    "Cache: {} read, {} write",
+                    format_tokens_human(acc.total_cache_read_tokens),
+                    format_tokens_human(acc.total_cache_write_tokens),
+                )),
             );
         }
         if acc.total_reasoning_tokens > 0 {
             eprintln!(
-                "{dim}Reasoning: {} tokens{reset}",
-                format_tokens_human(acc.total_reasoning_tokens),
-                dim = styles.dim,
-                reset = styles.reset,
+                "{}",
+                styles.dim.apply_to(format!(
+                    "Reasoning: {} tokens",
+                    format_tokens_human(acc.total_reasoning_tokens),
+                )),
             );
         }
     }
@@ -770,16 +759,13 @@ pub async fn run_command(
     }
     if let Some(failure) = outcome.failure_reason() {
         eprintln!(
-            "{red}Failure: {failure}{reset}",
-            red = styles.red,
-            reset = styles.reset,
+            "{}",
+            styles.red.apply_to(format!("Failure: {failure}")),
         );
     }
     eprintln!(
-        "{dim}Logs: {}{reset}",
-        logs_dir.display(),
-        dim = styles.dim,
-        reset = styles.reset,
+        "{}",
+        styles.dim.apply_to(format!("Logs: {}", logs_dir.display())),
     );
 
     // 9. Exit code
@@ -899,11 +885,10 @@ async fn run_from_branch(
     let (graph, diagnostics) = crate::workflow::WorkflowBuilder::new().prepare(&source)?;
 
     eprintln!(
-        "{bold}Resuming workflow:{reset} {} from branch {dim}{run_branch}{reset}",
+        "{} {} from branch {}",
+        styles.bold.apply_to("Resuming workflow:"),
         graph.name,
-        bold = styles.bold,
-        dim = styles.dim,
-        reset = styles.reset,
+        styles.dim.apply_to(run_branch),
     );
 
     super::print_diagnostics(&diagnostics, styles);
@@ -1044,28 +1029,25 @@ async fn run_from_branch(
     let outcome = engine_result?;
 
     eprintln!(
-        "\n{bold}=== Run Result ==={reset}",
-        bold = styles.bold,
-        reset = styles.reset,
+        "\n{}",
+        styles.bold.apply_to("=== Run Result ==="),
     );
     let status_str = outcome.status.to_string().to_uppercase();
     let status_color = match outcome.status {
-        StageStatus::Success | StageStatus::PartialSuccess => styles.green,
-        _ => styles.red,
+        StageStatus::Success | StageStatus::PartialSuccess => &styles.green,
+        _ => &styles.red,
     };
     eprintln!(
-        "Status: {status_color}{status_str}{reset}",
-        reset = styles.reset
+        "Status: {}",
+        status_color.apply_to(&status_str),
     );
     eprintln!(
         "Duration: {}",
         super::format_duration_human(run_duration_ms)
     );
     eprintln!(
-        "{dim}Logs: {}{reset}",
-        logs_dir.display(),
-        dim = styles.dim,
-        reset = styles.reset,
+        "{}",
+        styles.dim.apply_to(format!("Logs: {}", logs_dir.display())),
     );
 
     match outcome.status {
@@ -1200,9 +1182,8 @@ async fn run_preflight(
     // 7. Print warnings/errors to stderr
     for err in &errors {
         eprintln!(
-            "{red}error{reset}: {err}",
-            red = styles.red,
-            reset = styles.reset,
+            "{}: {err}",
+            styles.red.apply_to("error"),
         );
     }
 
@@ -1210,16 +1191,14 @@ async fn run_preflight(
     let ok = sandbox_ready && llm_available && provider_valid;
     if ok {
         eprintln!(
-            "\n{green}Preflight: OK{reset}",
-            green = styles.green,
-            reset = styles.reset,
+            "\n{}",
+            styles.green.apply_to("Preflight: OK"),
         );
         Ok(())
     } else {
         eprintln!(
-            "\n{red}Preflight: FAIL{reset}",
-            red = styles.red,
-            reset = styles.reset,
+            "\n{}",
+            styles.red.apply_to("Preflight: FAIL"),
         );
         std::process::exit(1);
     }
@@ -1249,9 +1228,8 @@ async fn generate_retro(
         Ok(cp) => cp,
         Err(e) => {
             eprintln!(
-                "{yellow}Warning:{reset} Could not load checkpoint, skipping retro: {e}",
-                yellow = styles.yellow,
-                reset = styles.reset,
+                "{} Could not load checkpoint, skipping retro: {e}",
+                styles.yellow.apply_to("Warning:"),
             );
             return;
         }
@@ -1273,9 +1251,8 @@ async fn generate_retro(
         Ok(()) => {}
         Err(e) => {
             eprintln!(
-                "{yellow}Warning:{reset} Failed to save initial retro: {e}",
-                yellow = styles.yellow,
-                reset = styles.reset,
+                "{} Failed to save initial retro: {e}",
+                styles.yellow.apply_to("Warning:"),
             );
         }
     }
@@ -1296,26 +1273,22 @@ async fn generate_retro(
             match retro.save(logs_dir) {
                 Ok(()) => {
                     eprintln!(
-                        "{dim}Retro saved to {}/retro.json{reset}",
-                        logs_dir.display(),
-                        dim = styles.dim,
-                        reset = styles.reset,
+                        "{}",
+                        styles.dim.apply_to(format!("Retro saved to {}/retro.json", logs_dir.display())),
                     );
                 }
                 Err(e) => {
                     eprintln!(
-                        "{yellow}Warning:{reset} Failed to save retro with narrative: {e}",
-                        yellow = styles.yellow,
-                        reset = styles.reset,
+                        "{} Failed to save retro with narrative: {e}",
+                        styles.yellow.apply_to("Warning:"),
                     );
                 }
             }
         }
         Err(e) => {
             eprintln!(
-                "{dim}Retro agent skipped: {e}{reset}",
-                dim = styles.dim,
-                reset = styles.reset,
+                "{}",
+                styles.dim.apply_to(format!("Retro agent skipped: {e}")),
             );
         }
     }
