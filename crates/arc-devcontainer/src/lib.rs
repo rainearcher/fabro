@@ -249,7 +249,7 @@ impl DevcontainerResolver {
 
         // Features
         let resolved_features = if !devcontainer.features.is_empty() {
-            features::resolve_features(&devcontainer.features, &build_context).await?
+            features::resolve_features(&devcontainer.features, base_dir).await?
         } else {
             features::ResolvedFeatures::default()
         };

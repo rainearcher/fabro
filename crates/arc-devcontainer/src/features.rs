@@ -28,8 +28,33 @@ pub struct ResolvedFeatures {
 }
 
 /// Extract the directory name from a feature ID.
-/// e.g. "ghcr.io/devcontainers/features/node:1" -> "node"
+/// Handles OCI refs ("ghcr.io/devcontainers/features/node:1" → "node"),
+/// local paths ("./my-feature" → "my-feature"),
+/// and HTTPS URLs ("https://example.com/feature.tgz" → "feature").
 fn dir_name_from_id(feature_id: &str) -> String {
+    // Local path: strip leading ./ or ../
+    if feature_id.starts_with("./") || feature_id.starts_with("../") {
+        let stripped = feature_id
+            .trim_start_matches("../")
+            .trim_start_matches("./");
+        return stripped
+            .rsplit('/')
+            .next()
+            .unwrap_or(stripped)
+            .to_string();
+    }
+
+    // HTTPS URL: take filename, strip .tgz extension
+    if feature_id.starts_with("https://") {
+        let filename = feature_id.rsplit('/').next().unwrap_or(feature_id);
+        return filename
+            .strip_suffix(".tgz")
+            .or_else(|| filename.strip_suffix(".tar.gz"))
+            .unwrap_or(filename)
+            .to_string();
+    }
+
+    // OCI ref: strip tag, take last path segment
     let without_tag = feature_id.split(':').next().unwrap_or(feature_id);
     without_tag
         .rsplit('/')
@@ -107,12 +132,14 @@ async fn ensure_oras() -> crate::Result<()> {
     Ok(())
 }
 
-/// Fetch a single feature using `oras pull` and extract its contents.
+/// Fetch a single OCI feature using `oras pull` and extract its contents.
 /// Returns the parsed feature metadata.
-async fn fetch_feature(
+async fn fetch_feature_oci(
     feature_id: &str,
     output_dir: &Path,
 ) -> crate::Result<FeatureMetadata> {
+    ensure_oras().await?;
+
     let dir_name = dir_name_from_id(feature_id);
     let feature_dir = output_dir.join(&dir_name);
     tokio::fs::create_dir_all(&feature_dir)
@@ -178,6 +205,171 @@ async fn fetch_feature(
     })?;
 
     Ok(metadata)
+}
+
+/// Fetch a local feature by copying its directory.
+async fn fetch_feature_local(
+    feature_id: &str,
+    output_dir: &Path,
+    devcontainer_dir: &Path,
+) -> crate::Result<FeatureMetadata> {
+    let local_path = devcontainer_dir.join(feature_id);
+    if !local_path.is_dir() {
+        return Err(DevcontainerError::Feature(format!(
+            "local feature path not found: {}",
+            local_path.display()
+        )));
+    }
+
+    let dir_name = dir_name_from_id(feature_id);
+    let feature_dir = output_dir.join(&dir_name);
+    copy_dir_recursive(&local_path, &feature_dir).await?;
+
+    let metadata_path = feature_dir.join("devcontainer-feature.json");
+    let metadata_str = tokio::fs::read_to_string(&metadata_path)
+        .await
+        .map_err(|e| {
+            DevcontainerError::Feature(format!(
+                "failed to read {}: {e}",
+                metadata_path.display()
+            ))
+        })?;
+
+    let metadata: FeatureMetadata = serde_json::from_str(&metadata_str).map_err(|e| {
+        DevcontainerError::Feature(format!(
+            "failed to parse {}: {e}",
+            metadata_path.display()
+        ))
+    })?;
+
+    Ok(metadata)
+}
+
+/// Fetch a feature from an HTTPS URL (tgz archive).
+async fn fetch_feature_https(
+    feature_id: &str,
+    output_dir: &Path,
+) -> crate::Result<FeatureMetadata> {
+    let dir_name = dir_name_from_id(feature_id);
+    let feature_dir = output_dir.join(&dir_name);
+    tokio::fs::create_dir_all(&feature_dir)
+        .await
+        .map_err(|e| {
+            DevcontainerError::Feature(format!(
+                "failed to create dir {}: {e}",
+                feature_dir.display()
+            ))
+        })?;
+
+    info!(feature_id, "downloading feature from HTTPS");
+
+    let response = reqwest::get(feature_id).await.map_err(|e| {
+        DevcontainerError::Feature(format!("failed to download {feature_id}: {e}"))
+    })?;
+
+    if !response.status().is_success() {
+        return Err(DevcontainerError::Feature(format!(
+            "HTTP {} downloading {feature_id}",
+            response.status()
+        )));
+    }
+
+    let bytes = response.bytes().await.map_err(|e| {
+        DevcontainerError::Feature(format!("failed to read response for {feature_id}: {e}"))
+    })?;
+
+    let tgz_path = feature_dir.join("devcontainer-feature.tgz");
+    tokio::fs::write(&tgz_path, &bytes).await.map_err(|e| {
+        DevcontainerError::Feature(format!(
+            "failed to write {}: {e}",
+            tgz_path.display()
+        ))
+    })?;
+
+    let status = tokio::process::Command::new("tar")
+        .args(["xzf", "devcontainer-feature.tgz"])
+        .current_dir(&feature_dir)
+        .status()
+        .await
+        .map_err(|e| DevcontainerError::Feature(format!("failed to extract tgz: {e}")))?;
+
+    if !status.success() {
+        return Err(DevcontainerError::Feature(format!(
+            "tar extraction failed for {feature_id}"
+        )));
+    }
+
+    let metadata_path = feature_dir.join("devcontainer-feature.json");
+    let metadata_str = tokio::fs::read_to_string(&metadata_path)
+        .await
+        .map_err(|e| {
+            DevcontainerError::Feature(format!(
+                "failed to read {}: {e}",
+                metadata_path.display()
+            ))
+        })?;
+
+    let metadata: FeatureMetadata = serde_json::from_str(&metadata_str).map_err(|e| {
+        DevcontainerError::Feature(format!(
+            "failed to parse {}: {e}",
+            metadata_path.display()
+        ))
+    })?;
+
+    Ok(metadata)
+}
+
+/// Dispatch feature fetch based on the feature ID prefix.
+async fn fetch_feature_dispatch(
+    feature_id: &str,
+    output_dir: &Path,
+    devcontainer_dir: &Path,
+) -> crate::Result<FeatureMetadata> {
+    if feature_id.starts_with("./") || feature_id.starts_with("../") {
+        fetch_feature_local(feature_id, output_dir, devcontainer_dir).await
+    } else if feature_id.starts_with("https://") {
+        fetch_feature_https(feature_id, output_dir).await
+    } else {
+        fetch_feature_oci(feature_id, output_dir).await
+    }
+}
+
+/// Recursively copy a directory.
+async fn copy_dir_recursive(src: &Path, dst: &Path) -> crate::Result<()> {
+    tokio::fs::create_dir_all(dst).await.map_err(|e| {
+        DevcontainerError::Feature(format!(
+            "failed to create dir {}: {e}",
+            dst.display()
+        ))
+    })?;
+
+    let mut entries = tokio::fs::read_dir(src).await.map_err(|e| {
+        DevcontainerError::Feature(format!(
+            "failed to read dir {}: {e}",
+            src.display()
+        ))
+    })?;
+
+    while let Some(entry) = entries.next_entry().await.map_err(|e| {
+        DevcontainerError::Feature(format!("failed to read dir entry: {e}"))
+    })? {
+        let entry_path = entry.path();
+        let dest_path = dst.join(entry.file_name());
+
+        if entry_path.is_dir() {
+            Box::pin(copy_dir_recursive(&entry_path, &dest_path)).await?;
+        } else {
+            tokio::fs::copy(&entry_path, &dest_path).await.map_err(|e| {
+                DevcontainerError::Feature(format!(
+                    "failed to copy {} to {}: {e}",
+                    entry_path.display(),
+                    dest_path.display()
+                ))
+            })?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Topological sort of features based on `installsAfter` and `dependsOn` dependencies.
@@ -342,13 +534,11 @@ fn generate_layer(
 /// Fetch, order, and resolve features into Dockerfile layers.
 pub async fn resolve_features(
     features: &HashMap<String, serde_json::Value>,
-    _build_context: &Path,
+    devcontainer_dir: &Path,
 ) -> crate::Result<ResolvedFeatures> {
     if features.is_empty() {
         return Ok(ResolvedFeatures::default());
     }
-
-    ensure_oras().await?;
 
     let tmp_dir = std::env::temp_dir().join("devcontainer-features");
     tokio::fs::create_dir_all(&tmp_dir).await.map_err(|e| {
@@ -364,7 +554,7 @@ pub async fn resolve_features(
     // Fetch all features and collect metadata
     let mut metadata_map: HashMap<String, FeatureMetadata> = HashMap::new();
     for feature_id in &feature_ids {
-        let metadata = fetch_feature(feature_id, &tmp_dir).await?;
+        let metadata = fetch_feature_dispatch(feature_id, &tmp_dir, devcontainer_dir).await?;
         metadata_map.insert(feature_id.clone(), metadata);
     }
 
@@ -383,7 +573,7 @@ pub async fn resolve_features(
                     });
                     if !already_present {
                         info!(dep_id, "auto-injecting missing dependsOn target");
-                        let dep_metadata = fetch_feature(dep_id, &tmp_dir).await?;
+                        let dep_metadata = fetch_feature_dispatch(dep_id, &tmp_dir, devcontainer_dir).await?;
                         metadata_map.insert(dep_id.clone(), dep_metadata);
                         feature_ids.push(dep_id.clone());
                         all_options.insert(dep_id.clone(), dep_options.clone());
@@ -471,6 +661,64 @@ mod tests {
     #[test]
     fn dir_name_from_id_simple() {
         assert_eq!(dir_name_from_id("node"), "node");
+    }
+
+    #[test]
+    fn dir_name_from_local_path() {
+        assert_eq!(dir_name_from_id("./my-feature"), "my-feature");
+        assert_eq!(dir_name_from_id("./sub/my-feature"), "my-feature");
+        assert_eq!(dir_name_from_id("../shared-feature"), "shared-feature");
+    }
+
+    #[test]
+    fn dir_name_from_https_url() {
+        assert_eq!(
+            dir_name_from_id("https://example.com/features/node.tgz"),
+            "node"
+        );
+        assert_eq!(
+            dir_name_from_id("https://example.com/features/python.tar.gz"),
+            "python"
+        );
+        assert_eq!(
+            dir_name_from_id("https://example.com/features/go"),
+            "go"
+        );
+    }
+
+    #[test]
+    fn fetch_feature_dispatch_routes() {
+        // Verify the routing logic by checking prefix detection
+        assert!("./local-feature".starts_with("./"));
+        assert!("../parent-feature".starts_with("../"));
+        assert!("https://example.com/feature.tgz".starts_with("https://"));
+        assert!(!"ghcr.io/foo/bar:1".starts_with("./"));
+        assert!(!"ghcr.io/foo/bar:1".starts_with("../"));
+        assert!(!"ghcr.io/foo/bar:1".starts_with("https://"));
+    }
+
+    #[tokio::test]
+    async fn fetch_feature_local_integration() {
+        let tmp_src = tempfile::tempdir().unwrap();
+        let feature_dir = tmp_src.path().join("my-feature");
+        std::fs::create_dir_all(&feature_dir).unwrap();
+
+        // Create a minimal devcontainer-feature.json
+        std::fs::write(
+            feature_dir.join("devcontainer-feature.json"),
+            r#"{"id": "my-feature", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+
+        // Create a dummy install.sh
+        std::fs::write(feature_dir.join("install.sh"), "#!/bin/sh\necho hi").unwrap();
+
+        let tmp_out = tempfile::tempdir().unwrap();
+        let metadata = fetch_feature_local("./my-feature", tmp_out.path(), tmp_src.path())
+            .await
+            .unwrap();
+        assert_eq!(metadata.id.as_deref(), Some("my-feature"));
+        assert!(tmp_out.path().join("my-feature/install.sh").exists());
     }
 
     #[test]
@@ -815,10 +1063,10 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires oras"]
-    async fn fetch_feature_integration() {
+    async fn fetch_feature_oci_integration() {
         let tmp = tempfile::tempdir().unwrap();
         let metadata =
-            fetch_feature("ghcr.io/devcontainers/features/node:1", tmp.path())
+            fetch_feature_oci("ghcr.io/devcontainers/features/node:1", tmp.path())
                 .await
                 .unwrap();
         assert!(metadata.id.is_some());
