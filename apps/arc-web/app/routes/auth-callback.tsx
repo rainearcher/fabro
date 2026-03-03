@@ -49,7 +49,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const session = await getSession(request);
-  session.set("userUrl", `https://api.github.com/user/${profile.id}`);
+  session.set("userUrl", `https://github.com/${profile.login}`);
   session.set("githubId", profile.id);
   session.set("githubNodeId", profile.node_id);
   session.set("githubLogin", profile.login);
