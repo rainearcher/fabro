@@ -29,19 +29,20 @@ use super::task_config;
 use super::task_config::TaskConfig;
 use super::{
     compute_stage_cost, format_cost, format_duration_human,
-    format_event_summary, format_tokens_human, print_diagnostics, read_dot_file, RunMode,
+    format_event_summary, format_tokens_human, print_diagnostics, read_dot_file,
     SandboxProvider, RunArgs,
 };
 
-/// Return the default model string for a given provider name.
-fn default_model_for_provider(provider: Option<&str>) -> String {
+/// Return the default model string for a given provider.
+fn default_model_for_provider(provider: Provider) -> &'static str {
     match provider {
-        Some("openai") => "gpt-5.2".to_string(),
-        Some("gemini") => "gemini-3.1-pro-preview".to_string(),
-        Some("kimi") => "kimi-k2.5".to_string(),
-        Some("zai") => "glm-4.7".to_string(),
-        Some("minimax") => "minimax-m2.5".to_string(),
-        _ => "claude-opus-4-6".to_string(),
+        Provider::Anthropic => "claude-opus-4-6",
+        Provider::OpenAi => "gpt-5.2",
+        Provider::Gemini => "gemini-3.1-pro-preview",
+        Provider::Kimi => "kimi-k2.5",
+        Provider::Zai => "glm-4.7",
+        Provider::Minimax => "minimax-m2.5",
+        Provider::Inception => "mercury",
     }
 }
 
@@ -81,7 +82,13 @@ fn resolve_model_provider(
                 .and_then(|v| v.as_str())
         })
         .map(String::from)
-        .unwrap_or_else(|| default_model_for_provider(provider.as_deref()));
+        .unwrap_or_else(|| {
+            let provider_enum = provider
+                .as_deref()
+                .and_then(|s| s.parse::<Provider>().ok())
+                .unwrap_or(Provider::Anthropic);
+            default_model_for_provider(provider_enum).to_string()
+        });
 
     // Resolve model alias through catalog
     match arc_llm::catalog::get_model_info(&model) {
@@ -108,14 +115,6 @@ struct CostAccumulator {
 ///
 /// Returns an error if the workflow cannot be read, parsed, validated, or executed.
 pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Result<()> {
-    let run_mode = if args.preflight {
-        RunMode::Preflight
-    } else if args.dry_run {
-        RunMode::DryRun
-    } else {
-        RunMode::Normal
-    };
-
     // Handle --run-branch resume: read everything from git metadata
     if let Some(branch) = args.run_branch.clone() {
         return run_from_branch(args, &branch, styles).await;
@@ -203,7 +202,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         SandboxProvider::Daytona => false,
     };
 
-    if run_mode == RunMode::Preflight {
+    if args.preflight {
         return run_preflight(&graph, &task_cfg, &args, git_clean, sandbox_provider_preview, styles).await;
     }
 
@@ -1061,71 +1060,46 @@ async fn run_preflight(
         .and_then(|c| c.sandbox.as_ref())
         .and_then(|e| e.daytona.clone());
 
-    let sandbox_ready = match sandbox_provider {
+    let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
         SandboxProvider::Docker => {
             let config = DockerSandboxConfig {
                 host_working_directory: original_cwd.to_string_lossy().to_string(),
                 ..DockerSandboxConfig::default()
             };
-            match DockerSandbox::new(config) {
-                Ok(env) => {
-                    let sandbox: Arc<dyn Sandbox> = Arc::new(env);
-                    match sandbox.initialize().await {
-                        Ok(()) => {
-                            let _ = sandbox.cleanup().await;
-                            true
-                        }
-                        Err(e) => {
-                            errors.push(format!("Sandbox init failed: {e}"));
-                            let _ = sandbox.cleanup().await;
-                            false
-                        }
-                    }
-                }
-                Err(e) => {
-                    errors.push(format!("Docker sandbox creation failed: {e}"));
-                    false
-                }
-            }
+            DockerSandbox::new(config)
+                .map(|env| Arc::new(env) as Arc<dyn Sandbox>)
+                .map_err(|e| format!("Docker sandbox creation failed: {e}"))
         }
         SandboxProvider::Daytona => {
             match daytona_sdk::Client::new().await {
                 Ok(daytona_client) => {
                     let config = daytona_config.unwrap_or_default();
                     let env = crate::daytona_sandbox::DaytonaSandbox::new(daytona_client, config);
-                    let sandbox: Arc<dyn Sandbox> = Arc::new(env);
-                    match sandbox.initialize().await {
-                        Ok(()) => {
-                            let _ = sandbox.cleanup().await;
-                            true
-                        }
-                        Err(e) => {
-                            errors.push(format!("Sandbox init failed: {e}"));
-                            let _ = sandbox.cleanup().await;
-                            false
-                        }
-                    }
+                    Ok(Arc::new(env) as Arc<dyn Sandbox>)
                 }
-                Err(e) => {
-                    errors.push(format!("Daytona client creation failed: {e}"));
-                    false
-                }
+                Err(e) => Err(format!("Daytona client creation failed: {e}")),
             }
         }
         SandboxProvider::Local => {
-            let env = LocalSandbox::new(original_cwd.clone());
-            let sandbox: Arc<dyn Sandbox> = Arc::new(env);
-            match sandbox.initialize().await {
-                Ok(()) => {
-                    let _ = sandbox.cleanup().await;
-                    true
-                }
-                Err(e) => {
-                    errors.push(format!("Sandbox init failed: {e}"));
-                    let _ = sandbox.cleanup().await;
-                    false
-                }
+            Ok(Arc::new(LocalSandbox::new(original_cwd.clone())) as Arc<dyn Sandbox>)
+        }
+    };
+
+    let sandbox_ready = match sandbox_result {
+        Ok(sandbox) => match sandbox.initialize().await {
+            Ok(()) => {
+                let _ = sandbox.cleanup().await;
+                true
             }
+            Err(e) => {
+                errors.push(format!("Sandbox init failed: {e}"));
+                let _ = sandbox.cleanup().await;
+                false
+            }
+        },
+        Err(e) => {
+            errors.push(e);
+            false
         }
     };
 
@@ -1167,12 +1141,11 @@ async fn run_preflight(
         true // None means default (Anthropic), which is valid
     };
 
-    // 5. Collect setup commands for display
-    let setup_commands: Vec<String> = task_cfg
+    // 5. Count setup commands for display
+    let setup_command_count = task_cfg
         .as_ref()
         .and_then(|c| c.setup.as_ref())
-        .map(|s| s.commands.clone())
-        .unwrap_or_default();
+        .map_or(0, |s| s.commands.len());
 
     // 6. Print structured report to stdout
     println!("workflow={}", graph.name);
@@ -1187,7 +1160,7 @@ async fn run_preflight(
     println!("model={model}");
     println!("provider={}", provider.as_deref().unwrap_or("anthropic"));
     println!("provider_valid={provider_valid}");
-    println!("setup_commands={}", setup_commands.len());
+    println!("setup_commands={setup_command_count}");
 
     // 7. Print warnings/errors to stderr
     for err in &errors {
@@ -1319,33 +1292,37 @@ mod tests {
 
     #[test]
     fn default_model_for_anthropic() {
-        assert_eq!(default_model_for_provider(None), "claude-opus-4-6");
-        assert_eq!(default_model_for_provider(Some("anthropic")), "claude-opus-4-6");
+        assert_eq!(default_model_for_provider(Provider::Anthropic), "claude-opus-4-6");
     }
 
     #[test]
     fn default_model_for_openai() {
-        assert_eq!(default_model_for_provider(Some("openai")), "gpt-5.2");
+        assert_eq!(default_model_for_provider(Provider::OpenAi), "gpt-5.2");
     }
 
     #[test]
     fn default_model_for_gemini() {
-        assert_eq!(default_model_for_provider(Some("gemini")), "gemini-3.1-pro-preview");
+        assert_eq!(default_model_for_provider(Provider::Gemini), "gemini-3.1-pro-preview");
     }
 
     #[test]
     fn default_model_for_kimi() {
-        assert_eq!(default_model_for_provider(Some("kimi")), "kimi-k2.5");
+        assert_eq!(default_model_for_provider(Provider::Kimi), "kimi-k2.5");
     }
 
     #[test]
     fn default_model_for_zai() {
-        assert_eq!(default_model_for_provider(Some("zai")), "glm-4.7");
+        assert_eq!(default_model_for_provider(Provider::Zai), "glm-4.7");
     }
 
     #[test]
     fn default_model_for_minimax() {
-        assert_eq!(default_model_for_provider(Some("minimax")), "minimax-m2.5");
+        assert_eq!(default_model_for_provider(Provider::Minimax), "minimax-m2.5");
+    }
+
+    #[test]
+    fn default_model_for_inception() {
+        assert_eq!(default_model_for_provider(Provider::Inception), "mercury");
     }
 
     #[test]
