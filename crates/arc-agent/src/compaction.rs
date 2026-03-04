@@ -197,7 +197,7 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
                 for tc in tool_calls {
                     let args_str = tc.arguments.to_string();
                     let truncated = if args_str.len() > 500 {
-                        format!("{}...", &args_str[..500])
+                        format!("{}...", &args_str[..crate::truncation::floor_char_boundary(&args_str, 500)])
                     } else {
                         args_str
                     };
@@ -208,7 +208,7 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
                 for r in results {
                     let content_str = r.content.to_string();
                     let truncated = if content_str.len() > 500 {
-                        format!("{}...", &content_str[..500])
+                        format!("{}...", &content_str[..crate::truncation::floor_char_boundary(&content_str, 500)])
                     } else {
                         content_str
                     };

@@ -157,12 +157,12 @@ fn extract_status_fields(text: &str, outcome: &mut Outcome) {
     }
 }
 
-/// Truncate a string to at most `max_chars` characters.
+/// Truncate a string to at most `max_chars` characters (char-boundary safe).
 fn truncate(s: &str, max_chars: usize) -> &str {
     if s.len() <= max_chars {
         s
     } else {
-        &s[..max_chars]
+        &s[..arc_agent::floor_char_boundary(s, max_chars)]
     }
 }
 

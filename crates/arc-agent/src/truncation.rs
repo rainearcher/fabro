@@ -1,5 +1,19 @@
 use crate::config::SessionConfig;
 
+/// Round a byte index down to the nearest UTF-8 char boundary.
+/// Stable equivalent of `str::floor_char_boundary` (nightly-only).
+#[must_use]
+pub fn floor_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TruncationMode {
     HeadTail,
@@ -47,8 +61,10 @@ pub fn truncate_output(output: &str, max_chars: usize, mode: TruncationMode) -> 
     match mode {
         TruncationMode::HeadTail => {
             let half = max_chars / 2;
-            let head = &output[..half];
-            let tail = &output[output.len() - half..];
+            let head_end = floor_char_boundary(output, half);
+            let tail_start = floor_char_boundary(output, output.len() - half);
+            let head = &output[..head_end];
+            let tail = &output[tail_start..];
             format!(
                 "{head}\n\n[WARNING: Tool output was truncated. {removed} characters were removed from the middle. \
                  The full output is available in the event stream. \
@@ -56,7 +72,8 @@ pub fn truncate_output(output: &str, max_chars: usize, mode: TruncationMode) -> 
             )
         }
         TruncationMode::Tail => {
-            let tail = &output[output.len() - max_chars..];
+            let tail_start = floor_char_boundary(output, output.len() - max_chars);
+            let tail = &output[tail_start..];
             format!(
                 "[WARNING: Tool output was truncated. First {removed} characters were removed. \
                  The full output is available in the event stream.]\n\n{tail}"
@@ -234,5 +251,29 @@ mod tests {
         let output = lines.join("\n");
         let result = truncate_lines(&output, 10);
         assert_eq!(result, output);
+    }
+
+    #[test]
+    fn floor_char_boundary_ascii() {
+        assert_eq!(floor_char_boundary("hello", 3), 3);
+        assert_eq!(floor_char_boundary("hello", 10), 5);
+        assert_eq!(floor_char_boundary("hello", 0), 0);
+    }
+
+    #[test]
+    fn floor_char_boundary_multibyte() {
+        // ✅ is 3 bytes (E2 9C 85)
+        let s = "a✅b";
+        assert_eq!(floor_char_boundary(s, 1), 1); // just past 'a'
+        assert_eq!(floor_char_boundary(s, 2), 1); // inside ✅, rounds down to 'a'
+        assert_eq!(floor_char_boundary(s, 3), 1); // still inside ✅
+        assert_eq!(floor_char_boundary(s, 4), 4); // at 'b'
+    }
+
+    #[test]
+    fn truncate_output_multibyte_no_panic() {
+        let output = "✅".repeat(100); // 300 bytes
+        let result = truncate_output(&output, 10, TruncationMode::HeadTail);
+        assert!(result.contains("Tool output was truncated"));
     }
 }

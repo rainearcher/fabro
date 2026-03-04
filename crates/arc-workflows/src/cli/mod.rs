@@ -365,7 +365,7 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
             format!("[LOOP_RESTART] from={from_node} to={to_node}")
         }
         WorkflowRunEvent::Prompt { stage, text } => {
-            let truncated = if text.len() > 80 { &text[..80] } else { text };
+            let truncated = if text.len() > 80 { &text[..arc_agent::floor_char_boundary(text, 80)] } else { text };
             format!("[PROMPT] stage={stage} text=\"{truncated}\"")
         }
         WorkflowRunEvent::Agent { stage, event } => match event {
@@ -436,7 +436,7 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
                 task,
             } => {
                 let short_id = &agent_id[..8.min(agent_id.len())];
-                let task_preview = if task.len() > 60 { &task[..60] } else { task };
+                let task_preview = if task.len() > 60 { &task[..arc_agent::floor_char_boundary(task, 60)] } else { task };
                 format!("[SUBAGENT_SPAWNED] stage={stage} agent_id={short_id} depth={depth} task=\"{task_preview}\"")
             }
             AgentEvent::SubAgentCompleted {
@@ -538,7 +538,7 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
             stderr,
         } => {
             let truncated = if stderr.len() > 80 {
-                &stderr[..80]
+                &stderr[..arc_agent::floor_char_boundary(stderr, 80)]
             } else {
                 stderr
             };

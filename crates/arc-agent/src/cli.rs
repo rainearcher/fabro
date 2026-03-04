@@ -205,7 +205,7 @@ fn format_tool_args(args: &serde_json::Value, cwd: &str) -> String {
             serde_json::Value::String(s) => {
                 let s = s.strip_prefix(&cwd_prefix).unwrap_or(s);
                 let display = if s.len() > 80 {
-                    format!("{}...", &s[..77])
+                    format!("{}...", &s[..crate::truncation::floor_char_boundary(s, 77)])
                 } else {
                     s.to_string()
                 };
@@ -506,7 +506,7 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
                             ..
                         } => {
                             let short_id = &agent_id[..8.min(agent_id.len())];
-                            let task_preview = if task.len() > 60 { &task[..60] } else { task };
+                            let task_preview = if task.len() > 60 { &task[..crate::truncation::floor_char_boundary(task, 60)] } else { task };
                             eprintln!(
                                 "  {}",
                                 s.dim.apply_to(format!(
