@@ -139,7 +139,7 @@ impl DevcontainerResolver {
                 .clone();
 
             let compose_config = compose::parse_compose_multi(&compose_paths, &service_name)
-                .map_err(|e| DevcontainerError::Compose(e))?;
+                .map_err(DevcontainerError::Compose)?;
 
             let mut environment = HashMap::new();
             for (k, v) in compose_config.environment {
