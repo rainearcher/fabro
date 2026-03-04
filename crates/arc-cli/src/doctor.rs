@@ -7,6 +7,7 @@ use arc_api::server_config::{ApiAuthStrategy, AuthProvider};
 use arc_llm::provider::Provider;
 use arc_util::terminal::Styles;
 use regex::Regex;
+use semver::Version;
 
 // ---------------------------------------------------------------------------
 // Core types
@@ -145,7 +146,7 @@ struct DepSpec {
     name: &'static str,
     command: &'static [&'static str],
     required: bool,
-    min_version: (u32, u32, u32),
+    min_version: Version,
     pattern: &'static LazyLock<Regex>,
 }
 
@@ -154,8 +155,8 @@ pub struct DepProbeResult {
     pub required: bool,
     pub found: bool,
     pub success: bool,
-    pub version: Option<(u32, u32, u32)>,
-    pub min_version: (u32, u32, u32),
+    pub version: Option<Version>,
+    pub min_version: Version,
 }
 
 static OPENSSL_RE: LazyLock<Regex> =
@@ -167,24 +168,20 @@ static GH_RE: LazyLock<Regex> =
 static DOT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"graphviz version (\d+)\.(\d+)\.(\d+)").unwrap());
 
-fn parse_version(re: &Regex, output: &str) -> Option<(u32, u32, u32)> {
+fn parse_version(re: &Regex, output: &str) -> Option<Version> {
     let caps = re.captures(output)?;
-    Some((
+    Some(Version::new(
         caps[1].parse().ok()?,
         caps[2].parse().ok()?,
         caps[3].parse().ok()?,
     ))
 }
 
-fn format_version(v: (u32, u32, u32)) -> String {
-    format!("{}.{}.{}", v.0, v.1, v.2)
-}
-
 const DEP_SPECS: &[DepSpec] = &[
-    DepSpec { name: "openssl", command: &["openssl", "version"], required: true, min_version: (3, 0, 0), pattern: &OPENSSL_RE },
-    DepSpec { name: "node", command: &["node", "--version"], required: true, min_version: (20, 0, 0), pattern: &NODE_RE },
-    DepSpec { name: "gh", command: &["gh", "--version"], required: false, min_version: (2, 0, 0), pattern: &GH_RE },
-    DepSpec { name: "dot", command: &["dot", "-V"], required: false, min_version: (2, 0, 0), pattern: &DOT_RE },
+    DepSpec { name: "openssl", command: &["openssl", "version"], required: true, min_version: Version::new(3, 0, 0), pattern: &OPENSSL_RE },
+    DepSpec { name: "node", command: &["node", "--version"], required: true, min_version: Version::new(20, 0, 0), pattern: &NODE_RE },
+    DepSpec { name: "gh", command: &["gh", "--version"], required: false, min_version: Version::new(2, 0, 0), pattern: &GH_RE },
+    DepSpec { name: "dot", command: &["dot", "-V"], required: false, min_version: Version::new(2, 0, 0), pattern: &DOT_RE },
 ];
 
 pub fn probe_system_deps() -> Vec<DepProbeResult> {
@@ -212,7 +209,7 @@ pub fn probe_system_deps() -> Vec<DepProbeResult> {
                 found,
                 success,
                 version,
-                min_version: spec.min_version,
+                min_version: spec.min_version.clone(),
             }
         })
         .collect()
@@ -223,7 +220,7 @@ pub fn check_system_deps(deps: &[DepProbeResult]) -> CheckResult {
     let mut worst_status = CheckStatus::Pass;
 
     for dep in deps {
-        let (status, text) = match (dep.found, dep.success, dep.version) {
+        let (status, text) = match (dep.found, dep.success, &dep.version) {
             (false, _, _) => {
                 if dep.required {
                     (CheckStatus::Error, format!("{}: not found (required)", dep.name))
@@ -242,18 +239,17 @@ pub fn check_system_deps(deps: &[DepProbeResult]) -> CheckResult {
                 (CheckStatus::Pass, format!("{}: version unknown", dep.name))
             }
             (true, true, Some(v)) => {
-                if v < dep.min_version {
+                if v < &dep.min_version {
                     (
                         CheckStatus::Warning,
                         format!(
-                            "{}: {} (minimum {})",
+                            "{}: {v} (minimum {})",
                             dep.name,
-                            format_version(v),
-                            format_version(dep.min_version),
+                            dep.min_version,
                         ),
                     )
                 } else {
-                    (CheckStatus::Pass, format!("{}: {}", dep.name, format_version(v)))
+                    (CheckStatus::Pass, format!("{}: {v}", dep.name))
                 }
             }
         };
@@ -1661,25 +1657,25 @@ mod tests {
     fn parse_version_openssl() {
         assert_eq!(
             parse_version(&OPENSSL_RE, "OpenSSL 3.4.1 11 Feb 2025 (Library: OpenSSL 3.4.1 11 Feb 2025)"),
-            Some((3, 4, 1)),
+            Some(Version::new(3, 4, 1)),
         );
     }
 
     #[test]
     fn parse_version_libressl() {
-        assert_eq!(parse_version(&OPENSSL_RE, "LibreSSL 3.3.6"), Some((3, 3, 6)));
+        assert_eq!(parse_version(&OPENSSL_RE, "LibreSSL 3.3.6"), Some(Version::new(3, 3, 6)));
     }
 
     #[test]
     fn parse_version_node() {
-        assert_eq!(parse_version(&NODE_RE, "v22.14.0"), Some((22, 14, 0)));
+        assert_eq!(parse_version(&NODE_RE, "v22.14.0"), Some(Version::new(22, 14, 0)));
     }
 
     #[test]
     fn parse_version_gh() {
         assert_eq!(
             parse_version(&GH_RE, "gh version 2.67.0 (2025-01-31)\nhttps://github.com/cli/cli/releases/tag/v2.67.0"),
-            Some((2, 67, 0)),
+            Some(Version::new(2, 67, 0)),
         );
     }
 
@@ -1687,7 +1683,7 @@ mod tests {
     fn parse_version_dot() {
         assert_eq!(
             parse_version(&DOT_RE, "dot - graphviz version 12.2.1 (20241206.2024)"),
-            Some((12, 2, 1)),
+            Some(Version::new(12, 2, 1)),
         );
     }
 
@@ -1706,8 +1702,8 @@ mod tests {
         required: bool,
         found: bool,
         success: bool,
-        version: Option<(u32, u32, u32)>,
-        min_version: (u32, u32, u32),
+        version: Option<Version>,
+        min_version: Version,
     ) -> DepProbeResult {
         DepProbeResult {
             name,
@@ -1722,10 +1718,10 @@ mod tests {
     #[test]
     fn check_system_deps_all_present() {
         let deps = vec![
-            dep("openssl", true, true, true, Some((3, 4, 1)), (3, 0, 0)),
-            dep("node", true, true, true, Some((22, 14, 0)), (20, 0, 0)),
-            dep("gh", false, true, true, Some((2, 67, 0)), (2, 0, 0)),
-            dep("dot", false, true, true, Some((12, 2, 1)), (2, 0, 0)),
+            dep("openssl", true, true, true, Some(Version::new(3, 4, 1)), Version::new(3, 0, 0)),
+            dep("node", true, true, true, Some(Version::new(22, 14, 0)), Version::new(20, 0, 0)),
+            dep("gh", false, true, true, Some(Version::new(2, 67, 0)), Version::new(2, 0, 0)),
+            dep("dot", false, true, true, Some(Version::new(12, 2, 1)), Version::new(2, 0, 0)),
         ];
         let result = check_system_deps(&deps);
         assert_eq!(result.status, CheckStatus::Pass);
@@ -1734,7 +1730,7 @@ mod tests {
 
     #[test]
     fn check_system_deps_required_missing_is_error() {
-        let deps = vec![dep("openssl", true, false, false, None, (3, 0, 0))];
+        let deps = vec![dep("openssl", true, false, false, None, Version::new(3, 0, 0))];
         let result = check_system_deps(&deps);
         assert_eq!(result.status, CheckStatus::Error);
         assert!(result.details[0].text.contains("not found (required)"));
@@ -1742,7 +1738,7 @@ mod tests {
 
     #[test]
     fn check_system_deps_optional_missing_is_warning() {
-        let deps = vec![dep("gh", false, false, false, None, (2, 0, 0))];
+        let deps = vec![dep("gh", false, false, false, None, Version::new(2, 0, 0))];
         let result = check_system_deps(&deps);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.details[0].text.contains("not found (optional)"));
@@ -1750,7 +1746,7 @@ mod tests {
 
     #[test]
     fn check_system_deps_outdated_is_warning() {
-        let deps = vec![dep("openssl", true, true, true, Some((1, 1, 1)), (3, 0, 0))];
+        let deps = vec![dep("openssl", true, true, true, Some(Version::new(1, 1, 1)), Version::new(3, 0, 0))];
         let result = check_system_deps(&deps);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.details[0].text.contains("1.1.1"));
@@ -1759,7 +1755,7 @@ mod tests {
 
     #[test]
     fn check_system_deps_unparseable_success_is_pass() {
-        let deps = vec![dep("openssl", true, true, true, None, (3, 0, 0))];
+        let deps = vec![dep("openssl", true, true, true, None, Version::new(3, 0, 0))];
         let result = check_system_deps(&deps);
         assert_eq!(result.status, CheckStatus::Pass);
         assert!(result.details[0].text.contains("version unknown"));
@@ -1767,7 +1763,7 @@ mod tests {
 
     #[test]
     fn check_system_deps_required_command_failed_is_error() {
-        let deps = vec![dep("node", true, true, false, None, (20, 0, 0))];
+        let deps = vec![dep("node", true, true, false, None, Version::new(20, 0, 0))];
         let result = check_system_deps(&deps);
         assert_eq!(result.status, CheckStatus::Error);
         assert!(result.details[0].text.contains("command failed (required)"));
@@ -1775,7 +1771,7 @@ mod tests {
 
     #[test]
     fn check_system_deps_optional_command_failed_is_warning() {
-        let deps = vec![dep("gh", false, true, false, None, (2, 0, 0))];
+        let deps = vec![dep("gh", false, true, false, None, Version::new(2, 0, 0))];
         let result = check_system_deps(&deps);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.details[0].text.contains("command failed (optional)"));
@@ -1784,8 +1780,8 @@ mod tests {
     #[test]
     fn check_system_deps_error_beats_warning() {
         let deps = vec![
-            dep("openssl", true, false, false, None, (3, 0, 0)),
-            dep("gh", false, false, false, None, (2, 0, 0)),
+            dep("openssl", true, false, false, None, Version::new(3, 0, 0)),
+            dep("gh", false, false, false, None, Version::new(2, 0, 0)),
         ];
         let result = check_system_deps(&deps);
         assert_eq!(result.status, CheckStatus::Error);
