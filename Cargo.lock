@@ -323,6 +323,7 @@ dependencies = [
  "base64",
  "chrono",
  "clap",
+ "console 0.15.11",
  "daytona-api-client",
  "daytona-sdk",
  "dialoguer",

@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod cli_backend;
+pub mod progress;
 pub mod run;
 pub mod runs;
 pub mod run_config;

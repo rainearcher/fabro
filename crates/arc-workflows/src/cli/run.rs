@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -25,6 +26,7 @@ use arc_llm::provider::Provider;
 
 use super::backend::AgentApiBackend;
 use super::cli_backend::{BackendRouter, AgentCliBackend};
+use super::progress;
 use super::run_config;
 use super::run_config::{RunDefaults, WorkflowRunConfig};
 use indicatif::HumanDuration;
@@ -270,12 +272,18 @@ pub async fn run_command(
         }
     }
 
+    // Create progress UI (used for non-verbose mode)
+    let is_tty = std::io::stderr().is_terminal();
+    let progress_ui = Arc::new(Mutex::new(progress::ProgressUI::new(is_tty)));
+
     if args.verbose {
         eprintln!(
             "{} {}",
             styles.dim.apply_to("Logs:"),
             styles.underline.apply_to(logs_dir.display()),
         );
+    } else {
+        progress_ui.lock().expect("progress lock poisoned").show_logs_dir(&logs_dir);
     }
 
     // 3. Build event emitter
@@ -368,47 +376,19 @@ pub async fn run_command(
             eprintln!("{}", format_event_summary(event, styles));
         });
     } else {
-        emitter.on_event(move |event| match event {
-            crate::event::WorkflowRunEvent::StageCompleted {
-                name,
-                duration_ms,
-                status,
-                usage,
-                ..  // node_id and other fields
-            } => {
-                let mut line = format!(
-                    "Stage \"{name}\" completed ({status}) in {}",
-                    HumanDuration(Duration::from_millis(*duration_ms)),
-                );
-                if let Some(u) = usage {
-                    let total = u.input_tokens + u.output_tokens;
-                    let tokens_str = format_tokens_human(total);
-                    if let Some(cost) = compute_stage_cost(u) {
-                        line.push_str(&format!(
-                            " \u{2014} {tokens_str} tokens ({})",
-                            format_cost(cost)
-                        ));
-                    } else {
-                        line.push_str(&format!(" \u{2014} {tokens_str} tokens"));
-                    }
-                }
-                eprintln!("{}", styles.dim.apply_to(line));
-            }
-            crate::event::WorkflowRunEvent::StageFailed { name, .. } => {
-                eprintln!(
-                    "{}",
-                    styles.dim.apply_to(format!("Stage \"{name}\" failed")),
-                );
-            }
-            _ => {}
-        });
+        progress::ProgressUI::register(&progress_ui, &mut emitter);
     }
 
     // 4. Build interviewer
     let interviewer: Arc<dyn Interviewer> = if args.auto_approve {
         Arc::new(AutoApproveInterviewer)
-    } else {
+    } else if args.verbose {
         Arc::new(ConsoleInterviewer::new(styles))
+    } else {
+        Arc::new(progress::ProgressAwareInterviewer::new(
+            ConsoleInterviewer::new(styles),
+            Arc::clone(&progress_ui),
+        ))
     };
 
     // Set up git worktree for local execution (must happen before cwd is captured)
@@ -706,6 +686,11 @@ pub async fn run_command(
     }
 
     let outcome = engine_result?;
+
+    // Finish progress bars before printing summary
+    if !args.verbose {
+        progress_ui.lock().expect("progress lock poisoned").finish();
+    }
 
     // 8. Print result
     eprintln!(
