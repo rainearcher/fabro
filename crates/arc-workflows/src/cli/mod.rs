@@ -123,6 +123,10 @@ pub struct RunArgs {
     /// Attach a label to this run (repeatable, format: KEY=VALUE)
     #[arg(long = "label", value_name = "KEY=VALUE")]
     pub label: Vec<String>,
+
+    /// Skip retro generation after the run
+    #[arg(long)]
+    pub no_retro: bool,
 }
 
 #[derive(Args)]

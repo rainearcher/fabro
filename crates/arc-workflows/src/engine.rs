@@ -1246,7 +1246,36 @@ impl WorkflowRunEngine {
             // Step 1: Check for terminal node
             if is_terminal(node) {
                 match check_goal_gates(graph, &node_outcomes) {
-                    Ok(()) => break,
+                    Ok(()) => {
+                        self.services
+                            .emitter
+                            .emit(&WorkflowRunEvent::StageStarted {
+                                node_id: node.id.clone(),
+                                name: node.label().to_string(),
+                                index: stage_index,
+                                handler_type: node.handler_type().map(String::from),
+                                attempt: 1,
+                                max_attempts: 1,
+                            });
+                        self.services
+                            .emitter
+                            .emit(&WorkflowRunEvent::StageCompleted {
+                                node_id: node.id.clone(),
+                                name: node.label().to_string(),
+                                index: stage_index,
+                                duration_ms: 0,
+                                status: StageStatus::Success.to_string(),
+                                preferred_label: None,
+                                suggested_next_ids: vec![],
+                                usage: None,
+                                failure: None,
+                                notes: None,
+                                files_touched: vec![],
+                                attempt: 1,
+                                max_attempts: 1,
+                            });
+                        break;
+                    }
                     Err(failed_node_id) => {
                         if let Some(retry_target) = get_retry_target(&failed_node_id, graph) {
                             current_node_id = retry_target;

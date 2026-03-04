@@ -41,7 +41,7 @@ cached_style!(
     style_tool_running,
     "          {spinner:.dim} {wide_msg} {elapsed:.dim}"
 );
-cached_style!(style_tool_done, "          {wide_msg}");
+cached_style!(style_tool_done, "          {wide_msg} {prefix:.dim}");
 cached_style!(style_static_dim, "    {wide_msg:.dim}");
 cached_style!(style_empty, " ");
 
@@ -76,20 +76,44 @@ fn format_duration_ms(ms: u64) -> String {
 
 // ── Tool call display name ──────────────────────────────────────────────
 
-fn tool_display_name(tool_name: &str, arguments: &serde_json::Value) -> String {
-    if tool_name == "bash" || tool_name == "execute_command" {
-        if let Some(cmd) = arguments.get("command").and_then(|v| v.as_str()) {
-            let truncated: String = if cmd.len() > 60 {
-                let mut s: String = cmd.chars().take(57).collect();
-                s.push_str("...");
-                s
-            } else {
-                cmd.to_string()
-            };
-            return format!("bash: {truncated}");
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() > max {
+        let mut t: String = s.chars().take(max - 3).collect();
+        t.push_str("...");
+        t
+    } else {
+        s.to_string()
+    }
+}
+
+fn shorten_path(path: &str) -> String {
+    if let Ok(cwd) = std::env::current_dir() {
+        if let Ok(rel) = std::path::Path::new(path).strip_prefix(&cwd) {
+            return rel.display().to_string();
         }
     }
-    tool_name.to_string()
+    path.to_string()
+}
+
+fn tool_display_name(tool_name: &str, arguments: &serde_json::Value) -> String {
+    let dim = Style::new().dim();
+    let arg = |key: &str| arguments.get(key).and_then(|v| v.as_str());
+    let path_arg = || arg("path").or_else(|| arg("file_path")).map(|p| truncate(&shorten_path(p), 60));
+
+    let detail = match tool_name {
+        "bash" | "execute_command" => arg("command").map(|c| truncate(c, 60)),
+        "glob" => arg("pattern").map(String::from),
+        "grep" | "ripgrep" => arg("pattern").map(|p| truncate(p, 40)),
+        "read_file" | "read" => path_arg(),
+        "write_file" | "write" | "create_file" => path_arg(),
+        "edit_file" | "edit" => path_arg(),
+        _ => None,
+    };
+
+    match detail {
+        Some(d) => format!("{tool_name}{}", dim.apply_to(format!("({d})"))),
+        None => tool_name.to_string(),
+    }
 }
 
 // ── Tool call entry ─────────────────────────────────────────────────────
@@ -448,7 +472,9 @@ impl ProgressUI {
                     } else {
                         ToolCallStatus::Succeeded
                     };
+                    let elapsed = format_duration_short(entry.bar.elapsed());
                     entry.bar.set_style(style_tool_done());
+                    entry.bar.set_prefix(elapsed);
                     entry
                         .bar
                         .finish_with_message(format!("{glyph} {}", entry.display_name));

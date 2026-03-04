@@ -661,7 +661,7 @@ pub async fn run_command(
     }
 
     // Auto-derive retro (always, cheap) and optionally run retro agent
-    {
+    if !args.no_retro {
         let (failed, failure_reason) = match &engine_result {
             Ok(o) => (
                 o.status == StageStatus::Fail,
@@ -972,7 +972,7 @@ async fn run_from_branch(
     let _ = crate::git::remove_worktree(&original_cwd, &worktree_path);
 
     // Auto-derive retro
-    {
+    if !args.no_retro {
         let (failed, failure_reason) = match &engine_result {
             Ok(o) => (
                 o.status == StageStatus::Fail,
