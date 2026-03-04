@@ -239,11 +239,17 @@ fn print_summary(session: &Session, styles: &Styles) {
             total_tokens += usage.total_tokens;
         }
     }
+    let token_str = if total_tokens >= 1_000_000 {
+        format!("{:.1}m", total_tokens as f64 / 1_000_000.0)
+    } else if total_tokens >= 1000 {
+        format!("{}k", total_tokens / 1000)
+    } else {
+        total_tokens.to_string()
+    };
     eprintln!(
         "{}",
         styles.dim.apply_to(format!(
-            "Done ({turn_count} turns, {tool_call_count} tool calls, {} tokens)",
-            indicatif::HumanCount(total_tokens as u64),
+            "Done ({turn_count} turns, {tool_call_count} tool calls, {token_str} tokens)"
         )),
     );
 }

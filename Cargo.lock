@@ -113,7 +113,6 @@ dependencies = [
  "futures",
  "glob",
  "htmd",
- "indicatif",
  "jsonschema",
  "libc",
  "paste",

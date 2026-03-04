@@ -27,12 +27,12 @@ use super::backend::AgentApiBackend;
 use super::cli_backend::{BackendRouter, AgentCliBackend};
 use super::run_config;
 use super::run_config::{RunDefaults, WorkflowRunConfig};
-use indicatif::{HumanCount, HumanDuration};
+use indicatif::HumanDuration;
 use std::time::Duration;
 
 use super::{
     compute_stage_cost, format_cost,
-    format_event_summary, print_diagnostics, read_dot_file,
+    format_event_summary, format_tokens_human, print_diagnostics, read_dot_file,
     SandboxProvider, RunArgs,
 };
 
@@ -381,15 +381,15 @@ pub async fn run_command(
                     HumanDuration(Duration::from_millis(*duration_ms)),
                 );
                 if let Some(u) = usage {
-                    let total = (u.input_tokens + u.output_tokens) as u64;
+                    let total = u.input_tokens + u.output_tokens;
+                    let tokens_str = format_tokens_human(total);
                     if let Some(cost) = compute_stage_cost(u) {
                         line.push_str(&format!(
-                            " \u{2014} {} tokens ({})",
-                            HumanCount(total),
+                            " \u{2014} {tokens_str} tokens ({})",
                             format_cost(cost)
                         ));
                     } else {
-                        line.push_str(&format!(" \u{2014} {} tokens", HumanCount(total)));
+                        line.push_str(&format!(" \u{2014} {tokens_str} tokens"));
                     }
                 }
                 eprintln!("{}", styles.dim.apply_to(line));
@@ -731,18 +731,18 @@ pub async fn run_command(
             eprintln!(
                 "Cost: {} ({} tokens)",
                 format_cost(acc.total_cost),
-                HumanCount(total_tokens as u64)
+                format_tokens_human(total_tokens)
             );
         } else {
-            eprintln!("Tokens: {}", HumanCount(total_tokens as u64));
+            eprintln!("Tokens: {}", format_tokens_human(total_tokens));
         }
         if acc.total_cache_read_tokens > 0 {
             eprintln!(
                 "{}",
                 styles.dim.apply_to(format!(
                     "Cache: {} read, {} write",
-                    HumanCount(acc.total_cache_read_tokens as u64),
-                    HumanCount(acc.total_cache_write_tokens as u64),
+                    format_tokens_human(acc.total_cache_read_tokens),
+                    format_tokens_human(acc.total_cache_write_tokens),
                 )),
             );
         }
@@ -751,7 +751,7 @@ pub async fn run_command(
                 "{}",
                 styles.dim.apply_to(format!(
                     "Reasoning: {} tokens",
-                    HumanCount(acc.total_reasoning_tokens as u64),
+                    format_tokens_human(acc.total_reasoning_tokens),
                 )),
             );
         }
