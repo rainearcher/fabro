@@ -207,11 +207,11 @@ pub async fn run_command(
     let (graph, diagnostics) = WorkflowBuilder::new().prepare(&source)?;
 
     eprintln!(
-        "{} {} ({})",
-        styles.bold.apply_to("Parsed workflow:"),
+        "{} {} {}",
+        styles.bold.apply_to("Workflow:"),
         graph.name,
         styles.dim.apply_to(format!(
-            "{} nodes, {} edges",
+            "({} nodes, {} edges)",
             graph.nodes.len(),
             graph.edges.len()
         )),
@@ -655,6 +655,11 @@ pub async fn run_command(
         }
     }
 
+    // Finish progress bars before printing summary
+    if !args.verbose {
+        progress_ui.lock().expect("progress lock poisoned").finish();
+    }
+
     // Auto-derive retro (always, cheap) and optionally run retro agent
     {
         let (failed, failure_reason) = match &engine_result {
@@ -683,11 +688,6 @@ pub async fn run_command(
     }
 
     let outcome = engine_result?;
-
-    // Finish progress bars before printing summary
-    if !args.verbose {
-        progress_ui.lock().expect("progress lock poisoned").finish();
-    }
 
     // 8. Print result
     eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="),);
@@ -737,17 +737,9 @@ pub async fn run_command(
     }
     drop(acc);
 
-    if let Some(notes) = &outcome.notes {
-        eprintln!("Notes: {notes}");
-    }
     if let Some(failure) = outcome.failure_reason() {
         eprintln!("{}", styles.red.apply_to(format!("Failure: {failure}")),);
     }
-    eprintln!(
-        "{} {}",
-        styles.dim.apply_to("Logs:"),
-        styles.underline.apply_to(logs_dir.display()),
-    );
 
     // 9. Exit code
     match outcome.status {
@@ -1022,11 +1014,6 @@ async fn run_from_branch(
     eprintln!(
         "Duration: {}",
         HumanDuration(Duration::from_millis(run_duration_ms))
-    );
-    eprintln!(
-        "{} {}",
-        styles.dim.apply_to("Logs:"),
-        styles.underline.apply_to(logs_dir.display()),
     );
 
     match outcome.status {

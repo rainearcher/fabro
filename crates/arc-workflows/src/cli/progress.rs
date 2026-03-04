@@ -29,21 +29,21 @@ macro_rules! cached_style {
 
 cached_style!(
     style_header_running,
-    "  {spinner:.dim} {wide_msg} {elapsed:.dim}"
+    "    {spinner:.dim} {wide_msg} {elapsed:.dim}"
 );
-cached_style!(style_header_done, "  {wide_msg} {prefix:.dim}");
+cached_style!(style_header_done, "    {wide_msg:.dim} {prefix:.dim}");
 cached_style!(
     style_stage_running,
-    "  {spinner:.cyan} {wide_msg} {elapsed:.dim}"
+    "    {spinner:.cyan} {wide_msg} {elapsed:.dim}"
 );
-cached_style!(style_stage_done, "  {wide_msg} {prefix:.dim}");
+cached_style!(style_stage_done, "    {wide_msg} {prefix:.dim}");
 cached_style!(
     style_tool_running,
-    "        {spinner:.dim} {wide_msg} {elapsed:.dim}"
+    "          {spinner:.dim} {wide_msg} {elapsed:.dim}"
 );
-cached_style!(style_tool_done, "        {wide_msg}");
-cached_style!(style_static_dim, "  {wide_msg:.dim}");
-cached_style!(style_empty, "");
+cached_style!(style_tool_done, "          {wide_msg}");
+cached_style!(style_static_dim, "    {wide_msg:.dim}");
+cached_style!(style_empty, " ");
 
 // ── Cached glyphs ───────────────────────────────────────────────────────
 
@@ -136,6 +136,7 @@ pub struct ProgressUI {
     setup_command_count: usize,
     sandbox_bar: Option<ProgressBar>,
     setup_bar: Option<ProgressBar>,
+    any_stage_started: bool,
 }
 
 impl ProgressUI {
@@ -153,6 +154,7 @@ impl ProgressUI {
             setup_command_count: 0,
             sandbox_bar: None,
             setup_bar: None,
+            any_stage_started: false,
         }
     }
 
@@ -165,13 +167,20 @@ impl ProgressUI {
         });
     }
 
-    /// Clear all active bars before the summary block is printed.
+    /// Clear all active bars and release the terminal for normal stderr output.
     pub fn finish(&mut self) {
         for (_id, stage) in self.active_stages.drain() {
             for entry in &stage.tool_calls {
                 entry.bar.finish_and_clear();
             }
             stage.spinner.finish_and_clear();
+        }
+        if let ProgressRenderer::Tty(tty) = &self.renderer {
+            // Add a trailing blank line through indicatif so it survives the final redraw
+            let sep = tty.multi.add(ProgressBar::new_spinner());
+            sep.set_style(style_empty());
+            sep.finish();
+            tty.multi.set_draw_target(ProgressDrawTarget::hidden());
         }
     }
 
@@ -257,7 +266,7 @@ impl ProgressUI {
                         }
                     }
                     ProgressRenderer::Plain => {
-                        eprintln!("  Sandbox: {provider} (ready in {dur})");
+                        eprintln!("    Sandbox: {provider} (ready in {dur})");
                     }
                 }
             }
@@ -294,7 +303,7 @@ impl ProgressUI {
                 }
             }
             ProgressRenderer::Plain => {
-                eprintln!("  Setup: {count} command{suffix} ({dur})");
+                eprintln!("    Setup: {count} command{suffix} ({dur})");
             }
         }
     }
@@ -308,12 +317,9 @@ impl ProgressUI {
                 let bar = tty.multi.add(ProgressBar::new_spinner());
                 bar.set_style(style_static_dim());
                 bar.finish_with_message(format!("Logs: {path_str}"));
-                let sep = tty.multi.add(ProgressBar::new_spinner());
-                sep.set_style(style_empty());
-                sep.finish();
             }
             ProgressRenderer::Plain => {
-                eprintln!("  Logs: {path_str}");
+                eprintln!("    Logs: {path_str}");
             }
         }
     }
@@ -322,6 +328,12 @@ impl ProgressUI {
 
     fn on_stage_started(&mut self, node_id: &str, name: &str) {
         if let ProgressRenderer::Tty(tty) = &self.renderer {
+            if !self.any_stage_started {
+                self.any_stage_started = true;
+                let sep = tty.multi.add(ProgressBar::new_spinner());
+                sep.set_style(style_empty());
+                sep.finish();
+            }
             let bar = tty.multi.add(ProgressBar::new_spinner());
             bar.set_style(style_stage_running());
             bar.set_message(name.to_string());
@@ -353,9 +365,9 @@ impl ProgressUI {
             }
             ProgressRenderer::Plain => {
                 if prefix.is_empty() {
-                    eprintln!("  {glyph} {name}");
+                    eprintln!("    {glyph} {name}");
                 } else {
-                    eprintln!("  {glyph} {name}  {prefix}");
+                    eprintln!("    {glyph} {name}  {prefix}");
                 }
             }
         }

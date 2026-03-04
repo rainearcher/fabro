@@ -19,7 +19,7 @@ pub fn validate_command(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<
         "{} ({} nodes, {} edges)",
         styles
             .bold
-            .apply_to(format!("Parsed workflow: {}", graph.name)),
+            .apply_to(format!("Workflow: {}", graph.name)),
         graph.nodes.len(),
         graph.edges.len(),
     );

@@ -776,19 +776,6 @@ impl WorkflowRunEngine {
         }
     }
 
-    /// Call inform on the interviewer, if one is configured.
-    fn inform(&self, message: &str, stage: &str) {
-        if let Some(ref interviewer) = self.interviewer {
-            // inform is async but we fire-and-forget since it's informational
-            let interviewer = Arc::clone(interviewer);
-            let message = message.to_string();
-            let stage = stage.to_string();
-            tokio::spawn(async move {
-                interviewer.inform(&message, &stage).await;
-            });
-        }
-    }
-
     /// Mirror graph-level attributes into the context.
     fn mirror_graph_attributes(graph: &Graph, context: &Context) {
         if !graph.goal().is_empty() {
@@ -1084,8 +1071,6 @@ impl WorkflowRunEngine {
                     _ => None,
                 },
             });
-        self.inform(&format!("Run started: {}", graph.name), "run");
-
         // Write manifest.json (spec 5.6)
         let manifest = write_manifest(&config.logs_root, graph, config);
 
@@ -1329,9 +1314,6 @@ impl WorkflowRunEngine {
                 attempt: 1,
                 max_attempts: usize::try_from(retry_policy.max_attempts).unwrap_or(usize::MAX),
             });
-            if node.handler_type() != Some("wait.human") {
-                self.inform(&format!("Stage started: {}", node.label()), &node.id);
-            }
             let stage_start = Instant::now();
 
             let (mut outcome, attempts_used) = if let Some((ref token, _)) = stall_token {
@@ -1440,7 +1422,6 @@ impl WorkflowRunEngine {
                         max_attempts: usize::try_from(retry_policy.max_attempts)
                             .unwrap_or(usize::MAX),
                     });
-                self.inform(&format!("Stage completed: {}", node.label()), &node.id);
             }
 
             // Write per-node status.json (spec 5.6)
@@ -3273,109 +3254,6 @@ mod tests {
     }
 
     // --- Gap #15: Interviewer.inform() tests ---
-
-    /// Mock interviewer that records `inform()` calls.
-    struct RecordingInformer {
-        messages: std::sync::Mutex<Vec<(String, String)>>,
-    }
-
-    impl RecordingInformer {
-        fn new() -> Self {
-            Self {
-                messages: std::sync::Mutex::new(Vec::new()),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl crate::interviewer::Interviewer for RecordingInformer {
-        async fn ask(&self, _question: crate::interviewer::Question) -> crate::interviewer::Answer {
-            crate::interviewer::Answer::yes()
-        }
-
-        async fn inform(&self, message: &str, stage: &str) {
-            self.messages
-                .lock()
-                .unwrap()
-                .push((message.to_string(), stage.to_string()));
-        }
-    }
-
-    #[tokio::test]
-    async fn engine_calls_inform_on_run_start() {
-        let dir = tempfile::tempdir().unwrap();
-        let g = simple_graph();
-        let informer = Arc::new(RecordingInformer::new());
-        let engine = WorkflowRunEngine::with_interviewer(
-            make_registry(),
-            Arc::new(EventEmitter::new()),
-            Arc::clone(&informer) as Arc<dyn crate::interviewer::Interviewer>,
-            local_env(),
-        );
-        let config = RunConfig {
-            logs_root: dir.path().to_path_buf(),
-            cancel_token: None,
-            dry_run: false,
-            run_id: "test-run".into(),
-            git_checkpoint: None,
-            base_sha: None,
-            run_branch: None,
-            meta_branch: None,
-            labels: HashMap::new(),
-        };
-        engine.run(&g, &config).await.unwrap();
-        // Give spawned inform tasks time to complete
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        let messages = informer.messages.lock().unwrap();
-        assert!(
-            messages
-                .iter()
-                .any(|(msg, stage)| msg.contains("Run started") && stage == "run"),
-            "expected 'Run started' inform call, got: {messages:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn engine_calls_inform_on_stage_start_and_complete() {
-        let dir = tempfile::tempdir().unwrap();
-        let g = simple_graph();
-        let informer = Arc::new(RecordingInformer::new());
-        let engine = WorkflowRunEngine::with_interviewer(
-            make_registry(),
-            Arc::new(EventEmitter::new()),
-            Arc::clone(&informer) as Arc<dyn crate::interviewer::Interviewer>,
-            local_env(),
-        );
-        let config = RunConfig {
-            logs_root: dir.path().to_path_buf(),
-            cancel_token: None,
-            dry_run: false,
-            run_id: "test-run".into(),
-            git_checkpoint: None,
-            base_sha: None,
-            run_branch: None,
-            meta_branch: None,
-            labels: HashMap::new(),
-        };
-        engine.run(&g, &config).await.unwrap();
-        // Give spawned inform tasks time to complete
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        let messages = informer.messages.lock().unwrap();
-        assert!(
-            messages
-                .iter()
-                .any(|(msg, _)| msg.contains("Stage started")),
-            "expected 'Stage started' inform call, got: {messages:?}"
-        );
-        assert!(
-            messages
-                .iter()
-                .any(|(msg, _)| msg.contains("Stage completed")),
-            "expected 'Stage completed' inform call, got: {messages:?}"
-        );
-    }
 
     #[tokio::test]
     async fn engine_without_interviewer_runs_normally() {
