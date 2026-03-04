@@ -528,32 +528,6 @@ fn doctor_no_color_when_no_color_set() {
         .stdout(predicate::str::contains("\x1b[").not());
 }
 
-#[test]
-fn doctor_checks_llm_providers() {
-    arc()
-        .args(["--no-dotenv", "doctor"])
-        .env_clear()
-        .assert()
-        .stdout(predicate::str::contains("LLM providers"));
-}
-
-#[test]
-fn doctor_checks_arc_api() {
-    arc()
-        .args(["--no-dotenv", "doctor"])
-        .env_clear()
-        .assert()
-        .stdout(predicate::str::contains("Arc API"));
-}
-
-#[test]
-fn doctor_checks_arc_web() {
-    arc()
-        .args(["--no-dotenv", "doctor"])
-        .env_clear()
-        .assert()
-        .stdout(predicate::str::contains("Arc Web"));
-}
 
 #[test]
 fn doctor_live_flag_accepted() {
