@@ -212,7 +212,7 @@ pub fn error_from_status_code(
         }
         413 => ProviderErrorKind::ContextLength,
         429 => ProviderErrorKind::RateLimit,
-        500..=504 => ProviderErrorKind::Server,
+        500..=504 | 529 => ProviderErrorKind::Server,
         // For ambiguous status codes (400, 422, etc.), use message-based classification
         _ => {
             let lower_msg = detail.message.to_lowercase();
@@ -501,6 +501,23 @@ mod tests {
                 ..
             }
         ));
+
+        let err = error_from_status_code(
+            529,
+            "Overloaded".into(),
+            "anthropic".into(),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(
+            err,
+            SdkError::Provider {
+                kind: ProviderErrorKind::Server,
+                ..
+            }
+        ));
+        assert!(err.retryable());
     }
 
     #[test]
