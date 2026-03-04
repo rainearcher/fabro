@@ -44,7 +44,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw redirect("/setup");
   }
   const user = await requireUser(request);
-  return { user };
+  return { user, provider };
 }
 
 const navigation = [
@@ -62,7 +62,7 @@ function classNames(...classes: Array<string | false | null | undefined>) {
 }
 
 export default function AppShell({ loaderData }: Route.ComponentProps) {
-  const { user } = loaderData;
+  const { user, provider } = loaderData;
   const { pathname } = useLocation();
   const matches = useMatches();
   const { theme, toggle } = useTheme();
@@ -123,33 +123,35 @@ export default function AppShell({ loaderData }: Route.ComponentProps) {
                   <ThemeIcon className="size-5" aria-hidden="true" />
                   <span className="sr-only">Toggle theme</span>
                 </button>
-                <Menu as="div" className="relative">
-                  <MenuButton className="relative flex max-w-xs items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500">
-                    <span className="absolute -inset-1.5" />
-                    <span className="sr-only">Open user menu</span>
-                    <img
-                      alt=""
-                      src={user.avatarUrl}
-                      className="size-8 rounded-full outline -outline-offset-1 outline-line-strong"
-                    />
-                  </MenuButton>
+                {provider !== "tailscale" && (
+                  <Menu as="div" className="relative">
+                    <MenuButton className="relative flex max-w-xs items-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500">
+                      <span className="absolute -inset-1.5" />
+                      <span className="sr-only">Open user menu</span>
+                      <img
+                        alt=""
+                        src={user.avatarUrl}
+                        className="size-8 rounded-full outline -outline-offset-1 outline-line-strong"
+                      />
+                    </MenuButton>
 
-                  <MenuItems
-                    transition
-                    className="absolute right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
-                  >
-                    <MenuItem>
-                      <Form method="POST" action="/auth/logout">
-                        <button
-                          type="submit"
-                          className="block w-full px-4 py-2 text-left text-sm text-fg-3 data-focus:bg-overlay data-focus:outline-hidden"
-                        >
-                          Sign out
-                        </button>
-                      </Form>
-                    </MenuItem>
-                  </MenuItems>
-                </Menu>
+                    <MenuItems
+                      transition
+                      className="absolute right-0 z-10 mt-2 w-48 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
+                    >
+                      <MenuItem>
+                        <Form method="POST" action="/auth/logout">
+                          <button
+                            type="submit"
+                            className="block w-full px-4 py-2 text-left text-sm text-fg-3 data-focus:bg-overlay data-focus:outline-hidden"
+                          >
+                            Sign out
+                          </button>
+                        </Form>
+                      </MenuItem>
+                    </MenuItems>
+                  </Menu>
+                )}
               </div>
             </div>
             <div className="-mr-2 flex md:hidden">
@@ -219,17 +221,19 @@ export default function AppShell({ loaderData }: Route.ComponentProps) {
                 <span className="sr-only">Toggle theme</span>
               </button>
             </div>
-            <div className="mt-3 space-y-1 px-2">
-              <Form method="POST" action="/auth/logout">
-                <DisclosureButton
-                  as="button"
-                  type="submit"
-                  className="block w-full rounded-md px-3 py-2 text-left text-base font-medium text-fg-muted hover:bg-overlay hover:text-fg"
-                >
-                  Sign out
-                </DisclosureButton>
-              </Form>
-            </div>
+            {provider !== "tailscale" && (
+              <div className="mt-3 space-y-1 px-2">
+                <Form method="POST" action="/auth/logout">
+                  <DisclosureButton
+                    as="button"
+                    type="submit"
+                    className="block w-full rounded-md px-3 py-2 text-left text-base font-medium text-fg-muted hover:bg-overlay hover:text-fg"
+                  >
+                    Sign out
+                  </DisclosureButton>
+                </Form>
+              </div>
+            )}
           </div>
         </DisclosurePanel>
       </Disclosure>

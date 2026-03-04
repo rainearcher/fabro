@@ -5,11 +5,11 @@ import { getUser } from "../lib/session.server";
 import type { Route } from "./+types/redirect-home";
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const authDisabled = getAppConfig().web.auth.provider === "insecure_disabled";
-  if (!authDisabled && !isGitHubAppConfigured()) {
+  const { provider } = getAppConfig().web.auth;
+  if (provider === "github" && !isGitHubAppConfigured()) {
     return redirect("/setup");
   }
-  if (!authDisabled) {
+  if (provider !== "insecure_disabled") {
     const user = await getUser(request);
     if (!user) {
       return redirect("/auth/login");
