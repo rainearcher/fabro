@@ -250,6 +250,11 @@ impl Session {
     }
 
     #[must_use]
+    pub fn steering_queue_handle(&self) -> Arc<Mutex<VecDeque<String>>> {
+        self.steering_queue.clone()
+    }
+
+    #[must_use]
     pub fn cancel_token(&self) -> CancellationToken {
         self.cancel_token.clone()
     }

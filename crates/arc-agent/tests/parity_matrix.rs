@@ -14,8 +14,8 @@ fn summarizer_model_id(provider: Provider) -> ModelId {
         | Provider::Kimi
         | Provider::Zai
         | Provider::Minimax
-        | Provider::Inception => ModelId::new(Provider::OpenAi, "gpt-4o-mini"),
-        Provider::Gemini => ModelId::new(Provider::Gemini, "gemini-2.0-flash"),
+        | Provider::Inception => ModelId::new(Provider::OpenAi, "gpt-5-mini"),
+        Provider::Gemini => ModelId::new(Provider::Gemini, "gemini-3-flash-preview"),
         Provider::Anthropic => ModelId::new(Provider::Anthropic, "claude-haiku-4-5"),
     }
 }
@@ -103,36 +103,30 @@ async fn make_session_with_config(
     Session::new(client, profile, env, config)
 }
 
-macro_rules! provider_tests {
-    ($scenario:ident) => {
+macro_rules! provider_test {
+    ($scenario:ident, $provider:expr, $model:expr, $prefix:ident) => {
         paste::paste! {
             #[tokio::test]
             #[ignore = "requires LLM API keys"]
-            async fn [<anthropic_ $scenario>]() {
+            async fn [<$prefix _ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session(Provider::Anthropic, "claude-haiku-4-5", tmp.path()).await;
-                session.initialize().await;
-                [<scenario_ $scenario>](&mut session, tmp.path()).await;
-            }
-
-            #[tokio::test]
-            #[ignore = "requires LLM API keys"]
-            async fn [<openai_ $scenario>]() {
-                let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session(Provider::OpenAi, "gpt-4o-mini", tmp.path()).await;
-                session.initialize().await;
-                [<scenario_ $scenario>](&mut session, tmp.path()).await;
-            }
-
-            #[tokio::test]
-            #[ignore = "requires LLM API keys"]
-            async fn [<gemini_ $scenario>]() {
-                let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session(Provider::Gemini, "gemini-2.5-flash", tmp.path()).await;
+                let mut session = make_session($provider, $model, tmp.path()).await;
                 session.initialize().await;
                 [<scenario_ $scenario>](&mut session, tmp.path()).await;
             }
         }
+    };
+}
+
+macro_rules! provider_tests {
+    ($scenario:ident) => {
+        provider_test!($scenario, Provider::Anthropic, "claude-haiku-4-5", anthropic);
+        provider_test!($scenario, Provider::OpenAi, "gpt-5-mini", openai);
+        provider_test!($scenario, Provider::Gemini, "gemini-3-flash-preview", gemini);
+        provider_test!($scenario, Provider::Kimi, "kimi-k2.5", kimi);
+        provider_test!($scenario, Provider::Zai, "glm-4.7", zai);
+        provider_test!($scenario, Provider::Minimax, "minimax-m2.5", minimax);
+        provider_test!($scenario, Provider::Inception, "mercury-2", inception);
     };
 }
 
@@ -144,7 +138,9 @@ provider_tests!(shell_timeout);
 provider_tests!(grep_and_glob);
 provider_tests!(tool_output_truncation);
 provider_tests!(parallel_tool_calls);
-provider_tests!(steering);
+provider_tests!(steering_before_input);
+provider_tests!(steering_mid_task);
+provider_tests!(follow_up);
 provider_tests!(subagent_spawn);
 
 provider_tests!(web_fetch);
@@ -158,32 +154,20 @@ provider_tests!(web_search);
 
 provider_tests!(error_recovery);
 
-macro_rules! anthropic_gemini_tests {
+// gpt-5-mini is too weak to reliably apply precise file edits (uses apply_patch, not edit_file).
+macro_rules! non_openai_provider_tests {
     ($scenario:ident) => {
-        paste::paste! {
-            #[tokio::test]
-            #[ignore = "requires LLM API keys"]
-            async fn [<anthropic_ $scenario>]() {
-                let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session(Provider::Anthropic, "claude-haiku-4-5", tmp.path()).await;
-                session.initialize().await;
-                [<scenario_ $scenario>](&mut session, tmp.path()).await;
-            }
-
-            #[tokio::test]
-            #[ignore = "requires LLM API keys"]
-            async fn [<gemini_ $scenario>]() {
-                let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session(Provider::Gemini, "gemini-2.5-flash", tmp.path()).await;
-                session.initialize().await;
-                [<scenario_ $scenario>](&mut session, tmp.path()).await;
-            }
-        }
+        provider_test!($scenario, Provider::Anthropic, "claude-haiku-4-5", anthropic);
+        provider_test!($scenario, Provider::Gemini, "gemini-3-flash-preview", gemini);
+        provider_test!($scenario, Provider::Kimi, "kimi-k2.5", kimi);
+        provider_test!($scenario, Provider::Zai, "glm-4.7", zai);
+        provider_test!($scenario, Provider::Minimax, "minimax-m2.5", minimax);
+        provider_test!($scenario, Provider::Inception, "mercury-2", inception);
     };
 }
 
-anthropic_gemini_tests!(multi_step_read_analyze_edit);
-anthropic_gemini_tests!(provider_specific_editing);
+non_openai_provider_tests!(multi_step_read_analyze_edit);
+non_openai_provider_tests!(provider_specific_editing);
 
 // ---------------------------------------------------------------------------
 // Scenario 1: simple_file_creation
@@ -313,14 +297,82 @@ async fn scenario_parallel_tool_calls(session: &mut Session, dir: &Path) {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario 10: steering
+// Scenario 10a: steering_before_input
 // ---------------------------------------------------------------------------
-async fn scenario_steering(session: &mut Session, _dir: &Path) {
+async fn scenario_steering_before_input(session: &mut Session, _dir: &Path) {
     session.steer("Stop counting and just say DONE".to_string());
     session
         .process_input("Count from 1 to 100, one number per line")
         .await
         .expect("process_input failed");
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 10b: steering_mid_task
+// ---------------------------------------------------------------------------
+async fn scenario_steering_mid_task(session: &mut Session, dir: &Path) {
+    // Setup: create a file the LLM will read (triggering a tool call)
+    std::fs::write(dir.join("task.txt"), "read me first").expect("write task.txt");
+
+    // Grab handles before process_input borrows &mut self
+    let steering_queue = session.steering_queue_handle();
+    let mut rx = session.subscribe();
+
+    // Spawn a task that waits for the first tool call, then injects steering
+    let steer_task = tokio::spawn(async move {
+        while let Ok(event) = rx.recv().await {
+            if matches!(event.event, arc_agent::AgentEvent::ToolCallCompleted { .. }) {
+                steering_queue
+                    .lock()
+                    .expect("steering queue lock")
+                    .push_back(
+                        "Stop what you are doing. Create a file called steered.txt containing 'steered' and do nothing else.".to_string(),
+                    );
+                break;
+            }
+        }
+    });
+
+    session
+        .process_input(
+            "Read task.txt, then create files a.txt, b.txt, c.txt, d.txt, e.txt each containing their letter",
+        )
+        .await
+        .expect("process_input failed");
+
+    steer_task.await.expect("steer task panicked");
+
+    // The steering message should have redirected the LLM to create steered.txt
+    assert!(
+        dir.join("steered.txt").exists(),
+        "steered.txt should exist — steering mid-task should have redirected the LLM"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 10c: follow_up
+// ---------------------------------------------------------------------------
+async fn scenario_follow_up(session: &mut Session, dir: &Path) {
+    session.follow_up("Create a file called second.txt containing 'second'".to_string());
+    session
+        .process_input("Create a file called first.txt containing 'first'")
+        .await
+        .expect("process_input failed");
+
+    let first = dir.join("first.txt");
+    let second = dir.join("second.txt");
+    assert!(first.exists(), "first.txt should exist");
+    assert!(second.exists(), "second.txt should exist");
+    let first_content = std::fs::read_to_string(&first).expect("read first.txt");
+    let second_content = std::fs::read_to_string(&second).expect("read second.txt");
+    assert!(
+        first_content.contains("first"),
+        "first.txt should contain 'first', got: {first_content}"
+    );
+    assert!(
+        second_content.contains("second"),
+        "second.txt should contain 'second', got: {second_content}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -347,17 +399,13 @@ macro_rules! reasoning_effort_tests {
     };
 }
 
-reasoning_effort_tests!(
-    Provider::Anthropic,
-    "claude-haiku-4-5",
-    anthropic_reasoning_effort
-);
-// gpt-4o-mini does not support the reasoning.effort parameter, so no OpenAI test.
-reasoning_effort_tests!(
-    Provider::Gemini,
-    "gemini-2.5-flash",
-    gemini_reasoning_effort
-);
+reasoning_effort_tests!(Provider::Anthropic, "claude-haiku-4-5", anthropic_reasoning_effort);
+// gpt-5-mini does not support the reasoning.effort parameter, so no OpenAI test.
+reasoning_effort_tests!(Provider::Gemini, "gemini-3-flash-preview", gemini_reasoning_effort);
+reasoning_effort_tests!(Provider::Kimi, "kimi-k2.5", kimi_reasoning_effort);
+reasoning_effort_tests!(Provider::Zai, "glm-4.7", zai_reasoning_effort);
+reasoning_effort_tests!(Provider::Minimax, "minimax-m2.5", minimax_reasoning_effort);
+reasoning_effort_tests!(Provider::Inception, "mercury-2", inception_reasoning_effort);
 
 // ---------------------------------------------------------------------------
 // Scenario 12: subagent_spawn
@@ -397,13 +445,13 @@ macro_rules! loop_detection_tests {
     };
 }
 
-loop_detection_tests!(
-    Provider::Anthropic,
-    "claude-haiku-4-5",
-    anthropic_loop_detection
-);
-loop_detection_tests!(Provider::OpenAi, "gpt-4o-mini", openai_loop_detection);
-loop_detection_tests!(Provider::Gemini, "gemini-2.5-flash", gemini_loop_detection);
+loop_detection_tests!(Provider::Anthropic, "claude-haiku-4-5", anthropic_loop_detection);
+loop_detection_tests!(Provider::OpenAi, "gpt-5-mini", openai_loop_detection);
+loop_detection_tests!(Provider::Gemini, "gemini-3-flash-preview", gemini_loop_detection);
+loop_detection_tests!(Provider::Kimi, "kimi-k2.5", kimi_loop_detection);
+loop_detection_tests!(Provider::Zai, "glm-4.7", zai_loop_detection);
+loop_detection_tests!(Provider::Minimax, "minimax-m2.5", minimax_loop_detection);
+loop_detection_tests!(Provider::Inception, "mercury-2", inception_loop_detection);
 
 // ---------------------------------------------------------------------------
 // Scenario 14: error_recovery

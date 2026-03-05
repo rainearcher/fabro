@@ -242,12 +242,39 @@ fn content_text_with_fallbacks(parts: &[ContentPart]) -> String {
 fn translate_messages(messages: &[Message]) -> Vec<ChatMessage> {
     messages
         .iter()
-        .map(|msg| {
+        .flat_map(|msg| {
+            // Tool messages must be split into one ChatMessage per ToolResult,
+            // each with its own tool_call_id. The Chat Completions API requires
+            // every tool_call_id from the assistant to have a matching tool message.
+            if msg.role == Role::Tool {
+                return msg
+                    .content
+                    .iter()
+                    .filter_map(|part| {
+                        if let ContentPart::ToolResult(tr) = part {
+                            let output = tr
+                                .content
+                                .as_str()
+                                .map_or_else(|| tr.content.to_string(), str::to_string);
+                            Some(ChatMessage {
+                                role: "tool".to_string(),
+                                content: Some(output),
+                                reasoning_content: None,
+                                tool_call_id: Some(tr.tool_call_id.clone()),
+                                tool_calls: None,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+            }
+
             let role = match msg.role {
                 Role::System | Role::Developer => "system",
                 Role::User => "user",
                 Role::Assistant => "assistant",
-                Role::Tool => "tool",
+                Role::Tool => unreachable!(),
             };
 
             let mut tool_calls: Vec<ChatToolCall> = Vec::new();
@@ -298,13 +325,13 @@ fn translate_messages(messages: &[Message]) -> Vec<ChatMessage> {
                 None
             };
 
-            ChatMessage {
+            vec![ChatMessage {
                 role: role.to_string(),
                 content,
                 reasoning_content,
                 tool_call_id: msg.tool_call_id.clone(),
                 tool_calls,
-            }
+            }]
         })
         .collect()
 }
