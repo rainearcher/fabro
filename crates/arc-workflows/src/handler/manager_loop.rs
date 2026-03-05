@@ -247,6 +247,7 @@ mod tests {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),
             git_state: std::sync::RwLock::new(None),
+            hook_runner: None,
         }
     }
 
@@ -378,6 +379,7 @@ mod tests {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),
             git_state: std::sync::RwLock::new(None),
+            hook_runner: None,
         };
 
         let handler = SubWorkflowHandler;
@@ -485,6 +487,7 @@ mod tests {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),
             git_state: std::sync::RwLock::new(None),
+            hook_runner: None,
         };
 
         let handler = SubWorkflowHandler;
@@ -544,6 +547,7 @@ mod tests {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),
             git_state: std::sync::RwLock::new(None),
+            hook_runner: None,
         };
 
         let handler = SubWorkflowHandler;

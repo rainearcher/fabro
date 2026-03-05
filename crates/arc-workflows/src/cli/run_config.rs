@@ -19,6 +19,8 @@ pub struct WorkflowRunConfig {
     pub setup: Option<SetupConfig>,
     pub sandbox: Option<SandboxConfig>,
     pub vars: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub hooks: Vec<crate::hook::HookDefinition>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -1077,5 +1079,45 @@ model = "opus"
             err.to_string().contains("timed out"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn parse_toml_with_hooks() {
+        let toml = r#"
+version = 1
+goal = "Test hooks"
+graph = "test.dot"
+
+[[hooks]]
+event = "stage_start"
+command = "./scripts/pre-check.sh"
+blocking = true
+sandbox = false
+
+[[hooks]]
+event = "run_complete"
+command = "echo done"
+"#;
+        let cfg: WorkflowRunConfig = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.hooks.len(), 2);
+        assert_eq!(cfg.hooks[0].event, crate::hook::HookEvent::StageStart);
+        assert_eq!(
+            cfg.hooks[0].command.as_deref(),
+            Some("./scripts/pre-check.sh")
+        );
+        assert_eq!(cfg.hooks[0].blocking, Some(true));
+        assert_eq!(cfg.hooks[0].sandbox, Some(false));
+        assert_eq!(cfg.hooks[1].event, crate::hook::HookEvent::RunComplete);
+    }
+
+    #[test]
+    fn parse_toml_without_hooks_defaults_empty() {
+        let toml = r#"
+version = 1
+goal = "No hooks"
+graph = "test.dot"
+"#;
+        let cfg: WorkflowRunConfig = toml::from_str(toml).unwrap();
+        assert!(cfg.hooks.is_empty());
     }
 }

@@ -21,6 +21,7 @@ use crate::engine::GitState;
 use crate::error::ArcError;
 use crate::event::EventEmitter;
 use crate::graph::{shape_to_handler_type, Graph, Node};
+use crate::hook::HookRunner;
 use crate::interviewer::Interviewer;
 use crate::outcome::Outcome;
 
@@ -32,6 +33,8 @@ pub struct EngineServices {
     /// Git state for the current run. Set via `set_git_state` at the start of
     /// `run_internal` and read by parallel/fan-in handlers.
     pub(crate) git_state: std::sync::RwLock<Option<Arc<GitState>>>,
+    /// Hook runner for user-defined lifecycle hooks.
+    pub hook_runner: Option<Arc<HookRunner>>,
 }
 
 impl EngineServices {

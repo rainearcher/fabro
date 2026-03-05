@@ -104,6 +104,7 @@ pub struct AppState {
     pub db: sqlx::SqlitePool,
     max_concurrent_runs: usize,
     scheduler_notify: tokio::sync::Notify,
+    pub hook_config: arc_workflows::hook::HookConfig,
 }
 
 /// Build the axum Router with all run endpoints.
@@ -329,6 +330,7 @@ pub fn create_app_state_with_options(
         db,
         max_concurrent_runs,
         scheduler_notify: tokio::sync::Notify::new(),
+        hook_config: arc_workflows::hook::HookConfig::default(),
     })
 }
 
@@ -468,12 +470,18 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
     let registry = (state.registry_factory)(Arc::clone(&interviewer) as Arc<dyn Interviewer>);
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let sandbox: Arc<dyn arc_agent::Sandbox> = Arc::new(LocalSandbox::new(cwd));
-    let engine = WorkflowRunEngine::with_interviewer(
+    let mut engine = WorkflowRunEngine::with_interviewer(
         registry,
         Arc::new(emitter),
         Arc::clone(&interviewer) as Arc<dyn Interviewer>,
         sandbox,
     );
+
+    // Wire up hook runner from server config
+    if !state.hook_config.hooks.is_empty() {
+        let runner = arc_workflows::hook::HookRunner::new(state.hook_config.clone());
+        engine.set_hook_runner(std::sync::Arc::new(runner));
+    }
 
     // Transition to Running, populate interviewer + context
     {

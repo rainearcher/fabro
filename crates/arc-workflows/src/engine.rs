@@ -746,6 +746,7 @@ impl WorkflowRunEngine {
                 emitter,
                 sandbox,
                 git_state: std::sync::RwLock::new(None),
+                hook_runner: None,
             },
             interviewer: None,
         }
@@ -760,6 +761,7 @@ impl WorkflowRunEngine {
                 emitter: Arc::clone(&services.emitter),
                 sandbox: Arc::clone(&services.sandbox),
                 git_state: std::sync::RwLock::new(None),
+                hook_runner: services.hook_runner.clone(),
             },
             interviewer: None,
         }
@@ -779,9 +781,30 @@ impl WorkflowRunEngine {
                 emitter,
                 sandbox,
                 git_state: std::sync::RwLock::new(None),
+                hook_runner: None,
             },
             interviewer: Some(interviewer),
         }
+    }
+
+    /// Set the hook runner for lifecycle hooks.
+    pub fn set_hook_runner(&mut self, runner: Arc<crate::hook::HookRunner>) {
+        self.services.hook_runner = Some(runner);
+    }
+
+    /// Run lifecycle hooks and return the merged decision.
+    /// Returns `Proceed` if no hook runner is configured.
+    async fn run_hooks(
+        &self,
+        hook_context: &crate::hook::HookContext,
+        work_dir: Option<&Path>,
+    ) -> crate::hook::HookDecision {
+        let Some(ref runner) = self.services.hook_runner else {
+            return crate::hook::HookDecision::Proceed;
+        };
+        runner
+            .run(hook_context, self.services.sandbox.as_ref(), work_dir)
+            .await
     }
 
     /// Mirror graph-level attributes into the context.
@@ -1079,6 +1102,27 @@ impl WorkflowRunEngine {
                     _ => None,
                 },
             });
+
+        // Resolve work_dir from config for hooks
+        let hook_work_dir: Option<PathBuf> = match config.git_checkpoint {
+            Some(GitCheckpointMode::Host(ref p)) => Some(p.clone()),
+            _ => None,
+        };
+
+        // RunStart hook (blocking — can prevent run)
+        {
+            let hook_ctx = crate::hook::HookContext::new(
+                crate::hook::HookEvent::RunStart,
+                run_id.clone(),
+                graph.name.clone(),
+            );
+            let decision = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
+            if let crate::hook::HookDecision::Block { reason } = decision {
+                let msg = reason.unwrap_or_else(|| "blocked by RunStart hook".into());
+                return Err(ArcError::engine(msg));
+            }
+        }
+
         // Write manifest.json (spec 5.6)
         let manifest = write_manifest(&config.logs_root, graph, config);
 
@@ -1301,6 +1345,18 @@ impl WorkflowRunEngine {
                                 duration_ms,
                                 git_commit_sha: last_git_sha.clone(),
                             });
+
+                        // RunFailed hook (non-blocking)
+                        {
+                            let mut hook_ctx = crate::hook::HookContext::new(
+                                crate::hook::HookEvent::RunFailed,
+                                run_id.clone(),
+                                graph.name.clone(),
+                            );
+                            hook_ctx.failure_reason = Some(error.to_string());
+                            let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
+                        }
+
                         return Ok((error.to_fail_outcome(), context));
                     }
                 }
@@ -1353,6 +1409,53 @@ impl WorkflowRunEngine {
                 attempt: 1,
                 max_attempts: usize::try_from(retry_policy.max_attempts).unwrap_or(usize::MAX),
             });
+
+            // StageStart hook (blocking — can skip node)
+            {
+                let mut hook_ctx = crate::hook::HookContext::new(
+                    crate::hook::HookEvent::StageStart,
+                    run_id.clone(),
+                    graph.name.clone(),
+                );
+                hook_ctx.cwd = hook_work_dir.as_ref().map(|p| p.display().to_string());
+                hook_ctx.node_id = Some(node.id.clone());
+                hook_ctx.node_label = Some(node.label().to_string());
+                hook_ctx.handler_type = node.handler_type().map(String::from);
+                hook_ctx.attempt = Some(1);
+                hook_ctx.max_attempts = Some(
+                    usize::try_from(retry_policy.max_attempts).unwrap_or(usize::MAX),
+                );
+                let decision = self
+                    .run_hooks(&hook_ctx, hook_work_dir.as_deref())
+                    .await;
+                match decision {
+                    crate::hook::HookDecision::Skip { reason } => {
+                        let mut outcome = Outcome::skipped();
+                        outcome.notes = Some(
+                            reason.unwrap_or_else(|| "skipped by StageStart hook".into()),
+                        );
+                        completed_nodes.push(node.id.clone());
+                        node_outcomes.insert(node.id.clone(), outcome);
+                        previous_node_id = Some(node.id.clone());
+                        stage_index += 1;
+                        // Select next edge and continue
+                        let edge = select_edge(&node.id, &Outcome::skipped(), &context, graph);
+                        if let Some(e) = edge {
+                            current_node_id = e.to.clone();
+                            incoming_edge = Some(e);
+                        } else {
+                            break;
+                        }
+                        continue;
+                    }
+                    crate::hook::HookDecision::Block { reason } => {
+                        let msg = reason.unwrap_or_else(|| "blocked by StageStart hook".into());
+                        return Err(ArcError::engine(msg));
+                    }
+                    _ => {}
+                }
+            }
+
             let stage_start = Instant::now();
 
             let (mut outcome, attempts_used) = if let Some((ref token, _)) = stall_token {
@@ -1442,6 +1545,23 @@ impl WorkflowRunEngine {
                     }),
                     will_retry: false,
                 });
+
+                // StageFailed hook (non-blocking)
+                {
+                    let mut hook_ctx = crate::hook::HookContext::new(
+                        crate::hook::HookEvent::StageFailed,
+                        run_id.clone(),
+                        graph.name.clone(),
+                    );
+                    hook_ctx.node_id = Some(node.id.clone());
+                    hook_ctx.node_label = Some(node.label().to_string());
+                    hook_ctx.handler_type = node.handler_type().map(String::from);
+                    hook_ctx.status = Some("fail".into());
+                    hook_ctx.failure_reason = outcome.failure_reason().map(String::from);
+                    let _ = self
+                        .run_hooks(&hook_ctx, hook_work_dir.as_deref())
+                        .await;
+                }
             } else {
                 self.services
                     .emitter
@@ -1461,6 +1581,22 @@ impl WorkflowRunEngine {
                         max_attempts: usize::try_from(retry_policy.max_attempts)
                             .unwrap_or(usize::MAX),
                     });
+
+                // StageComplete hook (non-blocking)
+                {
+                    let mut hook_ctx = crate::hook::HookContext::new(
+                        crate::hook::HookEvent::StageComplete,
+                        run_id.clone(),
+                        graph.name.clone(),
+                    );
+                    hook_ctx.node_id = Some(node.id.clone());
+                    hook_ctx.node_label = Some(node.label().to_string());
+                    hook_ctx.handler_type = node.handler_type().map(String::from);
+                    hook_ctx.status = Some(outcome.status.to_string());
+                    let _ = self
+                        .run_hooks(&hook_ctx, hook_work_dir.as_deref())
+                        .await;
+                }
             }
 
             // Write per-node status.json (spec 5.6)
@@ -1524,6 +1660,41 @@ impl WorkflowRunEngine {
                 }
                 (edge, None)
             };
+
+            // EdgeSelected hook (blocking — can override routing)
+            let (next_edge, jump_target) = {
+                let edge_to = jump_target
+                    .as_ref()
+                    .cloned()
+                    .or_else(|| next_edge.as_ref().map(|e| e.to.clone()));
+                if let Some(ref to) = edge_to {
+                    let mut hook_ctx = crate::hook::HookContext::new(
+                        crate::hook::HookEvent::EdgeSelected,
+                        run_id.clone(),
+                        graph.name.clone(),
+                    );
+                    hook_ctx.edge_from = Some(node.id.clone());
+                    hook_ctx.edge_to = Some(to.clone());
+                    hook_ctx.edge_label = next_edge.as_ref().and_then(|e| e.label().map(String::from));
+                    let decision = self
+                        .run_hooks(&hook_ctx, hook_work_dir.as_deref())
+                        .await;
+                    match decision {
+                        crate::hook::HookDecision::Override { edge_to: new_target } => {
+                            // Redirect routing to the hook-specified target
+                            (None, Some(new_target))
+                        }
+                        crate::hook::HookDecision::Block { reason } => {
+                            let msg = reason.unwrap_or_else(|| "blocked by EdgeSelected hook".into());
+                            return Err(ArcError::engine(msg));
+                        }
+                        _ => (next_edge, jump_target),
+                    }
+                } else {
+                    (next_edge, jump_target)
+                }
+            };
+
             let next_node_id_for_checkpoint = jump_target
                 .as_ref()
                 .cloned()
@@ -1549,6 +1720,17 @@ impl WorkflowRunEngine {
                     .emit(&WorkflowRunEvent::CheckpointSaved {
                         node_id: node.id.clone(),
                     });
+
+                // CheckpointSaved hook (non-blocking)
+                {
+                    let mut hook_ctx = crate::hook::HookContext::new(
+                        crate::hook::HookEvent::CheckpointSaved,
+                        run_id.clone(),
+                        graph.name.clone(),
+                    );
+                    hook_ctx.node_id = Some(node.id.clone());
+                    let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
+                }
             }
 
             // Step 6b: Write shadow branch first, then run branch commit with trailer
@@ -1691,6 +1873,18 @@ impl WorkflowRunEngine {
                                 duration_ms,
                                 git_commit_sha: last_git_sha.clone(),
                             });
+
+                        // RunFailed hook (non-blocking)
+                        {
+                            let mut hook_ctx = crate::hook::HookContext::new(
+                                crate::hook::HookEvent::RunFailed,
+                                run_id.clone(),
+                                graph.name.clone(),
+                            );
+                            hook_ctx.failure_reason = Some(error.to_string());
+                            let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
+                        }
+
                         return Err(error);
                     }
                     break;
@@ -1768,6 +1962,16 @@ impl WorkflowRunEngine {
                 total_cost,
                 final_git_commit_sha: last_git_sha.clone(),
             });
+
+        // RunComplete hook (non-blocking)
+        {
+            let hook_ctx = crate::hook::HookContext::new(
+                crate::hook::HookEvent::RunComplete,
+                run_id.clone(),
+                graph.name.clone(),
+            );
+            let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
+        }
 
         // Write final.patch: comprehensive diff from base_sha to HEAD
         if let (Some(ref mode), Some(ref base)) = (&config.git_checkpoint, &config.base_sha) {

@@ -172,28 +172,6 @@ fn truncate(s: &str, max_chars: usize) -> &str {
     }
 }
 
-/// Resolve a tool hook command from node attributes, falling back to graph attributes.
-fn resolve_hook(node: &Node, graph: &Graph, key: &str) -> Option<String> {
-    node.attrs
-        .get(key)
-        .and_then(|v| v.as_str())
-        .or_else(|| graph.attrs.get(key).and_then(|v| v.as_str()))
-        .map(String::from)
-}
-
-/// Execute a tool hook shell command. Returns true if the command succeeded (exit 0).
-fn run_hook(command: &str, node_id: &str, work_dir: Option<&Path>) -> bool {
-    let mut cmd = std::process::Command::new("sh");
-    cmd.arg("-c").arg(command).env("ARC_NODE_ID", node_id);
-    if let Some(wd) = work_dir {
-        cmd.current_dir(wd);
-    }
-    match cmd.output() {
-        Ok(output) => output.status.success(),
-        Err(_) => false,
-    }
-}
-
 #[async_trait]
 impl Handler for CodergenHandler {
     async fn execute(
@@ -223,22 +201,7 @@ impl Handler for CodergenHandler {
         tokio::fs::create_dir_all(&stage_dir).await?;
         tokio::fs::write(stage_dir.join("prompt.md"), &prompt).await?;
 
-        // Resolve work_dir from context for hooks
-        let work_dir_str = context
-            .get("internal.work_dir")
-            .and_then(|v| v.as_str().map(String::from));
-        let work_dir = work_dir_str.as_deref().map(Path::new);
-
-        // 3. Execute pre-hook (spec 9.7)
-        if let Some(pre_hook) = resolve_hook(node, graph, "tool_hooks.pre") {
-            if !run_hook(&pre_hook, &node.id, work_dir) {
-                let mut outcome = Outcome::skipped();
-                outcome.notes = Some("pre-hook returned non-zero, tool call skipped".to_string());
-                return Ok(outcome);
-            }
-        }
-
-        // 4. Call LLM backend
+        // 3. Call LLM backend
         let mode = node.codergen_mode()?;
         let thread_id = context
             .get("internal.thread_id")
@@ -288,14 +251,7 @@ impl Handler for CodergenHandler {
                 )
             };
 
-        // 5. Execute post-hook (spec 9.7)
-        if let Some(post_hook) = resolve_hook(node, graph, "tool_hooks.post") {
-            if !run_hook(&post_hook, &node.id, work_dir) {
-                context.append_log(format!("post-hook failed for node {}, continuing", node.id));
-            }
-        }
-
-        // 6. Write response to logs
+        // 4. Write response to logs
         tokio::fs::write(stage_dir.join("response.md"), &response_text).await?;
 
         // 7. Build and write status
@@ -343,6 +299,7 @@ mod tests {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),
             git_state: std::sync::RwLock::new(None),
+            hook_runner: None,
         }
     }
 
@@ -498,100 +455,6 @@ mod tests {
     fn truncate_long_string() {
         let long = "a".repeat(300);
         assert_eq!(truncate(&long, 200).len(), 200);
-    }
-
-    #[tokio::test]
-    async fn codergen_handler_pre_hook_failure_skips_backend() {
-        let handler = CodergenHandler::new(None);
-        let mut node = Node::new("step");
-        node.attrs.insert(
-            "tool_hooks.pre".to_string(),
-            AttrValue::String("exit 1".to_string()),
-        );
-        let context = Context::new();
-        let graph = Graph::new("test");
-        let tmp = TempDir::new().unwrap();
-
-        let outcome = handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
-            .await
-            .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Skipped);
-        assert!(outcome.notes.as_deref().unwrap().contains("pre-hook"));
-    }
-
-    #[tokio::test]
-    async fn codergen_handler_pre_hook_success_continues() {
-        let handler = CodergenHandler::new(None);
-        let mut node = Node::new("step");
-        node.attrs.insert(
-            "tool_hooks.pre".to_string(),
-            AttrValue::String("exit 0".to_string()),
-        );
-        let context = Context::new();
-        let graph = Graph::new("test");
-        let tmp = TempDir::new().unwrap();
-
-        let outcome = handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
-            .await
-            .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
-    }
-
-    #[tokio::test]
-    async fn codergen_handler_post_hook_failure_logs_warning() {
-        let handler = CodergenHandler::new(None);
-        let mut node = Node::new("step");
-        node.attrs.insert(
-            "tool_hooks.post".to_string(),
-            AttrValue::String("exit 1".to_string()),
-        );
-        let context = Context::new();
-        let graph = Graph::new("test");
-        let tmp = TempDir::new().unwrap();
-
-        let outcome = handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
-            .await
-            .unwrap();
-        // Post-hook failure should not fail the node
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
-    }
-
-    #[test]
-    fn resolve_hook_from_node_attr() {
-        let mut node = Node::new("step");
-        node.attrs.insert(
-            "tool_hooks.pre".to_string(),
-            AttrValue::String("echo node".to_string()),
-        );
-        let graph = Graph::new("test");
-        assert_eq!(
-            resolve_hook(&node, &graph, "tool_hooks.pre"),
-            Some("echo node".to_string())
-        );
-    }
-
-    #[test]
-    fn resolve_hook_falls_back_to_graph() {
-        let node = Node::new("step");
-        let mut graph = Graph::new("test");
-        graph.attrs.insert(
-            "tool_hooks.pre".to_string(),
-            AttrValue::String("echo graph".to_string()),
-        );
-        assert_eq!(
-            resolve_hook(&node, &graph, "tool_hooks.pre"),
-            Some("echo graph".to_string())
-        );
-    }
-
-    #[test]
-    fn resolve_hook_none_when_missing() {
-        let node = Node::new("step");
-        let graph = Graph::new("test");
-        assert_eq!(resolve_hook(&node, &graph, "tool_hooks.pre"), None);
     }
 
     #[tokio::test]

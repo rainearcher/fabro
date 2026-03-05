@@ -636,12 +636,23 @@ pub async fn run_command(
             Some(Box::new(BackendRouter::new(Box::new(api), cli)))
         }
     });
-    let engine = WorkflowRunEngine::with_interviewer(
+    let mut engine = WorkflowRunEngine::with_interviewer(
         registry,
         Arc::clone(&emitter),
         interviewer,
         Arc::clone(&sandbox),
     );
+
+    // Wire up hook runner from run config
+    if let Some(ref cfg) = run_cfg {
+        if !cfg.hooks.is_empty() {
+            let hook_config = crate::hook::HookConfig {
+                hooks: cfg.hooks.clone(),
+            };
+            let runner = crate::hook::HookRunner::new(hook_config);
+            engine.set_hook_runner(Arc::new(runner));
+        }
+    }
 
     // 7. Execute
     let run_id = worktree_run_id
@@ -1563,6 +1574,7 @@ mod tests {
             setup: None,
             sandbox: None,
             vars: None,
+            hooks: Vec::new(),
         };
         let (model, provider) = resolve_model_provider(
             Some("gpt-5.2"),
@@ -1602,6 +1614,7 @@ mod tests {
             setup: None,
             sandbox: None,
             vars: None,
+            hooks: Vec::new(),
         };
         let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
         assert_eq!(model, "toml-model");
@@ -1676,6 +1689,7 @@ mod tests {
             setup: None,
             sandbox: None,
             vars: None,
+            hooks: Vec::new(),
         };
         let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
         assert_eq!(model, "toml-model");
@@ -1697,6 +1711,7 @@ mod tests {
                 daytona: None,
             }),
             vars: None,
+            hooks: Vec::new(),
         };
         let defaults = RunDefaults::default();
         assert!(resolve_preserve_sandbox(true, Some(&cfg), &defaults));
@@ -1717,6 +1732,7 @@ mod tests {
                 daytona: None,
             }),
             vars: None,
+            hooks: Vec::new(),
         };
         let defaults = RunDefaults {
             sandbox: Some(run_config::SandboxConfig {

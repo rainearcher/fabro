@@ -1,0 +1,317 @@
+use serde::{Deserialize, Serialize};
+
+/// Lifecycle events that can trigger user-defined hooks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HookEvent {
+    RunStart,
+    RunComplete,
+    RunFailed,
+    StageStart,
+    StageComplete,
+    StageFailed,
+    StageRetrying,
+    EdgeSelected,
+    ParallelStart,
+    ParallelComplete,
+    SandboxReady,
+    SandboxCleanup,
+    CheckpointSaved,
+}
+
+impl HookEvent {
+    /// Whether hooks for this event block execution by default.
+    #[must_use]
+    pub fn is_blocking_by_default(self) -> bool {
+        matches!(self, Self::RunStart | Self::StageStart | Self::EdgeSelected)
+    }
+}
+
+impl std::fmt::Display for HookEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = serde_json::to_value(self)
+            .ok()
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_else(|| format!("{self:?}"));
+        f.write_str(&s)
+    }
+}
+
+/// Rich JSON payload sent to hooks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookContext {
+    pub event: HookEvent,
+    pub run_id: String,
+    pub workflow_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handler_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_to: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_attempts: Option<usize>,
+}
+
+impl HookContext {
+    #[must_use]
+    pub fn new(event: HookEvent, run_id: String, workflow_name: String) -> Self {
+        Self {
+            event,
+            run_id,
+            workflow_name,
+            cwd: None,
+            node_id: None,
+            node_label: None,
+            handler_type: None,
+            status: None,
+            edge_from: None,
+            edge_to: None,
+            edge_label: None,
+            failure_reason: None,
+            attempt: None,
+            max_attempts: None,
+        }
+    }
+}
+
+/// Decision returned by blocking hooks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+pub enum HookDecision {
+    Proceed,
+    Skip {
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    Block {
+        #[serde(default)]
+        reason: Option<String>,
+    },
+    Override {
+        edge_to: String,
+    },
+}
+
+impl Default for HookDecision {
+    fn default() -> Self {
+        Self::Proceed
+    }
+}
+
+impl HookDecision {
+    /// Merge two decisions. Block > Skip/Override > Proceed.
+    #[must_use]
+    pub fn merge(self, other: Self) -> Self {
+        match (&self, &other) {
+            (Self::Block { .. }, _) => self,
+            (_, Self::Block { .. }) => other,
+            (Self::Skip { .. }, _) | (Self::Override { .. }, _) => self,
+            (_, Self::Skip { .. }) | (_, Self::Override { .. }) => other,
+            _ => Self::Proceed,
+        }
+    }
+
+    #[must_use]
+    pub fn is_proceed(&self) -> bool {
+        matches!(self, Self::Proceed)
+    }
+}
+
+/// Result from executing a single hook.
+#[derive(Debug, Clone)]
+pub struct HookResult {
+    pub hook_name: Option<String>,
+    pub decision: HookDecision,
+    pub duration_ms: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hook_event_serde_round_trip() {
+        let events = [
+            HookEvent::RunStart,
+            HookEvent::RunComplete,
+            HookEvent::RunFailed,
+            HookEvent::StageStart,
+            HookEvent::StageComplete,
+            HookEvent::StageFailed,
+            HookEvent::StageRetrying,
+            HookEvent::EdgeSelected,
+            HookEvent::ParallelStart,
+            HookEvent::ParallelComplete,
+            HookEvent::SandboxReady,
+            HookEvent::SandboxCleanup,
+            HookEvent::CheckpointSaved,
+        ];
+        for event in events {
+            let json = serde_json::to_string(&event).unwrap();
+            let back: HookEvent = serde_json::from_str(&json).unwrap();
+            assert_eq!(event, back);
+        }
+    }
+
+    #[test]
+    fn hook_event_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&HookEvent::RunStart).unwrap(),
+            "\"run_start\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HookEvent::StageRetrying).unwrap(),
+            "\"stage_retrying\""
+        );
+    }
+
+    #[test]
+    fn hook_event_display() {
+        assert_eq!(HookEvent::RunStart.to_string(), "run_start");
+        assert_eq!(HookEvent::CheckpointSaved.to_string(), "checkpoint_saved");
+    }
+
+    #[test]
+    fn hook_event_blocking_defaults() {
+        assert!(HookEvent::RunStart.is_blocking_by_default());
+        assert!(HookEvent::StageStart.is_blocking_by_default());
+        assert!(HookEvent::EdgeSelected.is_blocking_by_default());
+        assert!(!HookEvent::RunComplete.is_blocking_by_default());
+        assert!(!HookEvent::StageFailed.is_blocking_by_default());
+        assert!(!HookEvent::CheckpointSaved.is_blocking_by_default());
+    }
+
+    #[test]
+    fn hook_context_serde_round_trip() {
+        let ctx = HookContext {
+            event: HookEvent::StageStart,
+            run_id: "run-123".into(),
+            workflow_name: "test-wf".into(),
+            cwd: Some("/tmp".into()),
+            node_id: Some("plan".into()),
+            node_label: Some("Plan".into()),
+            handler_type: Some("codergen".into()),
+            status: None,
+            edge_from: None,
+            edge_to: None,
+            edge_label: None,
+            failure_reason: None,
+            attempt: Some(1),
+            max_attempts: Some(3),
+        };
+        let json = serde_json::to_string(&ctx).unwrap();
+        let back: HookContext = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.event, HookEvent::StageStart);
+        assert_eq!(back.run_id, "run-123");
+        assert_eq!(back.node_id.as_deref(), Some("plan"));
+    }
+
+    #[test]
+    fn hook_context_omits_none_fields() {
+        let ctx = HookContext::new(
+            HookEvent::RunStart,
+            "run-1".into(),
+            "wf".into(),
+        );
+        let json = serde_json::to_string(&ctx).unwrap();
+        assert!(!json.contains("node_id"));
+        assert!(!json.contains("failure_reason"));
+    }
+
+    #[test]
+    fn hook_decision_serde_round_trip() {
+        let decisions = [
+            HookDecision::Proceed,
+            HookDecision::Skip {
+                reason: Some("not needed".into()),
+            },
+            HookDecision::Block {
+                reason: Some("forbidden".into()),
+            },
+            HookDecision::Override {
+                edge_to: "node_b".into(),
+            },
+        ];
+        for decision in decisions {
+            let json = serde_json::to_string(&decision).unwrap();
+            let back: HookDecision = serde_json::from_str(&json).unwrap();
+            assert_eq!(decision, back);
+        }
+    }
+
+    #[test]
+    fn hook_decision_merge_block_wins() {
+        let block = HookDecision::Block {
+            reason: Some("no".into()),
+        };
+        let skip = HookDecision::Skip {
+            reason: Some("skip".into()),
+        };
+        let proceed = HookDecision::Proceed;
+
+        assert!(matches!(
+            proceed.clone().merge(block.clone()),
+            HookDecision::Block { .. }
+        ));
+        assert!(matches!(
+            block.clone().merge(skip.clone()),
+            HookDecision::Block { .. }
+        ));
+        assert!(matches!(
+            skip.clone().merge(block.clone()),
+            HookDecision::Block { .. }
+        ));
+    }
+
+    #[test]
+    fn hook_decision_merge_skip_over_proceed() {
+        let skip = HookDecision::Skip {
+            reason: Some("skip".into()),
+        };
+        let proceed = HookDecision::Proceed;
+
+        assert!(matches!(
+            proceed.clone().merge(skip.clone()),
+            HookDecision::Skip { .. }
+        ));
+        assert!(matches!(
+            skip.merge(proceed),
+            HookDecision::Skip { .. }
+        ));
+    }
+
+    #[test]
+    fn hook_decision_merge_first_non_proceed_wins() {
+        let skip = HookDecision::Skip {
+            reason: Some("a".into()),
+        };
+        let override_d = HookDecision::Override {
+            edge_to: "x".into(),
+        };
+        // First non-Proceed wins when no Block
+        assert!(matches!(
+            skip.merge(override_d),
+            HookDecision::Skip { .. }
+        ));
+    }
+
+    #[test]
+    fn hook_decision_default_is_proceed() {
+        assert_eq!(HookDecision::default(), HookDecision::Proceed);
+    }
+}

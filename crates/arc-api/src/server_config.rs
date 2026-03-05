@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use arc_workflows::cli::run_config::RunDefaults;
+use arc_workflows::hook::HookConfig;
 use serde::Deserialize;
 use tracing::debug;
 
@@ -105,6 +106,8 @@ pub struct ServerConfig {
     pub git: GitConfig,
     #[serde(flatten)]
     pub run_defaults: RunDefaults,
+    #[serde(flatten)]
+    pub hook_config: HookConfig,
 }
 
 /// Load server config from an explicit path or `~/.arc/server.toml`, returning defaults if the
@@ -380,5 +383,44 @@ authentication_strategies = ["jwt"]
         let path = dir.path().join("nonexistent.toml");
         let result = load_server_config(Some(&path));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_config_with_hooks() {
+        let toml = r#"
+[[hooks]]
+event = "run_start"
+command = "echo 'run starting'"
+
+[[hooks]]
+event = "stage_complete"
+command = "echo 'stage done'"
+matcher = "codergen"
+"#;
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.hook_config.hooks.len(), 2);
+        assert_eq!(
+            config.hook_config.hooks[0].event,
+            arc_workflows::hook::HookEvent::RunStart
+        );
+        assert_eq!(
+            config.hook_config.hooks[0].command.as_deref(),
+            Some("echo 'run starting'")
+        );
+        assert_eq!(
+            config.hook_config.hooks[1].event,
+            arc_workflows::hook::HookEvent::StageComplete
+        );
+        assert_eq!(
+            config.hook_config.hooks[1].matcher.as_deref(),
+            Some("codergen")
+        );
+    }
+
+    #[test]
+    fn parse_config_without_hooks_defaults_empty() {
+        let toml = "";
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        assert!(config.hook_config.hooks.is_empty());
     }
 }

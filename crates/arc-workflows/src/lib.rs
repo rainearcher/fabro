@@ -11,6 +11,7 @@ pub mod event;
 pub mod git;
 pub mod graph;
 pub mod handler;
+pub mod hook;
 pub mod interviewer;
 pub mod outcome;
 pub mod parser;
