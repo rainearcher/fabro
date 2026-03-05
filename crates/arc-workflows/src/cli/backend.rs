@@ -266,7 +266,7 @@ impl CodergenBackend for AgentApiBackend {
                         to_provider = target.provider.as_str(),
                         to_model = target.model.as_str(),
                         error = error_msg.as_str(),
-                        "LLM provider failover (one_shot)"
+                        "LLM provider failover (prompt)"
                     );
 
                     let max_tokens = node.max_tokens().or_else(|| {
@@ -306,7 +306,7 @@ impl CodergenBackend for AgentApiBackend {
         }
 
         let provider_used = serde_json::json!({
-            "mode": "one_shot",
+            "mode": "prompt",
             "provider": &actual_provider,
             "model": &actual_model,
         });
@@ -520,7 +520,7 @@ impl CodergenBackend for AgentApiBackend {
         };
 
         let provider_used = serde_json::json!({
-            "mode": "agent_loop",
+            "mode": "agent",
             "provider": self.provider.as_str(),
             "model": &self.model,
         });

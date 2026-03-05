@@ -22,7 +22,7 @@ mod mtls_e2e {
         let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        registry.register("agent_loop", Box::new(AgentHandler::new(None)));
+        registry.register("agent", Box::new(AgentHandler::new(None)));
         registry
     }
 
@@ -432,7 +432,7 @@ mod server_lifecycle {
         let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        registry.register("agent_loop", Box::new(AgentHandler::new(None)));
+        registry.register("agent", Box::new(AgentHandler::new(None)));
         registry.register("human", Box::new(HumanHandler::new(interviewer)));
         registry
     }
@@ -630,7 +630,7 @@ mod sse_events {
         let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        registry.register("agent_loop", Box::new(AgentHandler::new(None)));
+        registry.register("agent", Box::new(AgentHandler::new(None)));
         registry
     }
 

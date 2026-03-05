@@ -286,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn matcher_filters_by_node_id() {
         let mut hook = make_hook(HookEvent::StageStart, "filtered");
-        hook.matcher = Some("agent_loop".into());
+        hook.matcher = Some("agent".into());
         let config = HookConfig {
             hooks: vec![hook],
         };
@@ -303,7 +303,7 @@ mod tests {
 
         // Matching node_id
         let mut ctx = make_context(HookEvent::StageStart);
-        ctx.node_id = Some("agent_loop_step".into());
+        ctx.node_id = Some("agent_step".into());
         assert_eq!(runner.filter_hooks(&ctx).len(), 1);
 
         // Non-matching node_id
@@ -315,7 +315,7 @@ mod tests {
     #[tokio::test]
     async fn matcher_filters_by_handler_type() {
         let mut hook = make_hook(HookEvent::StageStart, "filtered");
-        hook.matcher = Some("^agent_loop$".into());
+        hook.matcher = Some("^agent$".into());
         let config = HookConfig {
             hooks: vec![hook],
         };
@@ -327,7 +327,7 @@ mod tests {
         );
 
         let mut ctx = make_context(HookEvent::StageStart);
-        ctx.handler_type = Some("agent_loop".into());
+        ctx.handler_type = Some("agent".into());
         assert_eq!(runner.filter_hooks(&ctx).len(), 1);
 
         let mut ctx = make_context(HookEvent::StageStart);

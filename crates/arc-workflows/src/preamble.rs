@@ -157,7 +157,7 @@ fn render_compact_stage_details(
             }
             lines
         }
-        Some("agent_loop") | Some("one_shot") => {
+        Some("agent") | Some("agent_loop") | Some("prompt") | Some("one_shot") => {
             let mut lines = Vec::new();
             if let Some(usage) = &outcome.usage {
                 let input = format_token_count(usage.input_tokens);
@@ -234,7 +234,7 @@ fn render_summary_high_stage_section(
                 }
             }
         }
-        Some("agent_loop") | Some("one_shot") => {
+        Some("agent") | Some("agent_loop") | Some("prompt") | Some("one_shot") => {
             if let Some(usage) = &outcome.usage {
                 lines.push(format!("- Model: {}", usage.model));
                 lines.push(format!(
@@ -497,7 +497,7 @@ fn build_summary_preamble(
                                     }
                                 }
                             }
-                            Some("agent_loop") | Some("one_shot") => {
+                            Some("agent") | Some("agent_loop") | Some("prompt") | Some("one_shot") => {
                                 if let Some(usage) = &outcome.usage {
                                     parts.push(format!("  - Model: {}", usage.model));
                                 }
@@ -1098,7 +1098,7 @@ mod tests {
         );
 
         assert!(
-            preamble.contains("Handler: agent_loop"),
+            preamble.contains("Handler: agent"),
             "should show handler type"
         );
         assert!(
@@ -1505,7 +1505,7 @@ mod tests {
             "should have stage heading"
         );
         assert!(
-            preamble.contains("Handler: agent_loop"),
+            preamble.contains("Handler: agent"),
             "should show handler"
         );
         assert!(

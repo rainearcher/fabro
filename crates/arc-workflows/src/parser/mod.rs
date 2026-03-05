@@ -167,4 +167,16 @@ mod tests {
             .classes
             .contains(&"loop-a".to_string()));
     }
+
+    #[test]
+    fn parse_legacy_codergen_mode_attribute() {
+        let input = r#"digraph Legacy {
+            start [shape=Mdiamond]
+            exit  [shape=Msquare]
+            classify [codergen_mode="one_shot", prompt="Classify this"]
+            start -> classify -> exit
+        }"#;
+        let graph = parse(input).unwrap();
+        assert_eq!(graph.nodes["classify"].handler_type(), Some("prompt"));
+    }
 }

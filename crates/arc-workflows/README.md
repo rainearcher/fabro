@@ -5,7 +5,7 @@ A DOT-based pipeline runner for multi-stage AI workflows. Define workflows as Gr
 ## Key Concepts
 
 - **Graph** -- A directed graph parsed from DOT syntax containing nodes, edges, and attributes. The graph carries a `goal` describing the pipeline's purpose.
-- **Node** -- A workflow step. Graphviz shapes map to handler types (e.g., `Mdiamond` = start, `Msquare` = exit, `box` = agent_loop, `tab` = one_shot, `diamond` = conditional, `hexagon` = human gate, `component` = parallel).
+- **Node** -- A workflow step. Graphviz shapes map to handler types (e.g., `Mdiamond` = start, `Msquare` = exit, `box` = agent, `tab` = prompt, `diamond` = conditional, `hexagon` = human gate, `component` = parallel).
 - **Edge** -- A connection between nodes with optional `condition`, `label`, `weight`, and `fidelity` attributes that control routing.
 - **Handler** -- An async trait implementation that executes a node and returns an `Outcome`. Built-in handlers include `StartHandler`, `ExitHandler`, `AgentHandler`, `PromptHandler`, `ConditionalHandler`, `HumanHandler`, `ParallelHandler`, `FanInHandler`, `CommandHandler`, and `SubWorkflowHandler`.
 - **Outcome** -- The result of executing a handler, carrying a `StageStatus` (Success, Fail, PartialSuccess, Retry, Skipped), optional routing hints (`preferred_label`, `suggested_next_ids`), and context updates.
@@ -75,7 +75,7 @@ let graph = prepare_pipeline(dot_source).unwrap();
 let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
 registry.register("start", Box::new(StartHandler));
 registry.register("exit", Box::new(ExitHandler));
-registry.register("agent_loop", Box::new(AgentHandler::new(None)));
+registry.register("agent", Box::new(AgentHandler::new(None)));
 
 let engine = PipelineEngine::new(registry, EventEmitter::new());
 let config = RunConfig {

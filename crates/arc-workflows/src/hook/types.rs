@@ -223,7 +223,7 @@ mod tests {
             cwd: Some("/tmp".into()),
             node_id: Some("plan".into()),
             node_label: Some("Plan".into()),
-            handler_type: Some("agent_loop".into()),
+            handler_type: Some("agent".into()),
             status: None,
             edge_from: None,
             edge_to: None,

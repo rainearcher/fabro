@@ -73,8 +73,8 @@ pub fn shape_to_handler_type(shape: &str) -> Option<&'static str> {
     match shape {
         "Mdiamond" => Some("start"),
         "Msquare" => Some("exit"),
-        "box" => Some("agent_loop"),
-        "tab" => Some("one_shot"),
+        "box" => Some("agent"),
+        "tab" => Some("prompt"),
         "hexagon" => Some("human"),
         "diamond" => Some("conditional"),
         "component" => Some("parallel"),
@@ -465,8 +465,8 @@ mod tests {
     fn shape_to_handler_type_mappings() {
         assert_eq!(shape_to_handler_type("Mdiamond"), Some("start"));
         assert_eq!(shape_to_handler_type("Msquare"), Some("exit"));
-        assert_eq!(shape_to_handler_type("box"), Some("agent_loop"));
-        assert_eq!(shape_to_handler_type("tab"), Some("one_shot"));
+        assert_eq!(shape_to_handler_type("box"), Some("agent"));
+        assert_eq!(shape_to_handler_type("tab"), Some("prompt"));
         assert_eq!(shape_to_handler_type("hexagon"), Some("human"));
         assert_eq!(shape_to_handler_type("diamond"), Some("conditional"));
         assert_eq!(shape_to_handler_type("component"), Some("parallel"));

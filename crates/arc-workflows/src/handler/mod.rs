@@ -115,7 +115,7 @@ impl HandlerRegistry {
 /// Build a [`HandlerRegistry`] with all built-in handler types registered.
 ///
 /// The `make_backend` closure is called once per handler that needs a backend
-/// (`AgentHandler` default, explicit `"agent_loop"`, and `"parallel.fan_in"`).
+/// (`AgentHandler` default, explicit `"agent"`, and `"parallel.fan_in"`).
 #[must_use]
 pub fn default_registry(
     interviewer: Arc<dyn Interviewer>,
@@ -126,9 +126,19 @@ pub fn default_registry(
     registry.register("start", Box::new(start::StartHandler));
     registry.register("exit", Box::new(exit::ExitHandler));
     registry.register(
+        "agent",
+        Box::new(agent::AgentHandler::new(make_backend())),
+    );
+    // Legacy alias
+    registry.register(
         "agent_loop",
         Box::new(agent::AgentHandler::new(make_backend())),
     );
+    registry.register(
+        "prompt",
+        Box::new(prompt::PromptHandler::new(make_backend())),
+    );
+    // Legacy alias
     registry.register(
         "one_shot",
         Box::new(prompt::PromptHandler::new(make_backend())),

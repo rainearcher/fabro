@@ -166,7 +166,7 @@ fn make_linear_registry() -> HandlerRegistry {
     let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("agent_loop", Box::new(AgentHandler::new(None)));
+    registry.register("agent", Box::new(AgentHandler::new(None)));
     registry
 }
 
@@ -322,7 +322,7 @@ async fn end_to_end_branching_pipeline() {
     let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("agent_loop", Box::new(AgentHandler::new(None)));
+    registry.register("agent", Box::new(AgentHandler::new(None)));
     registry.register("conditional", Box::new(ConditionalHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
@@ -1248,7 +1248,7 @@ fn make_full_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
     let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("agent_loop", Box::new(AgentHandler::new(None)));
+    registry.register("agent", Box::new(AgentHandler::new(None)));
     registry.register("conditional", Box::new(ConditionalHandler));
     registry.register("command", Box::new(CommandHandler));
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
@@ -1368,7 +1368,7 @@ async fn smoke_test_with_mock_codergen_backend() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register(
-        "agent_loop",
+        "agent",
         Box::new(AgentHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
     registry.register("conditional", Box::new(ConditionalHandler));
@@ -1463,7 +1463,7 @@ async fn end_to_end_parallel_fan_out_fan_in() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register(
-        "agent_loop",
+        "agent",
         Box::new(AgentHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
     registry.register("parallel", Box::new(ParallelHandler));
@@ -2077,7 +2077,7 @@ async fn branching_loop_back_on_failure() {
     let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("agent_loop", Box::new(AgentHandler::new(None)));
+    registry.register("agent", Box::new(AgentHandler::new(None)));
     registry.register(
         "fail_then_succeed",
         Box::new(FailThenSucceedHandler {
@@ -2294,7 +2294,7 @@ async fn scenario_parallel_expert_review() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register(
-        "agent_loop",
+        "agent",
         Box::new(AgentHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
     registry.register("parallel", Box::new(ParallelHandler));
@@ -5615,7 +5615,7 @@ mod real_llm {
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
         registry.register(
-            "agent_loop",
+            "agent",
             Box::new(AgentHandler::new(Some(make_llm_backend(
                 make_llm_client().await.unwrap(),
             )))),
@@ -5729,7 +5729,7 @@ mod real_llm {
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
         registry.register(
-            "agent_loop",
+            "agent",
             Box::new(AgentHandler::new(Some(make_llm_backend(client)))),
         );
 
@@ -5867,7 +5867,7 @@ mod real_llm {
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
         registry.register(
-            "agent_loop",
+            "agent",
             Box::new(AgentHandler::new(Some(make_llm_backend(client)))),
         );
         registry.register("human", Box::new(HumanHandler::new(interviewer)));
@@ -5971,7 +5971,7 @@ mod real_llm {
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
         registry.register(
-            "one_shot",
+            "prompt",
             Box::new(arc_workflows::handler::prompt::PromptHandler::new(Some(
                 make_llm_backend(client),
             ))),
@@ -8024,7 +8024,7 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("command", Box::new(CommandHandler));
     registry.register(
-        "agent_loop",
+        "agent",
         Box::new(AgentHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
 
@@ -9378,9 +9378,9 @@ async fn full_pipeline_with_cli_backend_node() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register(
-        "agent_loop",
+        "agent",
         Box::new(AgentHandler::new(Some(Box::new({
-            // Second BackendRouter for the "agent_loop" handler
+            // Second BackendRouter for the "agent" handler
             let api2 = MockCodergenBackend;
             let cli2 = AgentCliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
             BackendRouter::new(Box::new(api2), cli2)
@@ -9510,7 +9510,7 @@ async fn stylesheet_backend_property_routes_to_cli() {
     let cli2 = AgentCliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
     let router2 = BackendRouter::new(Box::new(api2), cli2);
     registry.register(
-        "agent_loop",
+        "agent",
         Box::new(AgentHandler::new(Some(Box::new(router2)))),
     );
 

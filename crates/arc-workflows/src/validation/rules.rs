@@ -384,8 +384,10 @@ struct TypeKnownRule;
 const KNOWN_HANDLER_TYPES: &[&str] = &[
     "start",
     "exit",
-    "agent_loop",
-    "one_shot",
+    "agent",
+    "agent_loop", // legacy alias
+    "prompt",
+    "one_shot", // legacy alias
     "human",
     "conditional",
     "parallel",
@@ -618,7 +620,7 @@ impl LintRule for PromptOnLlmNodesRule {
     fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         for node in graph.nodes.values() {
-            if matches!(node.handler_type(), Some("agent_loop") | Some("one_shot")) {
+            if matches!(node.handler_type(), Some("agent") | Some("agent_loop") | Some("prompt") | Some("one_shot")) {
                 let has_prompt = node.prompt().is_some_and(|p| !p.is_empty());
                 let has_label = node
                     .attrs
@@ -2033,7 +2035,7 @@ mod tests {
         let mut n1 = Node::new("n1");
         n1.attrs.insert(
             "type".to_string(),
-            AttrValue::String("agent_loop".to_string()),
+            AttrValue::String("agent".to_string()),
         );
         g.nodes.insert("n1".to_string(), n1);
 
@@ -2075,17 +2077,17 @@ mod tests {
         assert!(d.is_empty());
     }
 
-    // --- prompt_on_llm_nodes: explicit type=agent_loop without prompt/label ---
+    // --- prompt_on_llm_nodes: explicit type=agent without prompt/label ---
 
     #[test]
-    fn prompt_on_llm_nodes_rule_explicit_agent_loop_type_no_prompt() {
+    fn prompt_on_llm_nodes_rule_explicit_agent_type_no_prompt() {
         let mut g = minimal_graph();
         let mut node = Node::new("work");
         node.attrs.insert(
             "type".to_string(),
-            AttrValue::String("agent_loop".to_string()),
+            AttrValue::String("agent".to_string()),
         );
-        // No shape=box, but explicit type=agent_loop
+        // No shape=box, but explicit type=agent
         node.attrs.insert(
             "shape".to_string(),
             AttrValue::String("diamond".to_string()),
