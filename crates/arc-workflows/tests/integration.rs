@@ -10,15 +10,15 @@ use arc_workflows::engine::{RunConfig, WorkflowRunEngine};
 use arc_workflows::error::ArcError;
 use arc_workflows::event::{EventEmitter, WorkflowRunEvent};
 use arc_workflows::graph::{AttrValue, Edge, Graph, Node};
-use arc_workflows::handler::codergen::{CodergenBackend, CodergenHandler, CodergenResult};
+use arc_workflows::handler::agent::{CodergenBackend, AgentHandler, CodergenResult};
 use arc_workflows::handler::conditional::ConditionalHandler;
 use arc_workflows::handler::default_registry;
 use arc_workflows::handler::exit::ExitHandler;
 use arc_workflows::handler::manager_loop::SubWorkflowHandler;
-use arc_workflows::handler::script::ScriptHandler;
+use arc_workflows::handler::command::CommandHandler;
 use arc_workflows::handler::start::StartHandler;
-use arc_workflows::handler::wait_human::WaitHumanHandler;
-use arc_workflows::handler::wait_timer::WaitTimerHandler;
+use arc_workflows::handler::human::HumanHandler;
+use arc_workflows::handler::wait::WaitHandler;
 use arc_workflows::handler::{Handler, HandlerRegistry};
 use arc_workflows::interviewer::auto_approve::AutoApproveInterviewer;
 use arc_workflows::interviewer::queue::QueueInterviewer;
@@ -130,7 +130,7 @@ fn parse_and_validate_human_gate() {
         review_gate [
             shape=hexagon,
             label="Review Changes",
-            type="wait.human"
+            type="human"
         ]
 
         start -> review_gate
@@ -146,7 +146,7 @@ fn parse_and_validate_human_gate() {
     assert_eq!(graph.edges.len(), 5);
 
     let gate = &graph.nodes["review_gate"];
-    assert_eq!(gate.node_type(), Some("wait.human"));
+    assert_eq!(gate.node_type(), Some("human"));
     assert_eq!(gate.shape(), "hexagon");
     assert_eq!(gate.label(), "Review Changes");
 
@@ -163,10 +163,10 @@ fn parse_and_validate_human_gate() {
 // ---------------------------------------------------------------------------
 
 fn make_linear_registry() -> HandlerRegistry {
-    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+    let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("codergen", Box::new(CodergenHandler::new(None)));
+    registry.register("agent_loop", Box::new(AgentHandler::new(None)));
     registry
 }
 
@@ -319,10 +319,10 @@ async fn end_to_end_branching_pipeline() {
     graph.edges.push(Edge::new("fail_path", "exit"));
 
     let dir = tempfile::tempdir().unwrap();
-    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+    let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("codergen", Box::new(CodergenHandler::new(None)));
+    registry.register("agent_loop", Box::new(AgentHandler::new(None)));
     registry.register("conditional", Box::new(ConditionalHandler));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
@@ -397,7 +397,7 @@ async fn end_to_end_human_gate_pipeline() {
     );
     gate.attrs.insert(
         "type".to_string(),
-        AttrValue::String("wait.human".to_string()),
+        AttrValue::String("human".to_string()),
     );
     gate.attrs.insert(
         "label".to_string(),
@@ -443,7 +443,7 @@ async fn end_to_end_human_gate_pipeline() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
@@ -1245,14 +1245,14 @@ fn collect_events(emitter: &mut EventEmitter) -> Arc<std::sync::Mutex<Vec<Workfl
 }
 
 fn make_full_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
-    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+    let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("codergen", Box::new(CodergenHandler::new(None)));
+    registry.register("agent_loop", Box::new(AgentHandler::new(None)));
     registry.register("conditional", Box::new(ConditionalHandler));
-    registry.register("script", Box::new(ScriptHandler));
-    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
-    registry.register("wait.timer", Box::new(WaitTimerHandler));
+    registry.register("command", Box::new(CommandHandler));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
+    registry.register("wait", Box::new(WaitHandler));
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
     registry
 }
@@ -1364,12 +1364,12 @@ async fn smoke_test_with_mock_codergen_backend() {
 
     let dir = tempfile::tempdir().unwrap();
     let backend = Box::new(MockCodergenBackend);
-    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(backend))));
+    let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(backend))));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register(
-        "codergen",
-        Box::new(CodergenHandler::new(Some(Box::new(MockCodergenBackend)))),
+        "agent_loop",
+        Box::new(AgentHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
     registry.register("conditional", Box::new(ConditionalHandler));
 
@@ -1417,7 +1417,7 @@ async fn smoke_test_with_mock_codergen_backend() {
         "mock backend should have written response, got: {plan_response}"
     );
 
-    // Verify prompt.md had $goal expanded by the CodergenHandler
+    // Verify prompt.md had $goal expanded by the AgentHandler
     let plan_prompt =
         std::fs::read_to_string(dir.path().join("nodes").join("plan").join("prompt.md"))
             .expect("plan prompt should exist");
@@ -1457,14 +1457,14 @@ async fn end_to_end_parallel_fan_out_fan_in() {
 
     let dir = tempfile::tempdir().unwrap();
 
-    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(Box::new(
+    let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(Box::new(
         MockCodergenBackend,
     )))));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register(
-        "codergen",
-        Box::new(CodergenHandler::new(Some(Box::new(MockCodergenBackend)))),
+        "agent_loop",
+        Box::new(AgentHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
     registry.register("parallel", Box::new(ParallelHandler));
     registry.register(
@@ -1915,7 +1915,7 @@ async fn auto_approve_interviewer_e2e() {
     );
     gate.attrs.insert(
         "type".to_string(),
-        AttrValue::String("wait.human".to_string()),
+        AttrValue::String("human".to_string()),
     );
     gate.attrs
         .insert("label".to_string(), AttrValue::String("Review".to_string()));
@@ -2074,10 +2074,10 @@ async fn branching_loop_back_on_failure() {
     graph.edges.push(e_fail);
 
     let dir = tempfile::tempdir().unwrap();
-    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+    let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("codergen", Box::new(CodergenHandler::new(None)));
+    registry.register("agent_loop", Box::new(AgentHandler::new(None)));
     registry.register(
         "fail_then_succeed",
         Box::new(FailThenSucceedHandler {
@@ -2121,7 +2121,7 @@ async fn human_gate_loops_back() {
     );
     gate.attrs.insert(
         "type".to_string(),
-        AttrValue::String("wait.human".to_string()),
+        AttrValue::String("human".to_string()),
     );
     gate.attrs
         .insert("label".to_string(), AttrValue::String("Review".to_string()));
@@ -2165,7 +2165,7 @@ async fn human_gate_loops_back() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
@@ -2288,21 +2288,21 @@ async fn scenario_parallel_expert_review() {
     let dir = tempfile::tempdir().unwrap();
 
     let interviewer: Arc<dyn Interviewer> = recorder.clone();
-    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(Box::new(
+    let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(Box::new(
         MockCodergenBackend,
     )))));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register(
-        "codergen",
-        Box::new(CodergenHandler::new(Some(Box::new(MockCodergenBackend)))),
+        "agent_loop",
+        Box::new(AgentHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
     registry.register("parallel", Box::new(ParallelHandler));
     registry.register(
         "parallel.fan_in",
         Box::new(FanInHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
-    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
@@ -5474,7 +5474,7 @@ mod real_llm {
     use arc_workflows::context::Context;
     use arc_workflows::error::ArcError;
     use arc_workflows::graph::Node;
-    use arc_workflows::handler::codergen::{CodergenBackend, CodergenHandler, CodergenResult};
+    use arc_workflows::handler::agent::{CodergenBackend, AgentHandler, CodergenResult};
 
     use arc_llm::client::Client;
     use arc_llm::types::{Message, Request};
@@ -5549,7 +5549,7 @@ mod real_llm {
     use arc_workflows::graph::{AttrValue, Edge, Graph};
     use arc_workflows::handler::exit::ExitHandler;
     use arc_workflows::handler::start::StartHandler;
-    use arc_workflows::handler::wait_human::WaitHumanHandler;
+    use arc_workflows::handler::human::HumanHandler;
     use arc_workflows::handler::HandlerRegistry;
     use arc_workflows::interviewer::auto_approve::AutoApproveInterviewer;
     use arc_workflows::outcome::StageStatus;
@@ -5611,12 +5611,12 @@ mod real_llm {
 
         let dir = tempfile::tempdir().unwrap();
         let backend = make_llm_backend(client);
-        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(backend))));
+        let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(backend))));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
         registry.register(
-            "codergen",
-            Box::new(CodergenHandler::new(Some(make_llm_backend(
+            "agent_loop",
+            Box::new(AgentHandler::new(Some(make_llm_backend(
                 make_llm_client().await.unwrap(),
             )))),
         );
@@ -5723,14 +5723,14 @@ mod real_llm {
         graph.edges.push(Edge::new("review", "exit"));
 
         let dir = tempfile::tempdir().unwrap();
-        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(
+        let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(
             make_llm_backend(Arc::clone(&client)),
         ))));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
         registry.register(
-            "codergen",
-            Box::new(CodergenHandler::new(Some(make_llm_backend(client)))),
+            "agent_loop",
+            Box::new(AgentHandler::new(Some(make_llm_backend(client)))),
         );
 
         let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
@@ -5811,7 +5811,7 @@ mod real_llm {
         );
         gate.attrs.insert(
             "type".to_string(),
-            AttrValue::String("wait.human".to_string()),
+            AttrValue::String("human".to_string()),
         );
         gate.attrs.insert(
             "label".to_string(),
@@ -5861,16 +5861,16 @@ mod real_llm {
         let dir = tempfile::tempdir().unwrap();
         let interviewer = Arc::new(AutoApproveInterviewer);
 
-        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(
+        let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(
             make_llm_backend(Arc::clone(&client)),
         ))));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
         registry.register(
-            "codergen",
-            Box::new(CodergenHandler::new(Some(make_llm_backend(client)))),
+            "agent_loop",
+            Box::new(AgentHandler::new(Some(make_llm_backend(client)))),
         );
-        registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+        registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
         let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
         let config = RunConfig {
@@ -5947,16 +5947,12 @@ mod real_llm {
         let mut classify = Node::new("classify");
         classify
             .attrs
-            .insert("shape".to_string(), AttrValue::String("box".to_string()));
+            .insert("shape".to_string(), AttrValue::String("tab".to_string()));
         classify.attrs.insert(
             "prompt".to_string(),
             AttrValue::String(
                 "Reply with exactly one word: is an apple a fruit or vegetable?".to_string(),
             ),
-        );
-        classify.attrs.insert(
-            "codergen_mode".to_string(),
-            AttrValue::String("one_shot".to_string()),
         );
         classify.attrs.insert(
             "llm_model".to_string(),
@@ -5969,14 +5965,16 @@ mod real_llm {
 
         let dir = tempfile::tempdir().unwrap();
 
-        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(
+        let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(
             make_llm_backend(Arc::clone(&client)),
         ))));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
         registry.register(
-            "codergen",
-            Box::new(CodergenHandler::new(Some(make_llm_backend(client)))),
+            "one_shot",
+            Box::new(arc_workflows::handler::prompt::PromptHandler::new(Some(
+                make_llm_backend(client),
+            ))),
         );
 
         let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
@@ -6045,7 +6043,7 @@ async fn human_gate_freeform_only_routes_text() {
     );
     gate.attrs.insert(
         "type".to_string(),
-        AttrValue::String("wait.human".to_string()),
+        AttrValue::String("human".to_string()),
     );
     gate.attrs.insert(
         "label".to_string(),
@@ -6073,7 +6071,7 @@ async fn human_gate_freeform_only_routes_text() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
@@ -6148,7 +6146,7 @@ async fn human_gate_freeform_with_fixed_choice_match() {
     );
     gate.attrs.insert(
         "type".to_string(),
-        AttrValue::String("wait.human".to_string()),
+        AttrValue::String("human".to_string()),
     );
     gate.attrs.insert(
         "label".to_string(),
@@ -6203,7 +6201,7 @@ async fn human_gate_freeform_with_fixed_choice_match() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
@@ -6267,7 +6265,7 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
     );
     gate.attrs.insert(
         "type".to_string(),
-        AttrValue::String("wait.human".to_string()),
+        AttrValue::String("human".to_string()),
     );
     gate.attrs.insert(
         "label".to_string(),
@@ -6318,7 +6316,7 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
@@ -6401,7 +6399,7 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
     );
     gate.attrs.insert(
         "type".to_string(),
-        AttrValue::String("wait.human".to_string()),
+        AttrValue::String("human".to_string()),
     );
     gate.attrs.insert(
         "label".to_string(),
@@ -6446,7 +6444,7 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
@@ -6508,7 +6506,7 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
     );
     gate.attrs.insert(
         "type".to_string(),
-        AttrValue::String("wait.human".to_string()),
+        AttrValue::String("human".to_string()),
     );
     gate.attrs.insert(
         "label".to_string(),
@@ -6554,7 +6552,7 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+    registry.register("human", Box::new(HumanHandler::new(interviewer)));
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
     let config = RunConfig {
@@ -7493,7 +7491,7 @@ graph = "test.dot"
 [[hooks]]
 event = "stage_start"
 command = "./scripts/pre-check.sh"
-matcher = "codergen"
+matcher = "agent_loop"
 blocking = true
 timeout_ms = 30000
 sandbox = false
@@ -7507,7 +7505,7 @@ command = "echo done"
         toml::from_str(toml).unwrap();
     assert_eq!(cfg.hooks.len(), 2);
     assert_eq!(cfg.hooks[0].event, arc_workflows::hook::HookEvent::StageStart);
-    assert_eq!(cfg.hooks[0].matcher.as_deref(), Some("codergen"));
+    assert_eq!(cfg.hooks[0].matcher.as_deref(), Some("agent_loop"));
     assert!(cfg.hooks[0].is_blocking());
     assert!(!cfg.hooks[0].runs_in_sandbox());
     assert_eq!(cfg.hooks[0].timeout(), std::time::Duration::from_millis(30000));
@@ -7900,7 +7898,7 @@ async fn arc_e2e_with_real_llm() {
             Provider::Anthropic,
             Vec::new(),
         ))
-            as Box<dyn arc_workflows::handler::codergen::CodergenBackend>)
+            as Box<dyn arc_workflows::handler::agent::CodergenBackend>)
     });
 
     let logs_dir = tempfile::tempdir().unwrap();
@@ -8024,10 +8022,10 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
-    registry.register("script", Box::new(ScriptHandler));
+    registry.register("command", Box::new(CommandHandler));
     registry.register(
-        "codergen",
-        Box::new(CodergenHandler::new(Some(Box::new(MockCodergenBackend)))),
+        "agent_loop",
+        Box::new(AgentHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
 
     let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
@@ -9374,15 +9372,15 @@ async fn full_pipeline_with_cli_backend_node() {
     let api = MockCodergenBackend;
     let cli = AgentCliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
     let router = BackendRouter::new(Box::new(api), cli);
-    let codergen_handler = CodergenHandler::new(Some(Box::new(router)));
+    let codergen_handler = AgentHandler::new(Some(Box::new(router)));
 
     let mut registry = HandlerRegistry::new(Box::new(codergen_handler));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register(
-        "codergen",
-        Box::new(CodergenHandler::new(Some(Box::new({
-            // Second BackendRouter for the "codergen" handler
+        "agent_loop",
+        Box::new(AgentHandler::new(Some(Box::new({
+            // Second BackendRouter for the "agent_loop" handler
             let api2 = MockCodergenBackend;
             let cli2 = AgentCliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
             BackendRouter::new(Box::new(api2), cli2)
@@ -9505,15 +9503,15 @@ async fn stylesheet_backend_property_routes_to_cli() {
     let cli = AgentCliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
     let router = BackendRouter::new(Box::new(api), cli);
 
-    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(Box::new(router)))));
+    let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(Some(Box::new(router)))));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     let api2 = MockCodergenBackend;
     let cli2 = AgentCliBackend::new("claude-opus-4-6".into(), Provider::Anthropic);
     let router2 = BackendRouter::new(Box::new(api2), cli2);
     registry.register(
-        "codergen",
-        Box::new(CodergenHandler::new(Some(Box::new(router2)))),
+        "agent_loop",
+        Box::new(AgentHandler::new(Some(Box::new(router2)))),
     );
 
     let dir = tempfile::tempdir().unwrap();

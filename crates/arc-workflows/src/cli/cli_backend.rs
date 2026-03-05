@@ -9,7 +9,7 @@ use crate::context::Context;
 use crate::error::ArcError;
 use crate::event::EventEmitter;
 use crate::graph::Node;
-use crate::handler::codergen::{CodergenBackend, CodergenResult};
+use crate::handler::agent::{CodergenBackend, CodergenResult};
 use crate::outcome::StageUsage;
 
 /// Models that are only available through CLI tools (not via API).

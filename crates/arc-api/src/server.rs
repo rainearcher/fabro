@@ -305,7 +305,7 @@ async fn get_aggregate_usage(
 /// Create an `AppState` with the given registry factory and database pool.
 ///
 /// The factory receives the run's `WebInterviewer` so it can wire it
-/// into handlers that need human-in-the-loop interaction (e.g., `WaitHumanHandler`).
+/// into handlers that need human-in-the-loop interaction (e.g., `HumanHandler`).
 pub fn create_app_state(
     db: sqlx::SqlitePool,
     registry_factory: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,

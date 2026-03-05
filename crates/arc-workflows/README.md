@@ -5,9 +5,9 @@ A DOT-based pipeline runner for multi-stage AI workflows. Define workflows as Gr
 ## Key Concepts
 
 - **Graph** -- A directed graph parsed from DOT syntax containing nodes, edges, and attributes. The graph carries a `goal` describing the pipeline's purpose.
-- **Node** -- A workflow step. Graphviz shapes map to handler types (e.g., `Mdiamond` = start, `Msquare` = exit, `box` = codergen/LLM, `diamond` = conditional, `hexagon` = human gate, `component` = parallel).
+- **Node** -- A workflow step. Graphviz shapes map to handler types (e.g., `Mdiamond` = start, `Msquare` = exit, `box` = agent_loop, `tab` = one_shot, `diamond` = conditional, `hexagon` = human gate, `component` = parallel).
 - **Edge** -- A connection between nodes with optional `condition`, `label`, `weight`, and `fidelity` attributes that control routing.
-- **Handler** -- An async trait implementation that executes a node and returns an `Outcome`. Built-in handlers include `StartHandler`, `ExitHandler`, `CodergenHandler`, `ConditionalHandler`, `WaitHumanHandler`, `ParallelHandler`, `FanInHandler`, `ScriptHandler`, and `SubWorkflowHandler`.
+- **Handler** -- An async trait implementation that executes a node and returns an `Outcome`. Built-in handlers include `StartHandler`, `ExitHandler`, `AgentHandler`, `PromptHandler`, `ConditionalHandler`, `HumanHandler`, `ParallelHandler`, `FanInHandler`, `CommandHandler`, and `SubWorkflowHandler`.
 - **Outcome** -- The result of executing a handler, carrying a `StageStatus` (Success, Fail, PartialSuccess, Retry, Skipped), optional routing hints (`preferred_label`, `suggested_next_ids`), and context updates.
 - **Context** -- A thread-safe key-value store shared across pipeline stages, supporting snapshots and isolated cloning for parallel branches.
 - **Interviewer** -- A trait for human-in-the-loop interactions. Implementations include `AutoApproveInterviewer`, `QueueInterviewer`, `CallbackInterviewer`, `ConsoleInterviewer`, and `RecordingInterviewer`.
@@ -67,15 +67,15 @@ use arc_workflows::event::EventEmitter;
 use arc_workflows::handler::HandlerRegistry;
 use arc_workflows::handler::start::StartHandler;
 use arc_workflows::handler::exit::ExitHandler;
-use arc_workflows::handler::codergen::CodergenHandler;
+use arc_workflows::handler::agent::AgentHandler;
 use arc_workflows::pipeline::prepare_pipeline;
 
 let graph = prepare_pipeline(dot_source).unwrap();
 
-let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
 registry.register("start", Box::new(StartHandler));
 registry.register("exit", Box::new(ExitHandler));
-registry.register("codergen", Box::new(CodergenHandler::new(None)));
+registry.register("agent_loop", Box::new(AgentHandler::new(None)));
 
 let engine = PipelineEngine::new(registry, EventEmitter::new());
 let config = RunConfig {
@@ -150,7 +150,7 @@ Clauses support `=`, `!=`, and bare key truthiness checks, joined with `&&`.
 
 ### Human-in-the-Loop Gates
 
-Nodes with `shape=hexagon` or `type="wait.human"` pause execution for human input. Outgoing edge labels become selectable options, with accelerator key parsing for patterns like `[A] Approve` and `F) Fix`.
+Nodes with `shape=hexagon` or `type="human"` pause execution for human input. Outgoing edge labels become selectable options, with accelerator key parsing for patterns like `[A] Approve` and `F) Fix`.
 
 ### Parallel Execution
 

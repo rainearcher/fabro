@@ -771,7 +771,7 @@ async fn daytona_parallel_git_branching_e2e() {
 // ---------------------------------------------------------------------------
 
 use arc_workflows::cli::cli_backend::AgentCliBackend;
-use arc_workflows::handler::codergen::{CodergenBackend, CodergenResult};
+use arc_workflows::handler::agent::{CodergenBackend, CodergenResult};
 
 /// Helper: run a real CLI backend test on Daytona.
 ///

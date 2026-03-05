@@ -3,27 +3,6 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::ArcError;
-
-/// Whether a codergen node runs as a multi-turn agent loop or a single LLM call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CodergenMode {
-    AgentLoop,
-    OneShot,
-}
-
-impl CodergenMode {
-    pub fn parse(s: &str) -> Result<Self, ArcError> {
-        match s {
-            "agent_loop" => Ok(Self::AgentLoop),
-            "one_shot" => Ok(Self::OneShot),
-            other => Err(ArcError::Validation(format!(
-                "invalid codergen_mode: {other:?} (expected \"agent_loop\" or \"one_shot\")"
-            ))),
-        }
-    }
-}
-
 /// Typed attribute values for nodes, edges, and graph-level attributes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AttrValue {
@@ -94,14 +73,15 @@ pub fn shape_to_handler_type(shape: &str) -> Option<&'static str> {
     match shape {
         "Mdiamond" => Some("start"),
         "Msquare" => Some("exit"),
-        "box" => Some("codergen"),
-        "hexagon" => Some("wait.human"),
+        "box" => Some("agent_loop"),
+        "tab" => Some("one_shot"),
+        "hexagon" => Some("human"),
         "diamond" => Some("conditional"),
         "component" => Some("parallel"),
         "tripleoctagon" => Some("parallel.fan_in"),
-        "parallelogram" => Some("script"),
+        "parallelogram" => Some("command"),
         "house" => Some("stack.manager_loop"),
-        "insulator" => Some("wait.timer"),
+        "insulator" => Some("wait"),
         _ => None,
     }
 }
@@ -234,14 +214,6 @@ impl Node {
     #[must_use]
     pub fn backend(&self) -> Option<&str> {
         self.str_attr("backend")
-    }
-
-    /// Returns the codergen mode for this node. Defaults to `AgentLoop` when absent.
-    pub fn codergen_mode(&self) -> Result<CodergenMode, ArcError> {
-        match self.str_attr("codergen_mode") {
-            Some(s) => CodergenMode::parse(s),
-            None => Ok(CodergenMode::AgentLoop),
-        }
     }
 
     /// Resolve the handler type for this node using explicit type or shape mapping.
@@ -493,17 +465,18 @@ mod tests {
     fn shape_to_handler_type_mappings() {
         assert_eq!(shape_to_handler_type("Mdiamond"), Some("start"));
         assert_eq!(shape_to_handler_type("Msquare"), Some("exit"));
-        assert_eq!(shape_to_handler_type("box"), Some("codergen"));
-        assert_eq!(shape_to_handler_type("hexagon"), Some("wait.human"));
+        assert_eq!(shape_to_handler_type("box"), Some("agent_loop"));
+        assert_eq!(shape_to_handler_type("tab"), Some("one_shot"));
+        assert_eq!(shape_to_handler_type("hexagon"), Some("human"));
         assert_eq!(shape_to_handler_type("diamond"), Some("conditional"));
         assert_eq!(shape_to_handler_type("component"), Some("parallel"));
         assert_eq!(
             shape_to_handler_type("tripleoctagon"),
             Some("parallel.fan_in")
         );
-        assert_eq!(shape_to_handler_type("parallelogram"), Some("script"));
+        assert_eq!(shape_to_handler_type("parallelogram"), Some("command"));
         assert_eq!(shape_to_handler_type("house"), Some("stack.manager_loop"));
-        assert_eq!(shape_to_handler_type("insulator"), Some("wait.timer"));
+        assert_eq!(shape_to_handler_type("insulator"), Some("wait"));
         assert_eq!(shape_to_handler_type("unknown"), None);
     }
 
@@ -558,9 +531,9 @@ mod tests {
         let mut node = Node::new("gate");
         node.attrs.insert(
             "type".to_string(),
-            AttrValue::String("wait.human".to_string()),
+            AttrValue::String("human".to_string()),
         );
-        assert_eq!(node.handler_type(), Some("wait.human"));
+        assert_eq!(node.handler_type(), Some("human"));
     }
 
     #[test]
@@ -748,54 +721,6 @@ mod tests {
         g.attrs
             .insert("max_node_visits".to_string(), AttrValue::Integer(10));
         assert_eq!(g.max_node_visits(), 10);
-    }
-
-    #[test]
-    fn codergen_mode_parse_agent_loop() {
-        assert_eq!(
-            CodergenMode::parse("agent_loop").unwrap(),
-            CodergenMode::AgentLoop
-        );
-    }
-
-    #[test]
-    fn codergen_mode_parse_one_shot() {
-        assert_eq!(
-            CodergenMode::parse("one_shot").unwrap(),
-            CodergenMode::OneShot
-        );
-    }
-
-    #[test]
-    fn codergen_mode_parse_invalid() {
-        let err = CodergenMode::parse("bogus").unwrap_err();
-        assert!(err.to_string().contains("bogus"));
-    }
-
-    #[test]
-    fn node_codergen_mode_defaults_to_agent_loop() {
-        let node = Node::new("test");
-        assert_eq!(node.codergen_mode().unwrap(), CodergenMode::AgentLoop);
-    }
-
-    #[test]
-    fn node_codergen_mode_one_shot() {
-        let mut node = Node::new("test");
-        node.attrs.insert(
-            "codergen_mode".to_string(),
-            AttrValue::String("one_shot".to_string()),
-        );
-        assert_eq!(node.codergen_mode().unwrap(), CodergenMode::OneShot);
-    }
-
-    #[test]
-    fn node_codergen_mode_invalid_value() {
-        let mut node = Node::new("test");
-        node.attrs.insert(
-            "codergen_mode".to_string(),
-            AttrValue::String("invalid".to_string()),
-        );
-        assert!(node.codergen_mode().is_err());
     }
 
     #[test]

@@ -840,7 +840,7 @@ mod tests {
             node_id: "plan".to_string(),
             name: "plan".to_string(),
             index: 0,
-            handler_type: Some("codergen".to_string()),
+            handler_type: Some("agent_loop".to_string()),
             script: None,
             attempt: 1,
             max_attempts: 3,
@@ -848,7 +848,7 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("StageStarted"));
         assert!(json.contains("plan"));
-        assert!(json.contains("\"handler_type\":\"codergen\""));
+        assert!(json.contains("\"handler_type\":\"agent_loop\""));
         assert!(json.contains("\"attempt\":1"));
         assert!(json.contains("\"max_attempts\":3"));
 
@@ -1348,7 +1348,7 @@ mod tests {
             node_id: "plan".to_string(),
             name: "Plan Stage".to_string(),
             index: 0,
-            handler_type: Some("codergen".to_string()),
+            handler_type: Some("agent_loop".to_string()),
             script: None,
             attempt: 1,
             max_attempts: 3,
@@ -1358,7 +1358,7 @@ mod tests {
         assert_eq!(fields["node_id"], "plan");
         assert_eq!(fields["node_label"], "Plan Stage");
         assert_eq!(fields["stage_index"], 0);
-        assert_eq!(fields["handler_type"], "codergen");
+        assert_eq!(fields["handler_type"], "agent_loop");
         assert_eq!(fields["attempt"], 1);
         assert_eq!(fields["max_attempts"], 3);
         // Old keys should not be present

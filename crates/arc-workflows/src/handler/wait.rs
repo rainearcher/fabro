@@ -10,10 +10,10 @@ use crate::outcome::Outcome;
 use super::{EngineServices, Handler};
 
 /// Sleeps for a configured duration before proceeding.
-pub struct WaitTimerHandler;
+pub struct WaitHandler;
 
 #[async_trait]
-impl Handler for WaitTimerHandler {
+impl Handler for WaitHandler {
     async fn execute(
         &self,
         node: &Node,
@@ -28,7 +28,7 @@ impl Handler for WaitTimerHandler {
             .and_then(AttrValue::as_duration)
             .ok_or_else(|| {
                 ArcError::Validation(format!(
-                    "wait.timer node {:?} is missing a valid `duration` attribute",
+                    "wait node {:?} is missing a valid `duration` attribute",
                     node.id
                 ))
             })?;
@@ -61,7 +61,7 @@ mod tests {
 
     #[tokio::test]
     async fn wait_timer_success_with_short_duration() {
-        let handler = WaitTimerHandler;
+        let handler = WaitHandler;
         let mut node = Node::new("wait60");
         node.attrs.insert(
             "duration".to_string(),
@@ -79,7 +79,7 @@ mod tests {
 
     #[tokio::test]
     async fn wait_timer_errors_without_duration() {
-        let handler = WaitTimerHandler;
+        let handler = WaitHandler;
         let node = Node::new("wait_no_dur");
         let context = Context::new();
         let graph = Graph::new("test");

@@ -10,7 +10,7 @@ use crate::event::EventEmitter;
 use crate::graph::{Graph, Node};
 use crate::outcome::Outcome;
 
-use super::codergen::{CodergenBackend, CodergenResult};
+use super::agent::{CodergenBackend, CodergenResult};
 use super::{EngineServices, Handler};
 
 /// Consolidates results from a preceding parallel node and selects the best candidate.
@@ -417,7 +417,7 @@ mod tests {
 
     #[tokio::test]
     async fn fan_in_with_backend_llm_eval() {
-        use crate::handler::codergen::CodergenBackend;
+        use crate::handler::agent::CodergenBackend;
         use tempfile::TempDir;
 
         struct MockBackend;

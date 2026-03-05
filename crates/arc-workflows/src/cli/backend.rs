@@ -16,7 +16,7 @@ use crate::context::Context;
 use crate::error::ArcError;
 use crate::event::WorkflowRunEvent;
 use crate::graph::Node;
-use crate::handler::codergen::{CodergenBackend, CodergenResult};
+use crate::handler::agent::{CodergenBackend, CodergenResult};
 use crate::outcome::StageUsage;
 
 fn build_profile(model: &str, provider: Provider) -> Box<dyn ProviderProfile> {

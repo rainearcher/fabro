@@ -11,7 +11,7 @@ mod mtls_e2e {
     use arc_api::server::{build_router, create_app_state};
     use arc_api::server_config::TlsConfig;
     use arc_api::tls::{build_rustls_config, ClientAuth};
-    use arc_workflows::handler::codergen::CodergenHandler;
+    use arc_workflows::handler::agent::AgentHandler;
     use arc_workflows::handler::exit::ExitHandler;
     use arc_workflows::handler::start::StartHandler;
     use arc_workflows::handler::HandlerRegistry;
@@ -19,10 +19,10 @@ mod mtls_e2e {
     use tokio::net::TcpListener;
 
     fn simple_registry(_interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
-        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+        let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        registry.register("codergen", Box::new(CodergenHandler::new(None)));
+        registry.register("agent_loop", Box::new(AgentHandler::new(None)));
         registry
     }
 
@@ -418,10 +418,10 @@ mod server_lifecycle {
     use std::time::Duration;
 
     use arc_api::server::{build_router, create_app_state};
-    use arc_workflows::handler::codergen::CodergenHandler;
+    use arc_workflows::handler::agent::AgentHandler;
     use arc_workflows::handler::exit::ExitHandler;
     use arc_workflows::handler::start::StartHandler;
-    use arc_workflows::handler::wait_human::WaitHumanHandler;
+    use arc_workflows::handler::human::HumanHandler;
     use arc_workflows::handler::HandlerRegistry;
     use arc_workflows::interviewer::Interviewer;
     use axum::body::Body;
@@ -429,11 +429,11 @@ mod server_lifecycle {
     use tower::ServiceExt;
 
     fn gate_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
-        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+        let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        registry.register("codergen", Box::new(CodergenHandler::new(None)));
-        registry.register("wait.human", Box::new(WaitHumanHandler::new(interviewer)));
+        registry.register("agent_loop", Box::new(AgentHandler::new(None)));
+        registry.register("human", Box::new(HumanHandler::new(interviewer)));
         registry
     }
 
@@ -447,7 +447,7 @@ mod server_lifecycle {
         start [shape=Mdiamond]
         exit  [shape=Msquare]
         work  [shape=box, prompt="Do work"]
-        gate  [shape=hexagon, type="wait.human", label="Approve?"]
+        gate  [shape=hexagon, type="human", label="Approve?"]
         done  [shape=box, prompt="Finish"]
         revise [shape=box, prompt="Revise"]
 
@@ -616,7 +616,7 @@ mod sse_events {
     use std::time::Duration;
 
     use arc_api::server::{build_router, create_app_state};
-    use arc_workflows::handler::codergen::CodergenHandler;
+    use arc_workflows::handler::agent::AgentHandler;
     use arc_workflows::handler::exit::ExitHandler;
     use arc_workflows::handler::start::StartHandler;
     use arc_workflows::handler::HandlerRegistry;
@@ -627,10 +627,10 @@ mod sse_events {
     use tower::ServiceExt;
 
     fn simple_registry(_interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
-        let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
+        let mut registry = HandlerRegistry::new(Box::new(AgentHandler::new(None)));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        registry.register("codergen", Box::new(CodergenHandler::new(None)));
+        registry.register("agent_loop", Box::new(AgentHandler::new(None)));
         registry
     }
 

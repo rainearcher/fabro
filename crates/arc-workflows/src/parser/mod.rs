@@ -103,7 +103,7 @@ mod tests {
             review_gate [
                 shape=hexagon,
                 label="Review Changes",
-                type="wait.human"
+                type="human"
             ]
 
             start -> review_gate
@@ -115,7 +115,7 @@ mod tests {
         let graph = parse(input).unwrap();
         assert_eq!(graph.name, "Review");
         let gate = &graph.nodes["review_gate"];
-        assert_eq!(gate.node_type(), Some("wait.human"));
+        assert_eq!(gate.node_type(), Some("human"));
         assert_eq!(gate.shape(), "hexagon");
     }
 

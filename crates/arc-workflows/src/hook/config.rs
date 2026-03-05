@@ -273,7 +273,7 @@ url = "https://hooks.example.com/done"
 name = "pre-check"
 event = "stage_start"
 command = "./check.sh"
-matcher = "codergen"
+matcher = "agent_loop"
 blocking = true
 timeout_ms = 30000
 sandbox = false
@@ -282,7 +282,7 @@ sandbox = false
         let hook = &config.hooks[0];
         assert_eq!(hook.name.as_deref(), Some("pre-check"));
         assert_eq!(hook.event, HookEvent::StageStart);
-        assert_eq!(hook.matcher.as_deref(), Some("codergen"));
+        assert_eq!(hook.matcher.as_deref(), Some("agent_loop"));
         assert!(hook.is_blocking());
         assert_eq!(hook.timeout(), std::time::Duration::from_millis(30_000));
         assert!(!hook.runs_in_sandbox());
@@ -601,12 +601,12 @@ command = "echo start"
 [[hooks]]
 event = "stage_complete"
 command = "echo done"
-matcher = "codergen"
+matcher = "agent_loop"
 "#;
         let config: HookConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.hooks.len(), 2);
         assert_eq!(config.hooks[0].event, HookEvent::RunStart);
         assert_eq!(config.hooks[1].event, HookEvent::StageComplete);
-        assert_eq!(config.hooks[1].matcher.as_deref(), Some("codergen"));
+        assert_eq!(config.hooks[1].matcher.as_deref(), Some("agent_loop"));
     }
 }

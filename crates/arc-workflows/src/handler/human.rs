@@ -71,12 +71,12 @@ fn parse_accelerator_key(label: &str) -> String {
 }
 
 /// Blocks until a human selects an option derived from outgoing edges.
-pub struct WaitHumanHandler {
+pub struct HumanHandler {
     interviewer: Arc<dyn Interviewer>,
     emitter: Option<Arc<EventEmitter>>,
 }
 
-impl WaitHumanHandler {
+impl HumanHandler {
     pub fn new(interviewer: Arc<dyn Interviewer>) -> Self {
         Self {
             interviewer,
@@ -98,7 +98,7 @@ impl WaitHumanHandler {
 }
 
 #[async_trait]
-impl Handler for WaitHumanHandler {
+impl Handler for HumanHandler {
     async fn execute(
         &self,
         node: &Node,
@@ -349,7 +349,7 @@ mod tests {
     #[tokio::test]
     async fn wait_human_auto_approve_selects_first() {
         let interviewer = Arc::new(AutoApproveInterviewer);
-        let handler = WaitHumanHandler::new(interviewer);
+        let handler = HumanHandler::new(interviewer);
         let graph = build_graph_with_human_gate();
         let node = graph.nodes.get("gate").unwrap();
         let context = Context::new();
@@ -371,7 +371,7 @@ mod tests {
     #[tokio::test]
     async fn wait_human_no_edges_returns_fail() {
         let interviewer = Arc::new(AutoApproveInterviewer);
-        let handler = WaitHumanHandler::new(interviewer);
+        let handler = HumanHandler::new(interviewer);
         let mut graph = Graph::new("test");
         let gate = Node::new("gate");
         graph.nodes.insert("gate".to_string(), gate);
@@ -391,7 +391,7 @@ mod tests {
         let interviewer = Arc::new(crate::interviewer::callback::CallbackInterviewer::new(
             |_| Answer::text("custom input"),
         ));
-        let handler = WaitHumanHandler::new(interviewer);
+        let handler = HumanHandler::new(interviewer);
 
         let mut graph = Graph::new("test");
         let mut gate = Node::new("gate");

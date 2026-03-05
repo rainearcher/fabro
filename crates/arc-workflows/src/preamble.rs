@@ -121,7 +121,7 @@ fn render_compact_stage_details(
 ) -> Vec<String> {
     let handler = node.and_then(|n| n.handler_type());
     match handler {
-        Some("script") => {
+        Some("command") => {
             let mut lines = Vec::new();
             if let Some(n) = node {
                 if let Some(cmd) = n
@@ -157,7 +157,7 @@ fn render_compact_stage_details(
             }
             lines
         }
-        Some("codergen") => {
+        Some("agent_loop") | Some("one_shot") => {
             let mut lines = Vec::new();
             if let Some(usage) = &outcome.usage {
                 let input = format_token_count(usage.input_tokens);
@@ -192,7 +192,7 @@ fn render_summary_high_stage_section(
     }
 
     match handler {
-        Some("script") => {
+        Some("command") => {
             if let Some(n) = node {
                 if let Some(cmd) = n
                     .attrs
@@ -234,7 +234,7 @@ fn render_summary_high_stage_section(
                 }
             }
         }
-        Some("codergen") => {
+        Some("agent_loop") | Some("one_shot") => {
             if let Some(usage) = &outcome.usage {
                 lines.push(format!("- Model: {}", usage.model));
                 lines.push(format!(
@@ -485,7 +485,7 @@ fn build_summary_preamble(
                             parts.push(format!("  - Handler: {h}"));
                         }
                         match handler {
-                            Some("script") => {
+                            Some("command") => {
                                 if let Some(n) = node {
                                     if let Some(cmd) = n
                                         .attrs
@@ -497,7 +497,7 @@ fn build_summary_preamble(
                                     }
                                 }
                             }
-                            Some("codergen") => {
+                            Some("agent_loop") | Some("one_shot") => {
                                 if let Some(usage) = &outcome.usage {
                                     parts.push(format!("  - Model: {}", usage.model));
                                 }
@@ -759,7 +759,7 @@ mod tests {
     // --- compact handler-specific details ---
 
     #[test]
-    fn compact_script_stage_shows_command_stdout_stderr() {
+    fn compact_command_stage_shows_command_stdout_stderr() {
         let mut graph = Graph::new("test");
         let mut run_tests = Node::new("run_tests");
         run_tests.attrs.insert(
@@ -806,7 +806,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_codergen_stage_shows_model_and_files() {
+    fn compact_agent_loop_stage_shows_model_and_files() {
         let mut graph = Graph::new("test");
         let mut report = Node::new("report");
         report
@@ -1013,13 +1013,13 @@ mod tests {
         );
         // Handler type should appear for nodes with known handlers
         assert!(
-            preamble.contains("Handler: script"),
+            preamble.contains("Handler: command"),
             "should show handler type for step3"
         );
     }
 
     #[test]
-    fn summary_low_script_stage_shows_handler_and_command() {
+    fn summary_low_command_stage_shows_handler_and_command() {
         let mut graph = Graph::new("test");
         let mut run_tests = Node::new("run_tests");
         run_tests.attrs.insert(
@@ -1051,7 +1051,7 @@ mod tests {
         );
 
         assert!(
-            preamble.contains("Handler: script"),
+            preamble.contains("Handler: command"),
             "should show handler type"
         );
         assert!(
@@ -1066,7 +1066,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_low_codergen_stage_shows_handler_and_model() {
+    fn summary_low_agent_loop_stage_shows_handler_and_model() {
         let mut graph = Graph::new("test");
         let mut report = Node::new("report");
         report
@@ -1098,7 +1098,7 @@ mod tests {
         );
 
         assert!(
-            preamble.contains("Handler: codergen"),
+            preamble.contains("Handler: agent_loop"),
             "should show handler type"
         );
         assert!(
@@ -1245,7 +1245,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_medium_codergen_stage_shows_compact_details() {
+    fn summary_medium_agent_loop_stage_shows_compact_details() {
         let mut graph = Graph::new("test");
         let mut report = Node::new("report");
         report
@@ -1409,7 +1409,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_high_script_stage_full_detail() {
+    fn summary_high_command_stage_full_detail() {
         let mut graph = Graph::new("test");
         let mut run_tests = Node::new("run_tests");
         run_tests.attrs.insert(
@@ -1448,7 +1448,7 @@ mod tests {
             preamble.contains("## Stage: run_tests"),
             "should have stage heading"
         );
-        assert!(preamble.contains("Handler: script"), "should show handler");
+        assert!(preamble.contains("Handler: command"), "should show handler");
         assert!(
             preamble.contains("Script: `make test`"),
             "should show script command"
@@ -1464,7 +1464,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_high_codergen_stage_with_response_preview() {
+    fn summary_high_agent_loop_stage_with_response_preview() {
         let mut graph = Graph::new("test");
         let mut report = Node::new("report");
         report
@@ -1505,7 +1505,7 @@ mod tests {
             "should have stage heading"
         );
         assert!(
-            preamble.contains("Handler: codergen"),
+            preamble.contains("Handler: agent_loop"),
             "should show handler"
         );
         assert!(

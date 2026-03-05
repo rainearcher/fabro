@@ -5,10 +5,10 @@ digraph HumanGate {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    draft   [label="Draft Proposal", prompt="Read the README.md (or note its absence). Propose a specific improvement: either create one or enhance the existing one. Describe your proposed changes clearly but do NOT make any changes yet.", codergen_mode="one_shot"]
+    draft   [label="Draft Proposal", prompt="Read the README.md (or note its absence). Propose a specific improvement: either create one or enhance the existing one. Describe your proposed changes clearly but do NOT make any changes yet.", shape=tab]
     approve [label="Approve Changes?", shape=hexagon]
     apply   [label="Apply Changes", prompt="Apply the proposed README changes that were approved."]
-    skip    [label="Skip", prompt="Acknowledged. No changes made.", codergen_mode="one_shot", reasoning_effort="low"]
+    skip    [label="Skip", prompt="Acknowledged. No changes made.", shape=tab, reasoning_effort="low"]
 
     start -> draft -> approve
     approve -> apply [label="[A] Approve"]

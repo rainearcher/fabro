@@ -375,7 +375,7 @@ mod tests {
             review_gate [
                 shape=hexagon,
                 label="Review Changes",
-                type="wait.human"
+                type="human"
             ]
 
             start -> review_gate

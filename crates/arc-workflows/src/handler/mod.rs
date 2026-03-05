@@ -1,13 +1,14 @@
-pub mod codergen;
+pub mod agent;
+pub mod command;
 pub mod conditional;
 pub mod exit;
 pub mod fan_in;
+pub mod human;
 pub mod manager_loop;
 pub mod parallel;
-pub mod script;
+pub mod prompt;
 pub mod start;
-pub mod wait_human;
-pub mod wait_timer;
+pub mod wait;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -114,27 +115,31 @@ impl HandlerRegistry {
 /// Build a [`HandlerRegistry`] with all built-in handler types registered.
 ///
 /// The `make_backend` closure is called once per handler that needs a backend
-/// (`CodergenHandler` default, explicit `"codergen"`, and `"parallel.fan_in"`).
+/// (`AgentHandler` default, explicit `"agent_loop"`, and `"parallel.fan_in"`).
 #[must_use]
 pub fn default_registry(
     interviewer: Arc<dyn Interviewer>,
-    make_backend: impl Fn() -> Option<Box<dyn codergen::CodergenBackend>>,
+    make_backend: impl Fn() -> Option<Box<dyn agent::CodergenBackend>>,
 ) -> HandlerRegistry {
     let mut registry =
-        HandlerRegistry::new(Box::new(codergen::CodergenHandler::new(make_backend())));
+        HandlerRegistry::new(Box::new(agent::AgentHandler::new(make_backend())));
     registry.register("start", Box::new(start::StartHandler));
     registry.register("exit", Box::new(exit::ExitHandler));
     registry.register(
-        "codergen",
-        Box::new(codergen::CodergenHandler::new(make_backend())),
+        "agent_loop",
+        Box::new(agent::AgentHandler::new(make_backend())),
+    );
+    registry.register(
+        "one_shot",
+        Box::new(prompt::PromptHandler::new(make_backend())),
     );
     registry.register("conditional", Box::new(conditional::ConditionalHandler));
     registry.register(
-        "wait.human",
-        Box::new(wait_human::WaitHumanHandler::new(interviewer)),
+        "human",
+        Box::new(human::HumanHandler::new(interviewer)),
     );
-    registry.register("script", Box::new(script::ScriptHandler));
-    registry.register("tool", Box::new(script::ScriptHandler));
+    registry.register("command", Box::new(command::CommandHandler));
+    registry.register("tool", Box::new(command::CommandHandler));
     registry.register("parallel", Box::new(parallel::ParallelHandler));
     registry.register(
         "parallel.fan_in",
@@ -144,7 +149,7 @@ pub fn default_registry(
         "stack.manager_loop",
         Box::new(manager_loop::SubWorkflowHandler),
     );
-    registry.register("wait.timer", Box::new(wait_timer::WaitTimerHandler));
+    registry.register("wait", Box::new(wait::WaitHandler));
     registry
 }
 
@@ -177,7 +182,7 @@ mod tests {
             _name: "default".to_string(),
         }));
         registry.register(
-            "wait.human",
+            "human",
             Box::new(TestHandler {
                 _name: "human".to_string(),
             }),
@@ -186,7 +191,7 @@ mod tests {
         let mut node = Node::new("gate");
         node.attrs.insert(
             "type".to_string(),
-            AttrValue::String("wait.human".to_string()),
+            AttrValue::String("human".to_string()),
         );
         let handler = registry.resolve(&node);
         // We can verify it returns the right handler by checking it doesn't panic

@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use crate::context::Context;
 use crate::error::ArcError;
 use crate::event::EventEmitter;
-use crate::graph::{CodergenMode, Graph, Node};
+use crate::graph::{Graph, Node};
 use crate::outcome::{Outcome, StageUsage};
 
 use super::{EngineServices, Handler};
@@ -53,11 +53,11 @@ pub trait CodergenBackend: Send + Sync {
 }
 
 /// The default handler for LLM task nodes.
-pub struct CodergenHandler {
+pub struct AgentHandler {
     backend: Option<Box<dyn CodergenBackend>>,
 }
 
-impl CodergenHandler {
+impl AgentHandler {
     #[must_use]
     pub fn new(backend: Option<Box<dyn CodergenBackend>>) -> Self {
         Self { backend }
@@ -69,7 +69,7 @@ impl CodergenHandler {
 /// Known variables are built from graph attributes (e.g. `$goal`). Any
 /// `$identifier` not in the map produces an error, catching typos like
 /// `$gaol` at runtime.
-fn expand_variables(text: &str, graph: &Graph) -> Result<String, ArcError> {
+pub(crate) fn expand_variables(text: &str, graph: &Graph) -> Result<String, ArcError> {
     let vars = HashMap::from([("goal".to_string(), graph.goal().to_string())]);
     crate::cli::run_config::expand_vars(text, &vars).map_err(|e| ArcError::Validation(e.to_string()))
 }
@@ -126,7 +126,7 @@ fn find_json_objects(text: &str) -> Vec<&str> {
 /// Searches for the last JSON object in the response that contains at least
 /// one status field (`preferred_next_label`, `outcome`, `suggested_next_ids`,
 /// `context_updates`). Merges extracted fields into the outcome.
-fn extract_status_fields(text: &str, outcome: &mut Outcome) {
+pub(crate) fn extract_status_fields(text: &str, outcome: &mut Outcome) {
     let candidates = find_json_objects(text);
 
     let parsed = candidates.iter().rev().find_map(|candidate| {
@@ -164,7 +164,7 @@ fn extract_status_fields(text: &str, outcome: &mut Outcome) {
 }
 
 /// Truncate a string to at most `max_chars` characters (char-boundary safe).
-fn truncate(s: &str, max_chars: usize) -> &str {
+pub(crate) fn truncate(s: &str, max_chars: usize) -> &str {
     if s.len() <= max_chars {
         s
     } else {
@@ -173,7 +173,7 @@ fn truncate(s: &str, max_chars: usize) -> &str {
 }
 
 #[async_trait]
-impl Handler for CodergenHandler {
+impl Handler for AgentHandler {
     async fn execute(
         &self,
         node: &Node,
@@ -201,29 +201,23 @@ impl Handler for CodergenHandler {
         tokio::fs::create_dir_all(&stage_dir).await?;
         tokio::fs::write(stage_dir.join("prompt.md"), &prompt).await?;
 
-        // 3. Call LLM backend
-        let mode = node.codergen_mode()?;
+        // 3. Call LLM backend (agent loop)
         let thread_id = context
             .get("internal.thread_id")
             .and_then(|v| v.as_str().map(String::from));
         let (response_text, stage_usage, backend_files_touched) =
             if let Some(backend) = &self.backend {
-                let result = match mode {
-                    CodergenMode::AgentLoop => {
-                        backend
-                            .run(
-                                node,
-                                &prompt,
-                                context,
-                                thread_id.as_deref(),
-                                &services.emitter,
-                                &stage_dir,
-                                &services.sandbox,
-                            )
-                            .await
-                    }
-                    CodergenMode::OneShot => backend.one_shot(node, &prompt, &stage_dir).await,
-                };
+                let result = backend
+                    .run(
+                        node,
+                        &prompt,
+                        context,
+                        thread_id.as_deref(),
+                        &services.emitter,
+                        &stage_dir,
+                        &services.sandbox,
+                    )
+                    .await;
                 match result {
                     Ok(CodergenResult::Full(outcome)) => {
                         let status_json = serde_json::to_string_pretty(&outcome)
@@ -305,7 +299,7 @@ mod tests {
 
     #[tokio::test]
     async fn codergen_handler_simulation_mode() {
-        let handler = CodergenHandler::new(None);
+        let handler = AgentHandler::new(None);
         let mut node = Node::new("plan");
         node.attrs.insert(
             "prompt".to_string(),
@@ -339,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn codergen_handler_variable_expansion() {
-        let handler = CodergenHandler::new(None);
+        let handler = AgentHandler::new(None);
         let mut node = Node::new("plan");
         node.attrs.insert(
             "prompt".to_string(),
@@ -366,7 +360,7 @@ mod tests {
 
     #[tokio::test]
     async fn codergen_handler_falls_back_to_label() {
-        let handler = CodergenHandler::new(None);
+        let handler = AgentHandler::new(None);
         let mut node = Node::new("work");
         node.attrs.insert(
             "label".to_string(),
@@ -389,7 +383,7 @@ mod tests {
 
     #[tokio::test]
     async fn codergen_handler_context_updates() {
-        let handler = CodergenHandler::new(None);
+        let handler = AgentHandler::new(None);
         let node = Node::new("step");
         let context = Context::new();
         let graph = Graph::new("test");
@@ -490,7 +484,7 @@ mod tests {
         let backend = ThreadCapturingBackend {
             captured_thread_id: captured.clone(),
         };
-        let handler = CodergenHandler::new(Some(Box::new(backend)));
+        let handler = AgentHandler::new(Some(Box::new(backend)));
 
         let node = Node::new("work");
         let context = Context::new();
@@ -541,7 +535,7 @@ mod tests {
         let backend = ThreadCapturingBackend {
             captured_thread_id: captured.clone(),
         };
-        let handler = CodergenHandler::new(Some(Box::new(backend)));
+        let handler = AgentHandler::new(Some(Box::new(backend)));
 
         let node = Node::new("work");
         let context = Context::new();
@@ -578,7 +572,7 @@ mod tests {
             }
         }
 
-        let handler = CodergenHandler::new(Some(Box::new(FailingBackend)));
+        let handler = AgentHandler::new(Some(Box::new(FailingBackend)));
         let node = Node::new("step");
         let context = Context::new();
         let graph = Graph::new("test");
@@ -675,121 +669,6 @@ Some text in between.
     }
 
     #[tokio::test]
-    async fn codergen_handler_one_shot_dispatches_to_backend() {
-        struct OneShotBackend;
-
-        #[async_trait]
-        impl CodergenBackend for OneShotBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
-                _sandbox: &Arc<dyn Sandbox>,
-            ) -> Result<CodergenResult, ArcError> {
-                panic!("run() should not be called in one_shot mode");
-            }
-
-            async fn one_shot(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _stage_dir: &Path,
-            ) -> Result<CodergenResult, ArcError> {
-                Ok(CodergenResult::Text {
-                    text: "one-shot response".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
-                })
-            }
-        }
-
-        let handler = CodergenHandler::new(Some(Box::new(OneShotBackend)));
-        let mut node = Node::new("classify");
-        node.attrs.insert(
-            "codergen_mode".to_string(),
-            AttrValue::String("one_shot".to_string()),
-        );
-        node.attrs.insert(
-            "prompt".to_string(),
-            AttrValue::String("Classify this".to_string()),
-        );
-        let context = Context::new();
-        let graph = Graph::new("test");
-        let tmp = TempDir::new().unwrap();
-
-        let outcome = handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
-            .await
-            .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
-
-        let prompt_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("classify").join("prompt.md"))
-                .unwrap();
-        assert_eq!(prompt_content, "Classify this");
-
-        let response_content = std::fs::read_to_string(
-            tmp.path()
-                .join("nodes")
-                .join("classify")
-                .join("response.md"),
-        )
-        .unwrap();
-        assert_eq!(response_content, "one-shot response");
-    }
-
-    #[tokio::test]
-    async fn codergen_handler_one_shot_simulation_mode() {
-        let handler = CodergenHandler::new(None);
-        let mut node = Node::new("classify");
-        node.attrs.insert(
-            "codergen_mode".to_string(),
-            AttrValue::String("one_shot".to_string()),
-        );
-        let context = Context::new();
-        let graph = Graph::new("test");
-        let tmp = TempDir::new().unwrap();
-
-        let outcome = handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
-            .await
-            .unwrap();
-        assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
-
-        let response_content = std::fs::read_to_string(
-            tmp.path()
-                .join("nodes")
-                .join("classify")
-                .join("response.md"),
-        )
-        .unwrap();
-        assert!(response_content.contains("[Simulated]"));
-    }
-
-    #[tokio::test]
-    async fn codergen_handler_invalid_mode_returns_error() {
-        let handler = CodergenHandler::new(None);
-        let mut node = Node::new("step");
-        node.attrs.insert(
-            "codergen_mode".to_string(),
-            AttrValue::String("bogus".to_string()),
-        );
-        let context = Context::new();
-        let graph = Graph::new("test");
-        let tmp = TempDir::new().unwrap();
-
-        let result = handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("bogus"));
-    }
-
-    #[tokio::test]
     async fn codergen_handler_returns_fail_outcome_for_non_retryable_backend_error() {
         struct ValidationFailBackend;
 
@@ -809,7 +688,7 @@ Some text in between.
             }
         }
 
-        let handler = CodergenHandler::new(Some(Box::new(ValidationFailBackend)));
+        let handler = AgentHandler::new(Some(Box::new(ValidationFailBackend)));
         let node = Node::new("step");
         let context = Context::new();
         let graph = Graph::new("test");
@@ -856,7 +735,7 @@ Some text in between.
         let backend = PromptCapturingBackend {
             captured_prompt: captured.clone(),
         };
-        let handler = CodergenHandler::new(Some(Box::new(backend)));
+        let handler = AgentHandler::new(Some(Box::new(backend)));
 
         let mut node = Node::new("report");
         node.attrs.insert(
@@ -924,7 +803,7 @@ Some text in between.
         let backend = PromptCapturingBackend {
             captured_prompt: captured.clone(),
         };
-        let handler = CodergenHandler::new(Some(Box::new(backend)));
+        let handler = AgentHandler::new(Some(Box::new(backend)));
 
         let mut node = Node::new("report");
         node.attrs.insert(
@@ -946,79 +825,8 @@ Some text in between.
     }
 
     #[tokio::test]
-    async fn codergen_handler_one_shot_prepends_preamble() {
-        use std::sync::{Arc, Mutex};
-
-        struct OneShotCapturingBackend {
-            captured_prompt: Arc<Mutex<Option<String>>>,
-        }
-
-        #[async_trait]
-        impl CodergenBackend for OneShotCapturingBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                _stage_dir: &std::path::Path,
-                _sandbox: &Arc<dyn Sandbox>,
-            ) -> Result<CodergenResult, ArcError> {
-                panic!("run() should not be called in one_shot mode");
-            }
-
-            async fn one_shot(
-                &self,
-                _node: &Node,
-                prompt: &str,
-                _stage_dir: &std::path::Path,
-            ) -> Result<CodergenResult, ArcError> {
-                *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
-                Ok(CodergenResult::Text {
-                    text: "classified".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
-                })
-            }
-        }
-
-        let captured = Arc::new(Mutex::new(None));
-        let backend = OneShotCapturingBackend {
-            captured_prompt: captured.clone(),
-        };
-        let handler = CodergenHandler::new(Some(Box::new(backend)));
-
-        let mut node = Node::new("classify");
-        node.attrs.insert(
-            "codergen_mode".to_string(),
-            AttrValue::String("one_shot".to_string()),
-        );
-        node.attrs.insert(
-            "prompt".to_string(),
-            AttrValue::String("Classify this".to_string()),
-        );
-        let context = Context::new();
-        context.set("current.preamble", serde_json::json!("Prior output here"));
-        let graph = Graph::new("test");
-        let tmp = TempDir::new().unwrap();
-
-        handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
-            .await
-            .unwrap();
-
-        let prompt = captured.lock().unwrap().clone().unwrap();
-        assert!(
-            prompt.starts_with("Prior output here"),
-            "one_shot prompt should start with preamble, got: {prompt}"
-        );
-        assert!(prompt.ends_with("Classify this"));
-    }
-
-    #[tokio::test]
     async fn codergen_handler_preamble_written_to_prompt_md() {
-        let handler = CodergenHandler::new(None);
+        let handler = AgentHandler::new(None);
         let mut node = Node::new("report");
         node.attrs.insert(
             "prompt".to_string(),

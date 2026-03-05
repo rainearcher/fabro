@@ -6,8 +6,8 @@ digraph Pipeline {
     exit  [shape=Msquare, label="Exit"]
 
     scan    [label="Scan Files", shape=parallelogram, script="find . -maxdepth 2 -type f | head -30"]
-    analyze [label="Analyze", prompt="Review the file listing from the previous step. Identify what kind of project this is and summarize its structure in 3-4 bullet points.", codergen_mode="one_shot", reasoning_effort="low"]
-    suggest [label="Suggest", prompt="Based on the analysis, suggest 3 concrete improvements to the project structure. Be specific and actionable.", codergen_mode="one_shot", reasoning_effort="low"]
+    analyze [label="Analyze", prompt="Review the file listing from the previous step. Identify what kind of project this is and summarize its structure in 3-4 bullet points.", shape=tab, reasoning_effort="low"]
+    suggest [label="Suggest", prompt="Based on the analysis, suggest 3 concrete improvements to the project structure. Be specific and actionable.", shape=tab, reasoning_effort="low"]
 
     start -> scan -> analyze -> suggest -> exit
 }

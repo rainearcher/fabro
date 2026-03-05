@@ -384,15 +384,16 @@ struct TypeKnownRule;
 const KNOWN_HANDLER_TYPES: &[&str] = &[
     "start",
     "exit",
-    "codergen",
-    "wait.human",
+    "agent_loop",
+    "one_shot",
+    "human",
     "conditional",
     "parallel",
     "parallel.fan_in",
-    "script",
+    "command",
     "tool",
     "stack.manager_loop",
-    "wait.timer",
+    "wait",
 ];
 
 impl LintRule for TypeKnownRule {
@@ -617,7 +618,7 @@ impl LintRule for PromptOnLlmNodesRule {
     fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         for node in graph.nodes.values() {
-            if node.handler_type() == Some("codergen") {
+            if matches!(node.handler_type(), Some("agent_loop") | Some("one_shot")) {
                 let has_prompt = node.prompt().is_some_and(|p| !p.is_empty());
                 let has_label = node
                     .attrs
@@ -629,7 +630,7 @@ impl LintRule for PromptOnLlmNodesRule {
                         rule: self.name().to_string(),
                         severity: Severity::Warning,
                         message: format!(
-                            "Codergen node '{}' has no prompt or label attribute",
+                            "LLM node '{}' has no prompt or label attribute",
                             node.id
                         ),
                         node_id: Some(node.id.clone()),
@@ -655,7 +656,7 @@ impl LintRule for FreeformEdgeCountRule {
     fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         for node in graph.nodes.values() {
-            if node.handler_type() == Some("wait.human") {
+            if node.handler_type() == Some("human") {
                 let freeform_count = graph
                     .outgoing_edges(&node.id)
                     .iter()
@@ -871,7 +872,7 @@ impl LintRule for ScriptAbsoluteCdRule {
     fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         for node in graph.nodes.values() {
-            if node.handler_type() != Some("script") {
+            if node.handler_type() != Some("command") {
                 continue;
             }
             let script = node
@@ -1222,7 +1223,7 @@ mod tests {
         let mut node = Node::new("gate");
         node.attrs.insert(
             "type".to_string(),
-            AttrValue::String("wait.human".to_string()),
+            AttrValue::String("human".to_string()),
         );
         g.nodes.insert("gate".to_string(), node);
         let rule = TypeKnownRule;
@@ -1884,7 +1885,7 @@ mod tests {
         let mut gate = Node::new("gate");
         gate.attrs.insert(
             "type".to_string(),
-            AttrValue::String("wait.human".to_string()),
+            AttrValue::String("human".to_string()),
         );
         g.nodes.insert("gate".to_string(), gate);
         g.nodes.insert("a".to_string(), Node::new("a"));
@@ -2032,7 +2033,7 @@ mod tests {
         let mut n1 = Node::new("n1");
         n1.attrs.insert(
             "type".to_string(),
-            AttrValue::String("codergen".to_string()),
+            AttrValue::String("agent_loop".to_string()),
         );
         g.nodes.insert("n1".to_string(), n1);
 
@@ -2059,7 +2060,7 @@ mod tests {
 
         let mut n5 = Node::new("n5");
         n5.attrs
-            .insert("type".to_string(), AttrValue::String("script".to_string()));
+            .insert("type".to_string(), AttrValue::String("command".to_string()));
         g.nodes.insert("n5".to_string(), n5);
 
         let mut n6 = Node::new("n6");
@@ -2074,17 +2075,17 @@ mod tests {
         assert!(d.is_empty());
     }
 
-    // --- prompt_on_llm_nodes: explicit type=codergen without prompt/label ---
+    // --- prompt_on_llm_nodes: explicit type=agent_loop without prompt/label ---
 
     #[test]
-    fn prompt_on_llm_nodes_rule_explicit_codergen_type_no_prompt() {
+    fn prompt_on_llm_nodes_rule_explicit_agent_loop_type_no_prompt() {
         let mut g = minimal_graph();
         let mut node = Node::new("work");
         node.attrs.insert(
             "type".to_string(),
-            AttrValue::String("codergen".to_string()),
+            AttrValue::String("agent_loop".to_string()),
         );
-        // No shape=box, but explicit type=codergen
+        // No shape=box, but explicit type=agent_loop
         node.attrs.insert(
             "shape".to_string(),
             AttrValue::String("diamond".to_string()),
@@ -2114,7 +2115,7 @@ mod tests {
         assert!(d.is_empty());
     }
 
-    // --- freeform_edge_count: with explicit type=wait.human ---
+    // --- freeform_edge_count: with explicit type=human ---
 
     #[test]
     fn freeform_edge_count_rule_explicit_type_two_freeform() {
@@ -2122,7 +2123,7 @@ mod tests {
         let mut gate = Node::new("gate");
         gate.attrs.insert(
             "type".to_string(),
-            AttrValue::String("wait.human".to_string()),
+            AttrValue::String("human".to_string()),
         );
         g.nodes.insert("gate".to_string(), gate);
         g.nodes.insert("a".to_string(), Node::new("a"));

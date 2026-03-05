@@ -395,7 +395,7 @@ command = "echo 'run starting'"
 [[hooks]]
 event = "stage_complete"
 command = "echo 'stage done'"
-matcher = "codergen"
+matcher = "agent_loop"
 "#;
         let config: ServerConfig = toml::from_str(toml).unwrap();
         assert_eq!(config.hook_config.hooks.len(), 2);
@@ -413,7 +413,7 @@ matcher = "codergen"
         );
         assert_eq!(
             config.hook_config.hooks[1].matcher.as_deref(),
-            Some("codergen")
+            Some("agent_loop")
         );
     }
 

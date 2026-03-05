@@ -14,10 +14,10 @@ fn timeout_ms(node: &Node) -> Option<u64> {
 }
 
 /// Executes an external script configured via node attributes.
-pub struct ScriptHandler;
+pub struct CommandHandler;
 
 #[async_trait]
-impl Handler for ScriptHandler {
+impl Handler for CommandHandler {
     async fn execute(
         &self,
         node: &Node,
@@ -187,7 +187,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_handler_no_script() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let node = Node::new("script_node");
         let context = Context::new();
         let graph = Graph::new("test");
@@ -203,7 +203,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_handler_echo_command() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -227,7 +227,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_handler_failing_command() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs
             .insert("script".to_string(), AttrValue::String("false".to_string()));
@@ -244,7 +244,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_handler_timeout() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -271,7 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn writes_script_invocation_json() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -300,7 +300,7 @@ mod tests {
 
     #[tokio::test]
     async fn writes_script_invocation_json_with_timeout() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -333,7 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn writes_stdout_and_stderr_logs() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -357,7 +357,7 @@ mod tests {
 
     #[tokio::test]
     async fn writes_stderr_log_on_failure() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -379,7 +379,7 @@ mod tests {
 
     #[tokio::test]
     async fn writes_script_timing_json_on_success() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -408,7 +408,7 @@ mod tests {
 
     #[tokio::test]
     async fn writes_script_timing_json_on_failure() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs
             .insert("script".to_string(), AttrValue::String("false".to_string()));
@@ -434,7 +434,7 @@ mod tests {
 
     #[tokio::test]
     async fn writes_script_timing_json_on_timeout() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -467,7 +467,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_handler_python_echo() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -495,7 +495,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_handler_python_failure() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -518,7 +518,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_handler_invalid_language() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -545,7 +545,7 @@ mod tests {
 
     #[tokio::test]
     async fn tool_command_attribute_fallback() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "tool_command".to_string(),
@@ -566,7 +566,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_handler_captures_stderr() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -591,7 +591,7 @@ mod tests {
 
     #[tokio::test]
     async fn tool_output_context_key_not_emitted() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -615,7 +615,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_handler_failure_includes_stdout() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
@@ -650,7 +650,7 @@ mod tests {
         // Spawn failures (binary not found) return Err, not Ok(Fail).
         // We trigger a real spawn failure by using language="python" and
         // pointing to a nonexistent interpreter via a wrapper that replaces
-        // the command. Since ScriptHandler hardcodes "python3", we instead
+        // the command. Since CommandHandler hardcodes "python3", we instead
         // create a minimal reproduction: a directory where "python3" is not
         // executable, won't work without PATH manipulation.
         //
@@ -662,7 +662,7 @@ mod tests {
 
     #[tokio::test]
     async fn script_handler_failure_sets_script_output() {
-        let handler = ScriptHandler;
+        let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
             "script".to_string(),
