@@ -5,7 +5,7 @@ use std::sync::Arc;
 use arc_agent::Sandbox;
 
 use super::config::{HookConfig, HookDefinition};
-use super::executor::{CommandHookExecutor, HookExecutor};
+use super::executor::{HookExecutorImpl, HookExecutor};
 use super::types::{HookContext, HookDecision};
 
 /// Central orchestrator: filters matching hooks, executes them, merges decisions.
@@ -22,7 +22,7 @@ impl HookRunner {
         let compiled_matchers = Self::compile_matchers(&config);
         Self {
             config,
-            command_executor: Arc::new(CommandHookExecutor),
+            command_executor: Arc::new(HookExecutorImpl),
             compiled_matchers,
         }
     }

@@ -44,7 +44,9 @@ console.workspace = true
 indicatif.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+reqwest.workspace = true
 [dev-dependencies]
+mockito = "1"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = "3"
 dotenvy.workspace = true

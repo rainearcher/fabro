@@ -7,7 +7,12 @@ use super::types::HookEvent;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HookType {
     Command { command: String },
-    Http { url: String, headers: Option<std::collections::HashMap<String, String>> },
+    Http {
+        url: String,
+        headers: Option<std::collections::HashMap<String, String>>,
+        #[serde(default)]
+        allowed_env_vars: Vec<String>,
+    },
 }
 
 /// A single hook definition.
@@ -168,6 +173,57 @@ url = "https://hooks.example.com/done"
             hook.resolved_hook_type(),
             Some(HookType::Http { url, .. }) if url == "https://hooks.example.com/done"
         ));
+    }
+
+    #[test]
+    fn parse_http_hook_with_allowed_env_vars() {
+        let toml = r#"
+[[hooks]]
+event = "run_start"
+type = "http"
+url = "https://hooks.example.com/start"
+allowed_env_vars = ["API_KEY", "SECRET"]
+
+[hooks.headers]
+Authorization = "Bearer $API_KEY"
+"#;
+        let config: HookConfig = toml::from_str(toml).unwrap();
+        let hook = &config.hooks[0];
+        match hook.resolved_hook_type().unwrap() {
+            HookType::Http {
+                url,
+                headers,
+                allowed_env_vars,
+            } => {
+                assert_eq!(url, "https://hooks.example.com/start");
+                assert_eq!(allowed_env_vars, vec!["API_KEY", "SECRET"]);
+                assert_eq!(
+                    headers.unwrap().get("Authorization").unwrap(),
+                    "Bearer $API_KEY"
+                );
+            }
+            _ => panic!("expected Http hook type"),
+        }
+    }
+
+    #[test]
+    fn parse_http_hook_allowed_env_vars_defaults_empty() {
+        let toml = r#"
+[[hooks]]
+event = "run_complete"
+type = "http"
+url = "https://hooks.example.com/done"
+"#;
+        let config: HookConfig = toml::from_str(toml).unwrap();
+        let hook = &config.hooks[0];
+        match hook.resolved_hook_type().unwrap() {
+            HookType::Http {
+                allowed_env_vars, ..
+            } => {
+                assert!(allowed_env_vars.is_empty());
+            }
+            _ => panic!("expected Http hook type"),
+        }
     }
 
     #[test]
