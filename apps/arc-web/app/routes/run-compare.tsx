@@ -9,7 +9,7 @@ import {
 import { useTheme } from "../lib/theme";
 import { apiJson } from "../api-client";
 import type { RunCompare } from "@qltysh/arc-api-client";
-import type { Route } from "./+types/run-files-changed";
+import type { Route } from "./+types/run-compare";
 
 export const handle = { wide: true };
 
@@ -508,7 +508,7 @@ function buildAnnotationsForFile(
   return annotations;
 }
 
-export default function RunFilesChanged({ loaderData }: Route.ComponentProps) {
+export default function RunCompare({ loaderData }: Route.ComponentProps) {
   const runFiles = loaderData;
   const checkpoints = [
     { id: "all", label: "All changes" },
