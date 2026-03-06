@@ -107,6 +107,7 @@
             "pages": [
               "examples/solitaire",
               "examples/semantic-port",
+              "examples/definition-of-done",
               "examples/nlspec-conformance",
               "examples/clone-substack"
             ]
