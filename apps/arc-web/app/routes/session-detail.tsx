@@ -9,6 +9,7 @@ import {
   UserIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/24/outline";
+import { timeAgo } from "../lib/time";
 import { apiJson } from "../api-client";
 import type { SessionDetail as ApiSessionDetail, PaginatedSessionGroupList } from "@qltysh/arc-api-client";
 import type { Route } from "./+types/session-detail";
@@ -27,9 +28,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const session: Session = {
     id: apiSession.id,
     title: apiSession.title,
-    repo: apiSession.repo,
     model: apiSession.model,
-    time: "",
+    created_at: apiSession.created_at,
+    updated_at: apiSession.updated_at,
     turns: apiSession.turns.map((t) => {
       if (t.kind === "tool" && t.tools) {
         return {
@@ -41,7 +42,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
           })),
         };
       }
-      return { kind: t.kind as "user" | "assistant", content: t.content ?? "", date: t.date };
+      return { kind: t.kind as "user" | "assistant", content: t.content ?? "", created_at: t.created_at };
     }),
   };
   const sessionGroups = apiGroups.map((g) => ({
@@ -49,8 +50,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     sessions: g.sessions.map((s) => ({
       id: s.id,
       title: s.title,
-      repo: s.repo,
-      time: s.time,
+      created_at: s.created_at,
     })),
   }));
   return { session, sessionGroups };
@@ -63,16 +63,16 @@ interface ToolUse {
 }
 
 type Turn =
-  | { kind: "user"; content: string; date?: string }
+  | { kind: "user"; content: string; created_at?: string }
   | { kind: "assistant"; content: string }
   | { kind: "tool"; tools: ToolUse[] };
 
 interface Session {
   id: string;
   title: string;
-  repo: string;
   model: string;
-  time: string;
+  created_at: string;
+  updated_at: string;
   turns: Turn[];
 }
 
@@ -81,13 +81,13 @@ const sessions: Record<string, Session> = {
   s1: {
     id: "s1",
     title: "Add rate limiting to auth endpoints",
-    repo: "api-server",
     model: "Opus 4.6",
-    time: "2h ago",
+    created_at: "2026-03-06T14:30:00Z",
+    updated_at: "2026-03-06T15:45:00Z",
     turns: [
       {
         kind: "user",
-        date: "Feb 28",
+        created_at: "2026-02-28T10:00:00Z",
         content: "Add rate limiting to the auth endpoints. We're getting hit with brute force attempts on /api/auth/login and /api/auth/register. Use a sliding window approach with Redis, 10 requests per minute per IP.",
       },
       {
@@ -147,13 +147,13 @@ const sessions: Record<string, Session> = {
   s2: {
     id: "s2",
     title: "Fix config parsing for nested values",
-    repo: "cli-tools",
     model: "Sonnet 4.6",
-    time: "4h ago",
+    created_at: "2026-03-06T12:30:00Z",
+    updated_at: "2026-03-06T13:15:00Z",
     turns: [
       {
         kind: "user",
-        date: "Feb 28",
+        created_at: "2026-02-28T10:00:00Z",
         content: "The CLI crashes when parsing nested TOML config values like [database.connection]. Can you debug and fix this?",
       },
       {
@@ -198,11 +198,11 @@ const sessions: Record<string, Session> = {
   s3: {
     id: "s3",
     title: "Migrate to React Router v7",
-    repo: "web-dashboard",
     model: "Opus 4.6",
-    time: "1d ago",
+    created_at: "2026-03-05T10:00:00Z",
+    updated_at: "2026-03-05T11:30:00Z",
     turns: [
-      { kind: "user", date: "Feb 26", content: "Help me migrate our app from React Router v6 to v7. We're using createBrowserRouter with data loaders." },
+      { kind: "user", created_at: "2026-02-26T10:00:00Z", content: "Help me migrate our app from React Router v6 to v7. We're using createBrowserRouter with data loaders." },
       { kind: "assistant", content: "I'll audit your current router setup and identify what needs to change for v7. Let me scan the codebase." },
       {
         kind: "tool",
@@ -221,11 +221,11 @@ function makeFallbackSession(id: string): Session {
   return {
     id,
     title: "Session",
-    repo: "unknown",
     model: "Opus 4.6",
-    time: "",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     turns: [
-      { kind: "user", date: "Feb 28", content: "Hello, let's get started." },
+      { kind: "user", created_at: "2026-02-28T10:00:00Z", content: "Hello, let's get started." },
       { kind: "assistant", content: "Sure! What would you like to work on?" },
     ],
   };
@@ -233,31 +233,31 @@ function makeFallbackSession(id: string): Session {
 
 interface SessionGroupType {
   label: string;
-  sessions: { id: string; title: string; repo: string; time: string }[];
+  sessions: { id: string; title: string; created_at: string }[];
 }
 
 const sessionGroups: SessionGroupType[] = [
   {
     label: "Today",
     sessions: [
-      { id: "s1", title: "Add rate limiting to auth endpoints", repo: "api-server", time: "2h ago" },
-      { id: "s2", title: "Fix config parsing for nested values", repo: "cli-tools", time: "4h ago" },
+      { id: "s1", title: "Add rate limiting to auth endpoints", created_at: "2026-03-06T14:30:00Z" },
+      { id: "s2", title: "Fix config parsing for nested values", created_at: "2026-03-06T12:30:00Z" },
     ],
   },
   {
     label: "Yesterday",
     sessions: [
-      { id: "s3", title: "Migrate to React Router v7", repo: "web-dashboard", time: "1d ago" },
-      { id: "s4", title: "Add dark mode toggle", repo: "web-dashboard", time: "1d ago" },
-      { id: "s5", title: "Update OpenAPI spec for v3", repo: "api-server", time: "1d ago" },
+      { id: "s3", title: "Migrate to React Router v7", created_at: "2026-03-05T10:00:00Z" },
+      { id: "s4", title: "Add dark mode toggle", created_at: "2026-03-05T09:00:00Z" },
+      { id: "s5", title: "Update OpenAPI spec for v3", created_at: "2026-03-05T08:00:00Z" },
     ],
   },
   {
     label: "Previous 7 days",
     sessions: [
-      { id: "s6", title: "Terraform module for Redis cluster", repo: "infrastructure", time: "3d ago" },
-      { id: "s7", title: "Add pipeline event types", repo: "shared-types", time: "5d ago" },
-      { id: "s8", title: "Implement webhook retry logic", repo: "api-server", time: "6d ago" },
+      { id: "s6", title: "Terraform module for Redis cluster", created_at: "2026-03-03T15:00:00Z" },
+      { id: "s7", title: "Add pipeline event types", created_at: "2026-03-01T11:00:00Z" },
+      { id: "s8", title: "Implement webhook retry logic", created_at: "2026-02-28T09:00:00Z" },
     ],
   },
 ];
@@ -327,7 +327,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function UserBlock({ content, date }: { content: string; date?: string }) {
+function UserBlock({ content, created_at }: { content: string; created_at?: string }) {
   return (
     <div className="group">
       <div className="flex gap-3">
@@ -340,7 +340,7 @@ function UserBlock({ content, date }: { content: string; date?: string }) {
       </div>
       <div className="ml-10 mt-1 flex h-6 items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
         <CopyButton text={content} />
-        {date != null && <span className="text-[11px] text-fg-muted">{date}</span>}
+        {created_at != null && <span className="text-[11px] text-fg-muted">{timeAgo(created_at)}</span>}
       </div>
     </div>
   );
@@ -397,8 +397,7 @@ function SessionSidebar({ activeId, groups }: { activeId: string; groups: Sessio
                   >
                     <span className="truncate text-sm">{s.title}</span>
                     <span className="flex items-center gap-1.5 mt-0.5">
-                      <span className="font-mono text-[11px] text-teal-500">{s.repo}</span>
-                      <span className="text-[11px] text-fg-muted">{s.time}</span>
+                      <span className="text-[11px] text-fg-muted">{timeAgo(s.created_at)}</span>
                     </span>
                   </Link>
                 </li>
@@ -421,8 +420,7 @@ export default function SessionDetail({ loaderData }: Route.ComponentProps) {
       <div className="flex-1 flex flex-col min-h-[calc(100vh-4rem)]">
         <div className="border-b border-line px-6 py-3 flex items-center gap-3">
           <h1 className="text-sm font-medium text-fg-2">{session.title}</h1>
-          <span className="font-mono text-xs text-teal-500">{session.repo}</span>
-          <span className="text-xs text-fg-muted">{session.time}</span>
+          <span className="text-xs text-fg-muted">{timeAgo(session.created_at)}</span>
           <span className="ml-auto font-mono text-xs text-fg-muted">{session.model}</span>
         </div>
 
@@ -431,7 +429,7 @@ export default function SessionDetail({ loaderData }: Route.ComponentProps) {
             {session.turns.map((turn, i) => {
               switch (turn.kind) {
                 case "user":
-                  return <UserBlock key={i} content={turn.content} date={turn.date} />;
+                  return <UserBlock key={i} content={turn.content} created_at={turn.created_at} />;
                 case "assistant": {
                   const next = session.turns[i + 1];
                   const showCopy = next?.kind !== "tool";
