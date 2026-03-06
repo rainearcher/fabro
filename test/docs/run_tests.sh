@@ -6,10 +6,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARC="${ARC:-$REPO_ROOT/target/release/arc}"
 
 PHASE="${1:-validate}"
+PARALLEL="${PARALLEL:-1}"
 
-pass=0
-fail=0
-total=0
+RESULTS_DIR="$(mktemp -d)"
+trap 'rm -rf "$RESULTS_DIR"' EXIT
 
 run_one() {
     local dot="$1"
@@ -26,33 +26,32 @@ run_one() {
     local toml
     toml="${dot_dir}/run-${stem}.toml"
 
-    total=$((total + 1))
+    local result_file="$RESULTS_DIR/$(echo "$rel" | tr '/' '_')"
 
     case "$PHASE" in
         validate)
-            if "$ARC" validate "$dot" 2>&1; then
+            if "$ARC" validate "$dot" > "$result_file.log" 2>&1; then
+                echo "PASS" > "$result_file"
                 echo "  PASS  $rel"
-                pass=$((pass + 1))
             else
+                echo "FAIL" > "$result_file"
                 echo "  FAIL  $rel"
-                fail=$((fail + 1))
             fi
             ;;
         preflight)
-            # cd into the dot file's directory so relative paths resolve
             local target="$dot_name"
             [[ -f "$toml" ]] && target="run-${stem}.toml"
 
-            if (cd "$dot_dir" && "$ARC" run start "$target" --preflight 2>&1); then
+            if (cd "$dot_dir" && "$ARC" run start "$target" --preflight > "$result_file.log" 2>&1); then
+                echo "PASS" > "$result_file"
                 echo "  PASS  $rel"
-                pass=$((pass + 1))
             else
+                echo "FAIL" > "$result_file"
                 echo "  FAIL  $rel"
-                fail=$((fail + 1))
+                grep -E "Errors:|•" "$result_file.log" | head -3 >&2
             fi
             ;;
         dry-run|haiku|full)
-            # cd into the dot file's directory so relative script paths resolve
             local target="$dot_name"
             [[ -f "$toml" ]] && target="run-${stem}.toml"
 
@@ -60,12 +59,13 @@ run_one() {
             [[ "$PHASE" == "dry-run" ]] && flags+=(--dry-run)
             [[ "$PHASE" == "haiku" ]] && flags+=(--model claude-haiku-4-5)
 
-            if (cd "$dot_dir" && "$ARC" run start "$target" "${flags[@]}" 2>&1); then
+            if (cd "$dot_dir" && "$ARC" run start "$target" "${flags[@]}" > "$result_file.log" 2>&1); then
+                echo "PASS" > "$result_file"
                 echo "  PASS  $rel"
-                pass=$((pass + 1))
             else
+                echo "FAIL" > "$result_file"
                 echo "  FAIL  $rel"
-                fail=$((fail + 1))
+                tail -5 "$result_file.log" >&2
             fi
             ;;
         *)
@@ -75,12 +75,41 @@ run_one() {
     esac
 }
 
-echo "=== Phase: $PHASE ==="
+echo "=== Phase: $PHASE (parallelism: $PARALLEL) ==="
 echo ""
 
+# Collect all dot files
+dots=()
 while IFS= read -r dot; do
-    run_one "$dot"
+    dots+=("$dot")
 done < <(find "$SCRIPT_DIR" -name '*.dot' | sort)
+
+# Run with parallelism
+active=0
+for dot in "${dots[@]}"; do
+    run_one "$dot" &
+    active=$((active + 1))
+    if [[ $active -ge $PARALLEL ]]; then
+        wait -n 2>/dev/null || true
+        active=$((active - 1))
+    fi
+done
+wait
+
+# Tally results
+pass=0
+fail=0
+for f in "$RESULTS_DIR"/*; do
+    [[ "$f" == *.log ]] && continue
+    [[ ! -f "$f" ]] && continue
+    result="$(cat "$f")"
+    if [[ "$result" == "PASS" ]]; then
+        pass=$((pass + 1))
+    else
+        fail=$((fail + 1))
+    fi
+done
+total=$((pass + fail))
 
 echo ""
 echo "=== Results: $pass passed, $fail failed, $total total ==="

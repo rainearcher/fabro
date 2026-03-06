@@ -332,10 +332,15 @@ impl CodergenBackend for AgentCliBackend {
         }
 
         if result.exit_code != 0 {
+            let stderr: String = result.stderr.chars().rev().take(500).collect::<Vec<_>>().into_iter().rev().collect();
+            let detail = if stderr.is_empty() {
+                format!("command: {command}")
+            } else {
+                stderr
+            };
             return Err(ArcError::handler(format!(
-                "CLI command exited with code {}: {}",
+                "CLI command exited with code {}: {detail}",
                 result.exit_code,
-                result.stderr.chars().take(500).collect::<String>()
             )));
         }
 
