@@ -183,7 +183,7 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 | `type` | String | Explicit handler type (overrides shape) |
 | `class` | String | Comma-separated classes for [stylesheet](/workflows/stylesheets) targeting |
 | `timeout` | Duration | Execution timeout (e.g. `900s`) |
-| `max_visits` | Integer | Max times this node can execute in a run (prevents infinite loops) |
+| `max_visits` | Integer | Max times this node can execute in a run. Overrides the graph-level `max_node_visits` for this node. |
 | `max_retries` | Integer | Override default retry count |
 | `retry_policy` | String | Named preset: `none`, `standard`, `aggressive`, `linear`, `patient` |
 | `retry_target` | String | Node ID to jump to on retry |

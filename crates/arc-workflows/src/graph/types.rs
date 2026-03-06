@@ -149,6 +149,11 @@ impl Node {
     }
 
     #[must_use]
+    pub fn max_visits(&self) -> Option<i64> {
+        self.int_attr("max_visits")
+    }
+
+    #[must_use]
     pub fn goal_gate(&self) -> bool {
         self.bool_attr("goal_gate").unwrap_or(false)
     }
@@ -519,6 +524,7 @@ mod tests {
         assert!(!node.auto_status());
         assert!(!node.allow_partial());
         assert_eq!(node.retry_policy(), None);
+        assert_eq!(node.max_visits(), None);
     }
 
     #[test]
@@ -541,6 +547,14 @@ mod tests {
         assert_eq!(node.shape(), "diamond");
         assert!(node.goal_gate());
         assert_eq!(node.max_retries(), Some(3));
+    }
+
+    #[test]
+    fn node_max_visits_returns_value() {
+        let mut node = Node::new("test");
+        node.attrs
+            .insert("max_visits".to_string(), AttrValue::Integer(5));
+        assert_eq!(node.max_visits(), Some(5));
     }
 
     #[test]

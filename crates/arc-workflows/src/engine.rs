@@ -1166,7 +1166,7 @@ impl WorkflowRunEngine {
         // Compute effective max-node-visits limit:
         // graph attr > 0 → use it; else dry_run → 10; else 0 (disabled)
         let graph_limit = graph.max_node_visits();
-        let max_node_visits: usize = if graph_limit > 0 {
+        let graph_max_node_visits: usize = if graph_limit > 0 {
             usize::try_from(graph_limit).unwrap_or(usize::MAX)
         } else if config.dry_run {
             10
@@ -1305,10 +1305,24 @@ impl WorkflowRunEngine {
                 .entry(current_node_id.clone())
                 .or_insert(0);
             *count += 1;
-            if max_node_visits > 0 && *count >= max_node_visits {
-                tracing::warn!(node = %current_node_id, visits = *count, limit = max_node_visits, "Node visit limit exceeded, run stuck in cycle");
+
+            let node_limit = node
+                .max_visits()
+                .and_then(|v| usize::try_from(v).ok())
+                .filter(|&v| v > 0);
+
+            if let Some(limit) = node_limit {
+                if *count >= limit {
+                    tracing::warn!(node = %current_node_id, visits = *count, limit, source = "node", "Node visit limit exceeded");
+                    return Err(ArcError::engine(format!(
+                        "node \"{}\" visited {count} times (node limit {limit}); run is stuck in a cycle",
+                        current_node_id
+                    )));
+                }
+            } else if graph_max_node_visits > 0 && *count >= graph_max_node_visits {
+                tracing::warn!(node = %current_node_id, visits = *count, limit = graph_max_node_visits, source = "graph", "Node visit limit exceeded");
                 return Err(ArcError::engine(format!(
-                    "node \"{}\" visited {count} times (limit {max_node_visits}); run is stuck in a cycle",
+                    "node \"{}\" visited {count} times (graph limit {graph_max_node_visits}); run is stuck in a cycle",
                     current_node_id
                 )));
             }
@@ -3749,7 +3763,102 @@ mod tests {
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("(limit 2)"), "expected limit of 2, got: {err}");
+        assert!(
+            err.contains("(graph limit 2)"),
+            "expected graph limit of 2, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn per_node_max_visits_fires_before_graph_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut g = cyclic_graph();
+        g.attrs
+            .insert("max_node_visits".to_string(), AttrValue::Integer(100));
+        g.nodes
+            .get_mut("work")
+            .unwrap()
+            .attrs
+            .insert("max_visits".to_string(), AttrValue::Integer(2));
+        let engine =
+            WorkflowRunEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+            labels: HashMap::new(),
+        };
+        let result = engine.run(&g, &config).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("node limit 2"),
+            "expected node limit 2, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn per_node_max_visits_overrides_dry_run_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut g = cyclic_graph();
+        g.nodes
+            .get_mut("work")
+            .unwrap()
+            .attrs
+            .insert("max_visits".to_string(), AttrValue::Integer(3));
+        let engine =
+            WorkflowRunEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: true,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+            labels: HashMap::new(),
+        };
+        let result = engine.run(&g, &config).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("node limit 3"),
+            "expected node limit 3, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn graph_limit_works_without_per_node_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut g = cyclic_graph();
+        g.attrs
+            .insert("max_node_visits".to_string(), AttrValue::Integer(3));
+        let engine =
+            WorkflowRunEngine::new(make_registry(), Arc::new(EventEmitter::new()), local_env());
+        let config = RunConfig {
+            logs_root: dir.path().to_path_buf(),
+            cancel_token: None,
+            dry_run: false,
+            run_id: "test-run".into(),
+            git_checkpoint: None,
+            base_sha: None,
+            run_branch: None,
+            meta_branch: None,
+            labels: HashMap::new(),
+        };
+        let result = engine.run(&g, &config).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("graph limit 3"),
+            "expected graph limit 3, got: {err}"
+        );
     }
 
     // --- node_dir visit-count tests ---

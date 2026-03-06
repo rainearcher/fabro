@@ -213,7 +213,7 @@ These attributes can be set on any node type:
 |---|---|
 | `label` | Display name shown in the graph visualization |
 | `class` | CSS-like class for [model stylesheet](/workflows/stylesheets) targeting (space-separated for multiple) |
-| `max_visits` | Maximum times this node can execute in a run (prevents infinite loops) |
+| `max_visits` | Max times this node can execute in a run. Overrides the graph-level `max_node_visits` for this node. |
 | `goal_gate` | When `true`, the workflow fails if this node doesn't succeed |
 | `max_retries` | Override default retry count for this node |
 | `retry_policy` | Named retry preset (see table below) |

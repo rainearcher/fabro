@@ -148,7 +148,24 @@ digraph Example {
 When a node hits the limit, the run fails immediately:
 
 ```
-node "verify" visited 20 times (limit 20); run is stuck in a cycle
+node "verify" visited 20 times (graph limit 20); run is stuck in a cycle
+```
+
+#### Per-node overrides
+
+You can set `max_visits` on individual nodes to override the graph-level limit for that node:
+
+```dot title="example.dot"
+digraph Example {
+    graph [max_node_visits="20"]
+    fix [max_visits=3]
+}
+```
+
+The per-node `max_visits` takes precedence over `max_node_visits` (and the dry-run default of 10). This is useful when specific nodes — like a fix-and-verify loop — should have a tighter limit than the rest of the workflow:
+
+```
+node "fix" visited 3 times (node limit 3); run is stuck in a cycle
 ```
 
 ### Tool call loop detection
