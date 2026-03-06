@@ -23,6 +23,14 @@ export interface CreateSessionResponse {
      */
     'id': string;
     /**
+     * Server-generated title for the session.
+     */
+    'title': string;
+    /**
+     * The resolved LLM model for this session (may be the server default).
+     */
+    'model': string;
+    /**
      * Timestamp when the session was created.
      */
     'created_at': string;

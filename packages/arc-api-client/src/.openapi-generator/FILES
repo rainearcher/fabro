@@ -78,6 +78,11 @@ models/saved-query.ts
 models/send-message-request.ts
 models/send-message-response.ts
 models/session-detail.ts
+models/session-event-assistant-turn.ts
+models/session-event-done.ts
+models/session-event-error.ts
+models/session-event-tool-turn.ts
+models/session-event.ts
 models/session-list-item.ts
 models/session-turn.ts
 models/setting-field-type.ts

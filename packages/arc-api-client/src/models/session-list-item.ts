@@ -27,6 +27,14 @@ export interface SessionListItem {
      */
     'title': string;
     /**
+     * The LLM model used for this session.
+     */
+    'model': string;
+    /**
+     * Truncated snippet of the most recent turn\'s content.
+     */
+    'last_message_preview': string;
+    /**
      * Timestamp when the session was created.
      */
     'created_at': string;

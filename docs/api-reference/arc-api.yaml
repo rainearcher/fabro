@@ -811,7 +811,17 @@ paths:
       operationId: streamSessionEvents
       tags: [Sessions]
       summary: Stream Session Events
-      description: Opens a server-sent event (SSE) stream for real-time session updates. Events include new assistant turns, tool invocations, and completion signals.
+      description: |
+        Opens a server-sent event (SSE) stream for real-time session updates.
+
+        The stream emits the following event types:
+
+        - `event: assistant_turn` — data: `AssistantTurn` JSON object
+        - `event: tool_turn` — data: `ToolTurn` JSON object
+        - `event: done` — data: `{}` (stream complete)
+        - `event: error` — data: `{"message": "..."}` (error occurred)
+
+        See the `SessionEvent` schema for the discriminated union of all event payloads.
       parameters:
         - $ref: "#/components/parameters/SessionId"
       responses:
@@ -2074,6 +2084,8 @@ components:
       required:
         - id
         - title
+        - model
+        - last_message_preview
         - created_at
         - updated_at
       properties:
@@ -2085,6 +2097,14 @@ components:
           type: string
           description: Short title summarizing the session topic.
           example: Add rate limiting to auth endpoints
+        model:
+          type: string
+          description: The LLM model used for this session.
+          example: Opus 4.6
+        last_message_preview:
+          type: string
+          description: Truncated snippet of the most recent turn's content.
+          example: "Done. I've created the rate limiter and wired it up..."
         created_at:
           type: string
           format: date-time
@@ -2137,6 +2157,7 @@ components:
       required:
         - kind
         - content
+        - created_at
       properties:
         kind:
           type: string
@@ -2145,6 +2166,11 @@ components:
           type: string
           description: Text content of the assistant response.
           example: I'll implement sliding window rate limiting using Redis.
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp when the turn was created.
+          example: "2026-02-28T10:01:00Z"
 
     ToolTurn:
       description: A tool invocation turn.
@@ -2152,6 +2178,7 @@ components:
       required:
         - kind
         - tools
+        - created_at
       properties:
         kind:
           type: string
@@ -2161,6 +2188,11 @@ components:
           description: Tool invocations for this turn.
           items:
             $ref: "#/components/schemas/ToolUse"
+        created_at:
+          type: string
+          format: date-time
+          description: Timestamp when the turn was created.
+          example: "2026-02-28T10:01:05Z"
 
     SessionDetail:
       description: Full session record including metadata and the complete conversation history.
@@ -2221,12 +2253,22 @@ components:
       type: object
       required:
         - id
+        - title
+        - model
         - created_at
       properties:
         id:
           type: string
           description: Unique identifier for the newly created session.
           example: s42
+        title:
+          type: string
+          description: Server-generated title for the session.
+          example: Add rate limiting to auth endpoints
+        model:
+          type: string
+          description: The resolved LLM model for this session (may be the server default).
+          example: Opus 4.6
         created_at:
           type: string
           format: date-time
@@ -2254,6 +2296,71 @@ components:
           type: boolean
           description: Whether the message was accepted for processing.
           example: true
+
+    SessionEvent:
+      description: Discriminated union of all SSE event payloads.
+      discriminator:
+        propertyName: event
+        mapping:
+          assistant_turn: "#/components/schemas/SessionEventAssistantTurn"
+          tool_turn: "#/components/schemas/SessionEventToolTurn"
+          done: "#/components/schemas/SessionEventDone"
+          error: "#/components/schemas/SessionEventError"
+      oneOf:
+        - $ref: "#/components/schemas/SessionEventAssistantTurn"
+        - $ref: "#/components/schemas/SessionEventToolTurn"
+        - $ref: "#/components/schemas/SessionEventDone"
+        - $ref: "#/components/schemas/SessionEventError"
+
+    SessionEventAssistantTurn:
+      description: An assistant turn event.
+      type: object
+      required:
+        - event
+        - data
+      properties:
+        event:
+          type: string
+          enum: [assistant_turn]
+        data:
+          $ref: "#/components/schemas/AssistantTurn"
+
+    SessionEventToolTurn:
+      description: A tool turn event.
+      type: object
+      required:
+        - event
+        - data
+      properties:
+        event:
+          type: string
+          enum: [tool_turn]
+        data:
+          $ref: "#/components/schemas/ToolTurn"
+
+    SessionEventDone:
+      description: Stream completion event.
+      type: object
+      required:
+        - event
+      properties:
+        event:
+          type: string
+          enum: [done]
+
+    SessionEventError:
+      description: Error event.
+      type: object
+      required:
+        - event
+        - message
+      properties:
+        event:
+          type: string
+          enum: [error]
+        message:
+          type: string
+          description: Human-readable error message.
 
     # ── Insights Schemas ────────────────────────────────────────────────
 

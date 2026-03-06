@@ -217,7 +217,7 @@ export const SessionsApiAxiosParamCreator = function (configuration?: Configurat
             };
         },
         /**
-         * Opens a server-sent event (SSE) stream for real-time session updates. Events include new assistant turns, tool invocations, and completion signals.
+         * Opens a server-sent event (SSE) stream for real-time session updates.  The stream emits the following event types:  - `event: assistant_turn` — data: `AssistantTurn` JSON object - `event: tool_turn` — data: `ToolTurn` JSON object - `event: done` — data: `{}` (stream complete) - `event: error` — data: `{\"message\": \"...\"}` (error occurred)  See the `SessionEvent` schema for the discriminated union of all event payloads. 
          * @summary Stream Session Events
          * @param {string} id Unique session identifier.
          * @param {*} [options] Override http request option.
@@ -321,7 +321,7 @@ export const SessionsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Opens a server-sent event (SSE) stream for real-time session updates. Events include new assistant turns, tool invocations, and completion signals.
+         * Opens a server-sent event (SSE) stream for real-time session updates.  The stream emits the following event types:  - `event: assistant_turn` — data: `AssistantTurn` JSON object - `event: tool_turn` — data: `ToolTurn` JSON object - `event: done` — data: `{}` (stream complete) - `event: error` — data: `{\"message\": \"...\"}` (error occurred)  See the `SessionEvent` schema for the discriminated union of all event payloads. 
          * @summary Stream Session Events
          * @param {string} id Unique session identifier.
          * @param {*} [options] Override http request option.
@@ -385,7 +385,7 @@ export const SessionsApiFactory = function (configuration?: Configuration, baseP
             return localVarFp.sendSessionMessage(id, sendMessageRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Opens a server-sent event (SSE) stream for real-time session updates. Events include new assistant turns, tool invocations, and completion signals.
+         * Opens a server-sent event (SSE) stream for real-time session updates.  The stream emits the following event types:  - `event: assistant_turn` — data: `AssistantTurn` JSON object - `event: tool_turn` — data: `ToolTurn` JSON object - `event: done` — data: `{}` (stream complete) - `event: error` — data: `{\"message\": \"...\"}` (error occurred)  See the `SessionEvent` schema for the discriminated union of all event payloads. 
          * @summary Stream Session Events
          * @param {string} id Unique session identifier.
          * @param {*} [options] Override http request option.
@@ -448,7 +448,7 @@ export class SessionsApi extends BaseAPI {
     }
 
     /**
-     * Opens a server-sent event (SSE) stream for real-time session updates. Events include new assistant turns, tool invocations, and completion signals.
+     * Opens a server-sent event (SSE) stream for real-time session updates.  The stream emits the following event types:  - `event: assistant_turn` — data: `AssistantTurn` JSON object - `event: tool_turn` — data: `ToolTurn` JSON object - `event: done` — data: `{}` (stream complete) - `event: error` — data: `{\"message\": \"...\"}` (error occurred)  See the `SessionEvent` schema for the discriminated union of all event payloads. 
      * @summary Stream Session Events
      * @param {string} id Unique session identifier.
      * @param {*} [options] Override http request option.

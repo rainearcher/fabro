@@ -23,6 +23,10 @@ export interface AssistantTurn {
      * Text content of the assistant response.
      */
     'content': string;
+    /**
+     * Timestamp when the turn was created.
+     */
+    'created_at': string;
 }
 
 export const AssistantTurnKindEnum = {

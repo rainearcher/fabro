@@ -26,6 +26,10 @@ export interface ToolTurn {
      * Tool invocations for this turn.
      */
     'tools': Array<ToolUse>;
+    /**
+     * Timestamp when the turn was created.
+     */
+    'created_at': string;
 }
 
 export const ToolTurnKindEnum = {
