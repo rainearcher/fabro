@@ -2,6 +2,7 @@ use std::path::Path;
 
 use async_trait::async_trait;
 
+use crate::context::keys;
 use crate::context::Context;
 use crate::error::ArcError;
 use crate::graph::{Graph, Node};
@@ -40,7 +41,7 @@ impl Handler for PromptHandler {
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| node.label());
         let expanded = expand_variables(raw_prompt, graph)?;
-        let preamble = context.get_string("current.preamble", "");
+        let preamble = context.preamble();
         let prompt = if preamble.is_empty() {
             expanded
         } else {
@@ -92,13 +93,13 @@ impl Handler for PromptHandler {
         outcome.notes = Some(format!("Stage completed: {}", node.id));
         outcome
             .context_updates
-            .insert("last_stage".to_string(), serde_json::json!(node.id));
+            .insert(keys::LAST_STAGE.to_string(), serde_json::json!(node.id));
         outcome.context_updates.insert(
-            "last_response".to_string(),
+            keys::LAST_RESPONSE.to_string(),
             serde_json::json!(truncate(&response_text, 200)),
         );
         outcome.context_updates.insert(
-            format!("response.{}", node.id),
+            keys::response_key(&node.id),
             serde_json::json!(&response_text),
         );
 
@@ -277,7 +278,7 @@ mod tests {
             AttrValue::String("Classify this".to_string()),
         );
         let context = Context::new();
-        context.set("current.preamble", serde_json::json!("Prior output here"));
+        context.set(keys::CURRENT_PREAMBLE, serde_json::json!("Prior output here"));
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 

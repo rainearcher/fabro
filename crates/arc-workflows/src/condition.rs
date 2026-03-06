@@ -10,6 +10,7 @@
 /// Op         ::= '=' | '!=' | '>' | '<' | '>=' | '<='
 ///              | 'contains' | 'matches'
 /// ```
+use crate::context::keys;
 use crate::context::Context;
 use crate::error::ArcError;
 use crate::outcome::Outcome;
@@ -312,10 +313,10 @@ pub fn parse_condition(expr: &str) -> Result<(), ArcError> {
 // ---------------------------------------------------------------------------
 
 fn resolve_key(key: &str, outcome: &Outcome, context: &Context) -> String {
-    if key == "outcome" {
+    if key == keys::OUTCOME {
         return outcome.status.to_string();
     }
-    if key == "preferred_label" {
+    if key == keys::PREFERRED_LABEL {
         return outcome.preferred_label.as_deref().unwrap_or("").to_string();
     }
     if let Some(path) = key.strip_prefix("context.") {
@@ -337,10 +338,10 @@ fn resolve_key_value(
     outcome: &Outcome,
     context: &Context,
 ) -> serde_json::Value {
-    if key == "outcome" {
+    if key == keys::OUTCOME {
         return serde_json::Value::String(outcome.status.to_string());
     }
-    if key == "preferred_label" {
+    if key == keys::PREFERRED_LABEL {
         return outcome
             .preferred_label
             .as_deref()
@@ -635,7 +636,7 @@ mod tests {
     fn context_failure_class_matches_when_set() {
         let outcome = make_outcome(StageStatus::Fail);
         let context = Context::new();
-        context.set("failure_class", serde_json::json!("budget_exhausted"));
+        context.set(keys::FAILURE_CLASS, serde_json::json!("budget_exhausted"));
         assert!(evaluate_condition(
             "context.failure_class=budget_exhausted",
             &outcome,
@@ -647,7 +648,7 @@ mod tests {
     fn context_failure_class_not_equals_on_success() {
         let outcome = make_outcome(StageStatus::Success);
         let context = Context::new();
-        context.set("failure_class", serde_json::json!(""));
+        context.set(keys::FAILURE_CLASS, serde_json::json!(""));
         assert!(evaluate_condition(
             "context.failure_class!=transient_infra",
             &outcome,
@@ -659,7 +660,7 @@ mod tests {
     fn context_failure_class_combined_with_outcome() {
         let outcome = make_outcome(StageStatus::Fail);
         let context = Context::new();
-        context.set("failure_class", serde_json::json!("transient_infra"));
+        context.set(keys::FAILURE_CLASS, serde_json::json!("transient_infra"));
         assert!(evaluate_condition(
             "outcome=fail && context.failure_class=transient_infra",
             &outcome,

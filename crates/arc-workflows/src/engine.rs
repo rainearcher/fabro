@@ -17,6 +17,7 @@ use crate::artifact::{offload_large_values, sync_artifacts_to_env, ArtifactStore
 use crate::asset_snapshot;
 use crate::checkpoint::Checkpoint;
 use crate::condition::evaluate_condition;
+use crate::context;
 use crate::context::Context;
 use crate::error::{ArcError, FailureClass, FailureSignature, Result};
 use crate::event::{EventEmitter, WorkflowRunEvent};
@@ -311,10 +312,7 @@ pub fn node_dir(logs_root: &Path, node_id: &str, visit: usize) -> PathBuf {
 
 /// Read the visit count from context, defaulting to 1 if not set.
 pub fn visit_from_context(context: &Context) -> usize {
-    context
-        .get("internal.node_visit_count")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(1) as usize
+    context.node_visit_count()
 }
 
 /// Write status.json for a completed node into {`logs_root}/nodes/{node_id}/status.json`.
@@ -820,11 +818,11 @@ impl WorkflowRunEngine {
     /// Mirror graph-level attributes into the context.
     fn mirror_graph_attributes(graph: &Graph, context: &Context) {
         if !graph.goal().is_empty() {
-            context.set("graph.goal", serde_json::json!(graph.goal()));
+            context.set(context::keys::GRAPH_GOAL, serde_json::json!(graph.goal()));
         }
         for (key, val) in &graph.attrs {
             context.set(
-                format!("graph.{key}"),
+                context::keys::graph_attr_key(key),
                 serde_json::json!(val.to_string_value()),
             );
         }
@@ -1210,7 +1208,7 @@ impl WorkflowRunEngine {
                 }
             }
             // Gap #6: Check if the checkpointed node used full fidelity
-            if cp.context_values.get("internal.fidelity") == Some(&serde_json::json!("full")) {
+            if cp.context_values.get(context::keys::INTERNAL_FIDELITY) == Some(&serde_json::json!("full")) {
                 degrade_fidelity_on_resume = true;
             }
         } else if let Some(start) = start_at {
@@ -1232,10 +1230,10 @@ impl WorkflowRunEngine {
         }
 
         // Store run_id and work_dir in context for handlers
-        context.set("internal.run_id", serde_json::json!(run_id));
+        context.set(context::keys::INTERNAL_RUN_ID, serde_json::json!(run_id));
         if let Some(GitCheckpointMode::Host(ref wd)) = config.git_checkpoint {
             context.set(
-                "internal.work_dir",
+                context::keys::INTERNAL_WORK_DIR,
                 serde_json::json!(wd.to_string_lossy().as_ref()),
             );
         }
@@ -1384,16 +1382,16 @@ impl WorkflowRunEngine {
                 fidelity = "summary:high".to_string();
             }
             degrade_fidelity_on_resume = false;
-            context.set("internal.fidelity", serde_json::json!(&fidelity));
+            context.set(context::keys::INTERNAL_FIDELITY, serde_json::json!(&fidelity));
 
             // Preamble injection at execution time (spec 5.4 / 8.3): synthesize a
             // fidelity-appropriate preamble from runtime data for handlers to read
             if fidelity == "full" {
-                context.set("current.preamble", serde_json::json!(""));
+                context.set(context::keys::CURRENT_PREAMBLE, serde_json::json!(""));
             } else {
                 let preamble =
                     build_preamble(&fidelity, &context, graph, &completed_nodes, &node_outcomes);
-                context.set("current.preamble", serde_json::json!(preamble));
+                context.set(context::keys::CURRENT_PREAMBLE, serde_json::json!(preamble));
             }
 
             // Thread context sharing: resolve thread ID and store in context for handlers
@@ -1401,18 +1399,18 @@ impl WorkflowRunEngine {
                 resolve_thread_id(incoming_edge, node, graph, previous_node_id.as_deref());
             if let Some(ref tid) = resolved_thread_id {
                 context.set(
-                    format!("thread.{tid}.current_node"),
+                    context::keys::thread_current_node_key(tid),
                     serde_json::json!(&node.id),
                 );
-                context.set("internal.thread_id", serde_json::json!(tid));
+                context.set(context::keys::INTERNAL_THREAD_ID, serde_json::json!(tid));
             } else {
-                context.set("internal.thread_id", serde_json::Value::Null);
+                context.set(context::keys::INTERNAL_THREAD_ID, serde_json::Value::Null);
             }
 
             // Step 2: Execute node handler with retry policy
             let visit = *loop_state.node_visits.get(&current_node_id).unwrap_or(&1);
-            context.set("internal.node_visit_count", serde_json::json!(visit));
-            context.set("current_node", serde_json::json!(&node.id));
+            context.set(context::keys::INTERNAL_NODE_VISIT_COUNT, serde_json::json!(visit));
+            context.set(context::keys::CURRENT_NODE, serde_json::json!(&node.id));
             let retry_policy = build_retry_policy(node, graph);
 
             self.services.emitter.emit(&WorkflowRunEvent::StageStarted {
@@ -1505,7 +1503,7 @@ impl WorkflowRunEngine {
             // Gap #5: Track retry count per node
             node_retries.insert(node.id.clone(), attempts_used);
             context.set(
-                format!("internal.retry_count.{}", node.id),
+                context::keys::retry_count_key(&node.id),
                 serde_json::json!(attempts_used),
             );
 
@@ -1637,19 +1635,19 @@ impl WorkflowRunEngine {
 
             // Step 4: Apply context updates from outcome
             context.apply_updates(&outcome.context_updates);
-            context.set("outcome", serde_json::json!(outcome.status.to_string()));
+            context.set(context::keys::OUTCOME, serde_json::json!(outcome.status.to_string()));
             context.set(
-                "failure_class",
+                context::keys::FAILURE_CLASS,
                 serde_json::json!(outcome_failure_class.map_or(String::new(), |fc| fc.to_string())),
             );
             context.set(
-                "failure_signature",
+                context::keys::FAILURE_SIGNATURE,
                 serde_json::json!(failure_sig
                     .as_ref()
                     .map_or(String::new(), |s| s.to_string())),
             );
             if let Some(ref pref) = outcome.preferred_label {
-                context.set("preferred_label", serde_json::json!(pref));
+                context.set(context::keys::PREFERRED_LABEL, serde_json::json!(pref));
             }
 
             // Step 5: Select next edge (done before checkpoint so we can store next_node_id)
@@ -2762,7 +2760,7 @@ mod tests {
         // Verify checkpoint has graph.goal mirrored
         let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
         assert_eq!(
-            cp.context_values.get("graph.goal"),
+            cp.context_values.get(context::keys::GRAPH_GOAL),
             Some(&serde_json::json!("Run tests"))
         );
     }
@@ -3035,7 +3033,7 @@ mod tests {
         // The checkpoint context should contain internal.fidelity
         let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
         assert_eq!(
-            cp.context_values.get("internal.fidelity"),
+            cp.context_values.get(context::keys::INTERNAL_FIDELITY),
             Some(&serde_json::json!("compact"))
         );
     }
@@ -4543,7 +4541,7 @@ mod tests {
         // Check the checkpoint for the failure_signature context value
         let checkpoint_path = dir.path().join("checkpoint.json");
         let cp = Checkpoint::load(&checkpoint_path).unwrap();
-        let sig_value = cp.context_values.get("failure_signature").unwrap();
+        let sig_value = cp.context_values.get(context::keys::FAILURE_SIGNATURE).unwrap();
         let sig_str = sig_value.as_str().unwrap();
         assert!(
             sig_str.contains("work|deterministic|"),

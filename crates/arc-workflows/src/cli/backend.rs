@@ -342,7 +342,7 @@ impl CodergenBackend for AgentApiBackend {
         stage_dir: &std::path::Path,
         sandbox: &Arc<dyn Sandbox>,
     ) -> Result<CodergenResult, ArcError> {
-        let fidelity = context.get_string("internal.fidelity", "");
+        let fidelity = context.fidelity();
         let reuse_key = if fidelity == "full" {
             thread_id.map(String::from)
         } else {

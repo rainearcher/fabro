@@ -6,6 +6,7 @@ use arc_agent::Sandbox;
 use async_trait::async_trait;
 use tokio::sync::Semaphore;
 
+use crate::context::keys;
 use crate::context::Context;
 use crate::engine::GitCheckpointMode;
 use crate::error::ArcError;
@@ -317,7 +318,7 @@ impl Handler for ParallelHandler {
                             ArcError::handler(format!("worktree setup join error: {e}"))
                         })??;
                         branch_context.set(
-                            "internal.work_dir",
+                            keys::INTERNAL_WORK_DIR,
                             serde_json::json!(wt_path.to_string_lossy().as_ref()),
                         );
                         let env: Arc<dyn Sandbox> =
@@ -366,7 +367,7 @@ impl Handler for ParallelHandler {
                                 "failed to reset remote worktree {wt_path_str}"
                             )));
                         }
-                        branch_context.set("internal.work_dir", serde_json::json!(&wt_path_str));
+                        branch_context.set(keys::INTERNAL_WORK_DIR, serde_json::json!(&wt_path_str));
                         let env: Arc<dyn Sandbox> = Arc::new(WorktreeSandbox {
                             inner: Arc::clone(&services.sandbox),
                             worktree_dir: wt_path_str.clone(),
@@ -637,8 +638,8 @@ impl Handler for ParallelHandler {
                 entry
             })
             .collect();
-        context.set("parallel.results", serde_json::json!(results_json));
-        context.set("parallel.branch_count", serde_json::json!(total));
+        context.set(keys::PARALLEL_RESULTS, serde_json::json!(results_json));
+        context.set(keys::PARALLEL_BRANCH_COUNT, serde_json::json!(total));
 
         let visit = crate::engine::visit_from_context(context);
         let node_dir = crate::engine::node_dir(logs_root, &node.id, visit);
@@ -815,7 +816,7 @@ mod tests {
         assert!(outcome.notes.as_deref().unwrap().contains("2 branches"));
 
         // Check context was set
-        let results = context.get("parallel.results");
+        let results = context.get(keys::PARALLEL_RESULTS);
         assert!(results.is_some());
 
         // Check parallel_results.json was written

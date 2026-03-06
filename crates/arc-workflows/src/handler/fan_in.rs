@@ -4,6 +4,7 @@ use std::sync::Arc;
 use arc_agent::Sandbox;
 use async_trait::async_trait;
 
+use crate::context::keys;
 use crate::context::Context;
 use crate::error::ArcError;
 use crate::event::EventEmitter;
@@ -35,7 +36,7 @@ impl Handler for FanInHandler {
         logs_root: &Path,
         services: &EngineServices,
     ) -> Result<Outcome, ArcError> {
-        let results = context.get("parallel.results");
+        let results = context.get(keys::PARALLEL_RESULTS);
         let Some(results) = results else {
             return Ok(Outcome::fail_deterministic(
                 "No parallel results to evaluate",
@@ -99,16 +100,16 @@ impl Handler for FanInHandler {
 
         let mut outcome = Outcome::success();
         outcome.context_updates.insert(
-            "parallel.fan_in.best_id".to_string(),
+            keys::PARALLEL_FAN_IN_BEST_ID.to_string(),
             serde_json::json!(best.id),
         );
         outcome.context_updates.insert(
-            "parallel.fan_in.best_outcome".to_string(),
+            keys::PARALLEL_FAN_IN_BEST_OUTCOME.to_string(),
             serde_json::json!(best.status),
         );
         if let Some(ref sha) = best_head_sha {
             outcome.context_updates.insert(
-                "parallel.fan_in.best_head_sha".to_string(),
+                keys::PARALLEL_FAN_IN_BEST_HEAD_SHA.to_string(),
                 serde_json::json!(sha),
             );
         }
@@ -234,7 +235,7 @@ async fn llm_evaluate(
             // If the backend returned a full Outcome, extract best_id from context_updates
             let best_id = outcome
                 .context_updates
-                .get("parallel.fan_in.best_id")
+                .get(keys::PARALLEL_FAN_IN_BEST_ID)
                 .and_then(|v| v.as_str())
                 .map(String::from)
                 .or_else(|| outcome.notes.clone())
@@ -330,7 +331,7 @@ mod tests {
         let node = Node::new("fan_in");
         let context = Context::new();
         context.set(
-            "parallel.results",
+            keys::PARALLEL_RESULTS,
             serde_json::json!([
                 {"id": "branch_a", "status": "fail"},
                 {"id": "branch_b", "status": "success"},
@@ -345,7 +346,7 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
         assert_eq!(
-            outcome.context_updates.get("parallel.fan_in.best_id"),
+            outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
             Some(&serde_json::json!("branch_b"))
         );
     }
@@ -356,7 +357,7 @@ mod tests {
         let node = Node::new("fan_in");
         let context = Context::new();
         context.set(
-            "parallel.results",
+            keys::PARALLEL_RESULTS,
             serde_json::json!([
                 {"id": "c", "status": "success"},
                 {"id": "a", "status": "success"},
@@ -371,7 +372,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            outcome.context_updates.get("parallel.fan_in.best_id"),
+            outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
             Some(&serde_json::json!("a"))
         );
     }
@@ -394,7 +395,7 @@ mod tests {
         );
         let context = Context::new();
         context.set(
-            "parallel.results",
+            keys::PARALLEL_RESULTS,
             serde_json::json!([
                 {"id": "branch_a", "status": "success"},
                 {"id": "branch_b", "status": "fail"},
@@ -410,7 +411,7 @@ mod tests {
         assert_eq!(outcome.status, StageStatus::Success);
         // Should still pick branch_a via heuristic (success beats fail)
         assert_eq!(
-            outcome.context_updates.get("parallel.fan_in.best_id"),
+            outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
             Some(&serde_json::json!("branch_a"))
         );
     }
@@ -451,7 +452,7 @@ mod tests {
         );
         let context = Context::new();
         context.set(
-            "parallel.results",
+            keys::PARALLEL_RESULTS,
             serde_json::json!([
                 {"id": "branch_a", "status": "success"},
                 {"id": "branch_b", "status": "success"},
@@ -467,7 +468,7 @@ mod tests {
         assert_eq!(outcome.status, StageStatus::Success);
         // LLM chose branch_b
         assert_eq!(
-            outcome.context_updates.get("parallel.fan_in.best_id"),
+            outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
             Some(&serde_json::json!("branch_b"))
         );
 
@@ -489,7 +490,7 @@ mod tests {
         let node = Node::new("fan_in");
         let context = Context::new();
         context.set(
-            "parallel.results",
+            keys::PARALLEL_RESULTS,
             serde_json::json!([
                 {"id": "branch_a", "status": "fail"},
                 {"id": "branch_b", "status": "fail"},
@@ -516,7 +517,7 @@ mod tests {
         let node = Node::new("fan_in");
         let context = Context::new();
         context.set(
-            "parallel.results",
+            keys::PARALLEL_RESULTS,
             serde_json::json!([
                 {"id": "branch_a", "status": "success", "score": 0.5},
                 {"id": "branch_b", "status": "success", "score": 0.9},
@@ -533,7 +534,7 @@ mod tests {
         assert_eq!(outcome.status, StageStatus::Success);
         // branch_b has highest score
         assert_eq!(
-            outcome.context_updates.get("parallel.fan_in.best_id"),
+            outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
             Some(&serde_json::json!("branch_b"))
         );
     }

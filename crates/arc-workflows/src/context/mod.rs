@@ -1,3 +1,5 @@
+pub mod keys;
+
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -113,6 +115,41 @@ impl Context {
             values.insert(key.clone(), value.clone());
         }
     }
+
+    // --- Typed accessors ---
+
+    #[must_use]
+    pub fn run_id(&self) -> String {
+        self.get_string(keys::INTERNAL_RUN_ID, "unknown")
+    }
+
+    #[must_use]
+    pub fn fidelity(&self) -> String {
+        self.get_string(keys::INTERNAL_FIDELITY, "")
+    }
+
+    #[must_use]
+    pub fn preamble(&self) -> String {
+        self.get_string(keys::CURRENT_PREAMBLE, "")
+    }
+
+    #[must_use]
+    pub fn thread_id(&self) -> Option<String> {
+        self.get(keys::INTERNAL_THREAD_ID)
+            .and_then(|v| v.as_str().map(String::from))
+    }
+
+    #[must_use]
+    pub fn node_visit_count(&self) -> usize {
+        self.get(keys::INTERNAL_NODE_VISIT_COUNT)
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as usize
+    }
+
+    #[must_use]
+    pub fn current_node_id(&self) -> String {
+        self.get_string(keys::CURRENT_NODE, "")
+    }
 }
 
 #[cfg(test)]
@@ -218,5 +255,90 @@ mod tests {
     fn default_creates_empty_context() {
         let ctx = Context::default();
         assert!(ctx.snapshot().is_empty());
+    }
+
+    #[test]
+    fn run_id_default() {
+        let ctx = Context::new();
+        assert_eq!(ctx.run_id(), "unknown");
+    }
+
+    #[test]
+    fn run_id_set() {
+        let ctx = Context::new();
+        ctx.set(keys::INTERNAL_RUN_ID, serde_json::json!("abc-123"));
+        assert_eq!(ctx.run_id(), "abc-123");
+    }
+
+    #[test]
+    fn fidelity_default() {
+        let ctx = Context::new();
+        assert_eq!(ctx.fidelity(), "");
+    }
+
+    #[test]
+    fn fidelity_set() {
+        let ctx = Context::new();
+        ctx.set(keys::INTERNAL_FIDELITY, serde_json::json!("compact"));
+        assert_eq!(ctx.fidelity(), "compact");
+    }
+
+    #[test]
+    fn preamble_default() {
+        let ctx = Context::new();
+        assert_eq!(ctx.preamble(), "");
+    }
+
+    #[test]
+    fn preamble_set() {
+        let ctx = Context::new();
+        ctx.set(keys::CURRENT_PREAMBLE, serde_json::json!("hello"));
+        assert_eq!(ctx.preamble(), "hello");
+    }
+
+    #[test]
+    fn thread_id_default() {
+        let ctx = Context::new();
+        assert_eq!(ctx.thread_id(), None);
+    }
+
+    #[test]
+    fn thread_id_null() {
+        let ctx = Context::new();
+        ctx.set(keys::INTERNAL_THREAD_ID, serde_json::Value::Null);
+        assert_eq!(ctx.thread_id(), None);
+    }
+
+    #[test]
+    fn thread_id_set() {
+        let ctx = Context::new();
+        ctx.set(keys::INTERNAL_THREAD_ID, serde_json::json!("main"));
+        assert_eq!(ctx.thread_id(), Some("main".to_string()));
+    }
+
+    #[test]
+    fn node_visit_count_default() {
+        let ctx = Context::new();
+        assert_eq!(ctx.node_visit_count(), 1);
+    }
+
+    #[test]
+    fn node_visit_count_set() {
+        let ctx = Context::new();
+        ctx.set(keys::INTERNAL_NODE_VISIT_COUNT, serde_json::json!(3));
+        assert_eq!(ctx.node_visit_count(), 3);
+    }
+
+    #[test]
+    fn current_node_id_default() {
+        let ctx = Context::new();
+        assert_eq!(ctx.current_node_id(), "");
+    }
+
+    #[test]
+    fn current_node_id_set() {
+        let ctx = Context::new();
+        ctx.set(keys::CURRENT_NODE, serde_json::json!("plan"));
+        assert_eq!(ctx.current_node_id(), "plan");
     }
 }

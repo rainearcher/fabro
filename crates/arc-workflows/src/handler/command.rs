@@ -2,6 +2,7 @@ use std::path::Path;
 
 use async_trait::async_trait;
 
+use crate::context::keys;
 use crate::context::Context;
 use crate::error::ArcError;
 use crate::graph::{Graph, Node};
@@ -129,10 +130,10 @@ impl Handler for CommandHandler {
                     let mut outcome = Outcome::success();
                     outcome
                         .context_updates
-                        .insert("command.output".to_string(), serde_json::json!(stdout));
+                        .insert(keys::COMMAND_OUTPUT.to_string(), serde_json::json!(stdout));
                     outcome
                         .context_updates
-                        .insert("command.stderr".to_string(), serde_json::json!(stderr));
+                        .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(stderr));
                     outcome.notes = Some(format!("Script completed: {script}"));
                     Ok(outcome)
                 } else {
@@ -151,10 +152,10 @@ impl Handler for CommandHandler {
                     let mut outcome = Outcome::fail_classify(reason);
                     outcome
                         .context_updates
-                        .insert("command.output".to_string(), serde_json::json!(stdout));
+                        .insert(keys::COMMAND_OUTPUT.to_string(), serde_json::json!(stdout));
                     outcome
                         .context_updates
-                        .insert("command.stderr".to_string(), serde_json::json!(stderr));
+                        .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(stderr));
                     Ok(outcome)
                 }
             }
@@ -219,9 +220,9 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
         assert!(outcome.notes.as_deref().unwrap().contains("echo hello"));
-        let command_output = outcome.context_updates.get("command.output").unwrap();
+        let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
         assert!(command_output.as_str().unwrap().contains("hello"));
-        let command_stderr = outcome.context_updates.get("command.stderr").unwrap();
+        let command_stderr = outcome.context_updates.get(keys::COMMAND_STDERR).unwrap();
         assert_eq!(command_stderr.as_str().unwrap(), "");
     }
 
@@ -486,7 +487,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        let command_output = outcome.context_updates.get("command.output").unwrap();
+        let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
         assert!(command_output
             .as_str()
             .unwrap()
@@ -560,7 +561,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        let command_output = outcome.context_updates.get("command.output").unwrap();
+        let command_output = outcome.context_updates.get(keys::COMMAND_OUTPUT).unwrap();
         assert!(command_output.as_str().unwrap().contains("legacy"));
     }
 
@@ -581,7 +582,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        let command_stderr = outcome.context_updates.get("command.stderr").unwrap();
+        let command_stderr = outcome.context_updates.get(keys::COMMAND_STDERR).unwrap();
         assert!(
             command_stderr.as_str().unwrap().contains("err"),
             "command.stderr should contain 'err', got: {:?}",
@@ -606,7 +607,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        assert!(outcome.context_updates.contains_key("command.output"));
+        assert!(outcome.context_updates.contains_key(keys::COMMAND_OUTPUT));
         assert!(
             !outcome.context_updates.contains_key("tool.output"),
             "tool.output should not be emitted"
@@ -679,7 +680,7 @@ mod tests {
         assert_eq!(outcome.status, StageStatus::Fail);
         let command_output = outcome
             .context_updates
-            .get("command.output")
+            .get(keys::COMMAND_OUTPUT)
             .expect("command.output should be set on failure");
         assert!(
             command_output.as_str().unwrap().contains("build output"),

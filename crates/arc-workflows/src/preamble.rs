@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::artifact::{artifact_path, format_artifact_reference};
+use crate::context::keys;
 use crate::context::Context;
 use crate::graph::{is_llm_handler_type, Graph, Node};
 use crate::outcome::Outcome;
@@ -23,7 +24,7 @@ pub fn build_preamble(
     node_outcomes: &HashMap<String, Outcome>,
 ) -> String {
     let goal = graph.goal();
-    let run_id = context.get_string("internal.run_id", "unknown");
+    let run_id = context.run_id();
 
     match fidelity {
         "truncate" => {
@@ -69,15 +70,15 @@ pub fn build_preamble(
 // ---------------------------------------------------------------------------
 
 fn is_context_key_excluded(key: &str) -> bool {
-    key.starts_with("internal.")
-        || key.starts_with("current")
-        || key.starts_with("graph.")
-        || key.starts_with("thread.")
-        || key.starts_with("response.")
-        || key == "outcome"
-        || key == "last_stage"
-        || key == "last_response"
-        || key == "preferred_label"
+    key.starts_with(keys::INTERNAL_PREFIX)
+        || key.starts_with(keys::CURRENT_PREFIX)
+        || key.starts_with(keys::GRAPH_PREFIX)
+        || key.starts_with(keys::THREAD_PREFIX)
+        || key.starts_with(keys::RESPONSE_PREFIX)
+        || key == keys::OUTCOME
+        || key == keys::LAST_STAGE
+        || key == keys::LAST_RESPONSE
+        || key == keys::PREFERRED_LABEL
 }
 
 fn format_value(val: &serde_json::Value) -> String {
@@ -101,11 +102,11 @@ fn format_token_count(tokens: i64) -> String {
 /// handler-specific details, so they can be skipped in the trailing context section.
 fn stage_rendered_keys(node_id: &str, outcome: &Outcome) -> HashSet<String> {
     let candidates = [
-        "command.output".to_string(),
-        "command.stderr".to_string(),
-        "last_stage".to_string(),
-        "last_response".to_string(),
-        format!("response.{node_id}"),
+        keys::COMMAND_OUTPUT.to_string(),
+        keys::COMMAND_STDERR.to_string(),
+        keys::LAST_STAGE.to_string(),
+        keys::LAST_RESPONSE.to_string(),
+        keys::response_key(node_id),
     ];
     candidates
         .into_iter()
@@ -133,7 +134,7 @@ fn render_compact_stage_details(
                     lines.push(format!("  - Script: `{cmd}`"));
                 }
             }
-            if let Some(stdout_val) = outcome.context_updates.get("command.output") {
+            if let Some(stdout_val) = outcome.context_updates.get(keys::COMMAND_OUTPUT) {
                 let stdout = format_value(stdout_val);
                 if stdout.trim().is_empty() {
                     lines.push("  - Stdout: (empty)".to_string());
@@ -144,7 +145,7 @@ fn render_compact_stage_details(
                     lines.push("    ```".to_string());
                 }
             }
-            if let Some(stderr_val) = outcome.context_updates.get("command.stderr") {
+            if let Some(stderr_val) = outcome.context_updates.get(keys::COMMAND_STDERR) {
                 let stderr = format_value(stderr_val);
                 if stderr.trim().is_empty() {
                     lines.push("  - Stderr: (empty)".to_string());
@@ -203,7 +204,7 @@ fn render_summary_high_stage_section(
                     lines.push(format!("- Script: `{cmd}`"));
                 }
             }
-            if let Some(stdout_val) = outcome.context_updates.get("command.output") {
+            if let Some(stdout_val) = outcome.context_updates.get(keys::COMMAND_OUTPUT) {
                 if let Some(path) = artifact_path(stdout_val) {
                     lines.push(format!("- Stdout: {}", format_artifact_reference(path)));
                 } else {
@@ -218,7 +219,7 @@ fn render_summary_high_stage_section(
                     }
                 }
             }
-            if let Some(stderr_val) = outcome.context_updates.get("command.stderr") {
+            if let Some(stderr_val) = outcome.context_updates.get(keys::COMMAND_STDERR) {
                 if let Some(path) = artifact_path(stderr_val) {
                     lines.push(format!("- Stderr: {}", format_artifact_reference(path)));
                 } else {
@@ -250,7 +251,7 @@ fn render_summary_high_stage_section(
                 ));
             }
             // Include full response from context_updates (or artifact pointer)
-            if let Some(resp_val) = outcome.context_updates.get(&format!("response.{node_id}")) {
+            if let Some(resp_val) = outcome.context_updates.get(&keys::response_key(node_id)) {
                 if let Some(path) = artifact_path(resp_val) {
                     lines.push(format!("- Response: {}", format_artifact_reference(path)));
                 } else {
@@ -532,7 +533,7 @@ mod tests {
             AttrValue::String("Fix the login bug".to_string()),
         );
         let context = Context::new();
-        context.set("internal.run_id", serde_json::json!("abc-123"));
+        context.set(keys::INTERNAL_RUN_ID, serde_json::json!("abc-123"));
         let completed_nodes: Vec<String> = Vec::new();
         let node_outcomes: HashMap<String, Outcome> = HashMap::new();
 
@@ -596,7 +597,7 @@ mod tests {
             AttrValue::String("Deploy app".to_string()),
         );
         let context = Context::new();
-        context.set("internal.run_id", serde_json::json!("run-456"));
+        context.set(keys::INTERNAL_RUN_ID, serde_json::json!("run-456"));
         let completed_nodes = vec!["plan".to_string(), "code".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         node_outcomes.insert("plan".to_string(), Outcome::success());
@@ -637,7 +638,7 @@ mod tests {
     fn build_preamble_compact_includes_context_values() {
         let graph = Graph::new("test");
         let context = Context::new();
-        context.set("graph.goal", serde_json::json!("Build it"));
+        context.set(keys::GRAPH_GOAL, serde_json::json!("Build it"));
         context.set("user.name", serde_json::json!("alice"));
         let completed_nodes: Vec<String> = Vec::new();
         let node_outcomes: HashMap<String, Outcome> = HashMap::new();
@@ -665,15 +666,15 @@ mod tests {
     fn build_preamble_compact_excludes_internal_keys() {
         let graph = Graph::new("test");
         let context = Context::new();
-        context.set("internal.fidelity", serde_json::json!("compact"));
-        context.set("internal.retry_count.plan", serde_json::json!(1));
-        context.set("current_node", serde_json::json!("work"));
-        context.set("graph.default_fidelity", serde_json::json!("compact"));
+        context.set(keys::INTERNAL_FIDELITY, serde_json::json!("compact"));
+        context.set(&keys::retry_count_key("plan"), serde_json::json!(1));
+        context.set(keys::CURRENT_NODE, serde_json::json!("work"));
+        context.set(&keys::graph_attr_key("default_fidelity"), serde_json::json!("compact"));
         context.set("thread.main.current_node", serde_json::json!("work"));
-        context.set("response.plan", serde_json::json!("some response"));
-        context.set("last_stage", serde_json::json!("plan"));
-        context.set("last_response", serde_json::json!("resp"));
-        context.set("preferred_label", serde_json::json!("success"));
+        context.set(&keys::response_key("plan"), serde_json::json!("some response"));
+        context.set(keys::LAST_STAGE, serde_json::json!("plan"));
+        context.set(keys::LAST_RESPONSE, serde_json::json!("resp"));
+        context.set(keys::PREFERRED_LABEL, serde_json::json!("success"));
         context.set("user.name", serde_json::json!("bob"));
         let completed_nodes: Vec<String> = Vec::new();
         let node_outcomes: HashMap<String, Outcome> = HashMap::new();
@@ -777,12 +778,12 @@ mod tests {
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
         outcome.context_updates.insert(
-            "command.output".to_string(),
+            keys::COMMAND_OUTPUT.to_string(),
             serde_json::json!("10 passed\n"),
         );
         outcome
             .context_updates
-            .insert("command.stderr".to_string(), serde_json::json!(""));
+            .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(""));
         node_outcomes.insert("run_tests".to_string(), outcome);
 
         let preamble = build_preamble(
@@ -856,10 +857,10 @@ mod tests {
     fn compact_context_excludes_engine_keys() {
         let graph = Graph::new("test");
         let context = Context::new();
-        context.set("graph.default_fidelity", serde_json::json!("compact"));
+        context.set(&keys::graph_attr_key("default_fidelity"), serde_json::json!("compact"));
         context.set("thread.main.current_node", serde_json::json!("work"));
-        context.set("response.plan", serde_json::json!("some LLM response"));
-        context.set("last_stage", serde_json::json!("plan"));
+        context.set(&keys::response_key("plan"), serde_json::json!("some LLM response"));
+        context.set(keys::LAST_STAGE, serde_json::json!("plan"));
         context.set("user.preference", serde_json::json!("dark"));
         let completed_nodes: Vec<String> = Vec::new();
         let node_outcomes: HashMap<String, Outcome> = HashMap::new();
@@ -910,17 +911,17 @@ mod tests {
 
         let context = Context::new();
         // command.output is set in context (the engine copies context_updates to context)
-        context.set("command.output", serde_json::json!("hi\n"));
-        context.set("command.stderr", serde_json::json!(""));
+        context.set(keys::COMMAND_OUTPUT, serde_json::json!("hi\n"));
+        context.set(keys::COMMAND_STDERR, serde_json::json!(""));
         let completed_nodes = vec!["step".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
         outcome
             .context_updates
-            .insert("command.output".to_string(), serde_json::json!("hi\n"));
+            .insert(keys::COMMAND_OUTPUT.to_string(), serde_json::json!("hi\n"));
         outcome
             .context_updates
-            .insert("command.stderr".to_string(), serde_json::json!(""));
+            .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(""));
         node_outcomes.insert("step".to_string(), outcome);
 
         let preamble = build_preamble(
@@ -1037,7 +1038,7 @@ mod tests {
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::fail_classify("exit code 1");
         outcome.context_updates.insert(
-            "command.output".to_string(),
+            keys::COMMAND_OUTPUT.to_string(),
             serde_json::json!("test failed"),
         );
         node_outcomes.insert("run_tests".to_string(), outcome);
@@ -1214,12 +1215,12 @@ mod tests {
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
         outcome.context_updates.insert(
-            "command.output".to_string(),
+            keys::COMMAND_OUTPUT.to_string(),
             serde_json::json!("All tests passed\n"),
         );
         outcome
             .context_updates
-            .insert("command.stderr".to_string(), serde_json::json!(""));
+            .insert(keys::COMMAND_STDERR.to_string(), serde_json::json!(""));
         node_outcomes.insert("run_tests".to_string(), outcome);
 
         let preamble = build_preamble(
@@ -1355,7 +1356,7 @@ mod tests {
     fn build_preamble_summary_high_includes_context_values() {
         let graph = Graph::new("test");
         let context = Context::new();
-        context.set("graph.goal", serde_json::json!("Build"));
+        context.set(keys::GRAPH_GOAL, serde_json::json!("Build"));
         context.set("user.name", serde_json::json!("alice"));
         let completed_nodes: Vec<String> = Vec::new();
         let node_outcomes: HashMap<String, Outcome> = HashMap::new();
@@ -1427,11 +1428,11 @@ mod tests {
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
         outcome.context_updates.insert(
-            "command.output".to_string(),
+            keys::COMMAND_OUTPUT.to_string(),
             serde_json::json!("All tests passed\n"),
         );
         outcome.context_updates.insert(
-            "command.stderr".to_string(),
+            keys::COMMAND_STDERR.to_string(),
             serde_json::json!("warning: unused var\n"),
         );
         node_outcomes.insert("run_tests".to_string(), outcome);
@@ -1487,7 +1488,7 @@ mod tests {
         });
         outcome.files_touched = vec!["src/lib.rs".to_string()];
         outcome.context_updates.insert(
-            "response.report".to_string(),
+            keys::response_key("report"),
             serde_json::json!("The tests all pass successfully."),
         );
         node_outcomes.insert("report".to_string(), outcome);
@@ -1605,21 +1606,21 @@ mod tests {
 
     #[test]
     fn is_context_key_excluded_checks() {
-        assert!(is_context_key_excluded("internal.fidelity"));
-        assert!(is_context_key_excluded("internal.retry_count.plan"));
-        assert!(is_context_key_excluded("current_node"));
-        assert!(is_context_key_excluded("current.preamble"));
-        assert!(is_context_key_excluded("graph.default_fidelity"));
-        assert!(is_context_key_excluded("graph.goal"));
-        assert!(is_context_key_excluded("thread.main.current_node"));
-        assert!(is_context_key_excluded("response.plan"));
-        assert!(is_context_key_excluded("outcome"));
-        assert!(is_context_key_excluded("last_stage"));
-        assert!(is_context_key_excluded("last_response"));
-        assert!(is_context_key_excluded("preferred_label"));
+        assert!(is_context_key_excluded(keys::INTERNAL_FIDELITY));
+        assert!(is_context_key_excluded(&keys::retry_count_key("plan")));
+        assert!(is_context_key_excluded(keys::CURRENT_NODE));
+        assert!(is_context_key_excluded(keys::CURRENT_PREAMBLE));
+        assert!(is_context_key_excluded(&keys::graph_attr_key("default_fidelity")));
+        assert!(is_context_key_excluded(keys::GRAPH_GOAL));
+        assert!(is_context_key_excluded(&keys::thread_current_node_key("main")));
+        assert!(is_context_key_excluded(&keys::response_key("plan")));
+        assert!(is_context_key_excluded(keys::OUTCOME));
+        assert!(is_context_key_excluded(keys::LAST_STAGE));
+        assert!(is_context_key_excluded(keys::LAST_RESPONSE));
+        assert!(is_context_key_excluded(keys::PREFERRED_LABEL));
         assert!(!is_context_key_excluded("user.name"));
         assert!(!is_context_key_excluded("custom.key"));
-        assert!(!is_context_key_excluded("command.output"));
+        assert!(!is_context_key_excluded(keys::COMMAND_OUTPUT));
     }
 
     // --- unknown fidelity mode ---

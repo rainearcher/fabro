@@ -128,17 +128,11 @@ impl Handler for SubWorkflowHandler {
         };
 
         // Build child RunConfig
-        let visit = context
-            .get("internal.node_visit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(1);
+        let visit = context.node_visit_count() as u64;
         let child_logs = logs_root.join(format!("nodes/{}_{visit}/child", node.id));
         let _ = std::fs::create_dir_all(&child_logs);
 
-        let parent_run_id = context
-            .get("internal.run_id")
-            .and_then(|v| v.as_str().map(String::from))
-            .unwrap_or_default();
+        let parent_run_id = context.run_id();
         let cancel_token = Arc::new(AtomicBool::new(false));
         let child_cancel = Arc::clone(&cancel_token);
 

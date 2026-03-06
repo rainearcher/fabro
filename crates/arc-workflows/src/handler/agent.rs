@@ -5,6 +5,7 @@ use std::sync::Arc;
 use arc_agent::Sandbox;
 use async_trait::async_trait;
 
+use crate::context::keys;
 use crate::context::Context;
 use crate::error::ArcError;
 use crate::event::EventEmitter;
@@ -188,7 +189,7 @@ impl Handler for AgentHandler {
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| node.label());
         let expanded = expand_variables(raw_prompt, graph)?;
-        let preamble = context.get_string("current.preamble", "");
+        let preamble = context.preamble();
         let prompt = if preamble.is_empty() {
             expanded
         } else {
@@ -202,9 +203,7 @@ impl Handler for AgentHandler {
         tokio::fs::write(stage_dir.join("prompt.md"), &prompt).await?;
 
         // 3. Call LLM backend (agent loop)
-        let thread_id = context
-            .get("internal.thread_id")
-            .and_then(|v| v.as_str().map(String::from));
+        let thread_id = context.thread_id();
         let (response_text, stage_usage, backend_files_touched) =
             if let Some(backend) = &self.backend {
                 let result = backend
@@ -253,13 +252,13 @@ impl Handler for AgentHandler {
         outcome.notes = Some(format!("Stage completed: {}", node.id));
         outcome
             .context_updates
-            .insert("last_stage".to_string(), serde_json::json!(node.id));
+            .insert(keys::LAST_STAGE.to_string(), serde_json::json!(node.id));
         outcome.context_updates.insert(
-            "last_response".to_string(),
+            keys::LAST_RESPONSE.to_string(),
             serde_json::json!(truncate(&response_text, 200)),
         );
         outcome.context_updates.insert(
-            format!("response.{}", node.id),
+            keys::response_key(&node.id),
             serde_json::json!(&response_text),
         );
 
@@ -395,12 +394,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            outcome.context_updates.get("last_stage"),
+            outcome.context_updates.get(keys::LAST_STAGE),
             Some(&serde_json::json!("step"))
         );
-        assert!(outcome.context_updates.contains_key("last_response"));
+        assert!(outcome.context_updates.contains_key(keys::LAST_RESPONSE));
         assert_eq!(
-            outcome.context_updates.get("response.step"),
+            outcome.context_updates.get(&keys::response_key("step")),
             Some(&serde_json::json!("[Simulated] Response for stage: step"))
         );
     }
@@ -489,7 +488,7 @@ mod tests {
         let node = Node::new("work");
         let context = Context::new();
         // Simulate what the engine stores in internal.thread_id
-        context.set("internal.thread_id", serde_json::json!("main"));
+        context.set(keys::INTERNAL_THREAD_ID, serde_json::json!("main"));
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
@@ -744,7 +743,7 @@ Some text in between.
         );
         let context = Context::new();
         context.set(
-            "current.preamble",
+            keys::CURRENT_PREAMBLE,
             serde_json::json!("## Test Output\n10 passed, 0 failed"),
         );
         let graph = Graph::new("test");
@@ -834,7 +833,7 @@ Some text in between.
         );
         let context = Context::new();
         context.set(
-            "current.preamble",
+            keys::CURRENT_PREAMBLE,
             serde_json::json!("## Script Output\nAll tests passed"),
         );
         let graph = Graph::new("test");

@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 
+use crate::context::keys;
 use crate::context::Context;
 use crate::error::ArcError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
@@ -204,15 +205,15 @@ impl Handler for HumanHandler {
             let mut outcome = Outcome::success();
             outcome.suggested_next_ids = vec![freeform_to.clone()];
             outcome.context_updates.insert(
-                "human.gate.selected".to_string(),
+                keys::HUMAN_GATE_SELECTED.to_string(),
                 serde_json::json!("freeform"),
             );
             outcome
                 .context_updates
-                .insert("human.gate.label".to_string(), serde_json::json!(text));
+                .insert(keys::HUMAN_GATE_LABEL.to_string(), serde_json::json!(text));
             outcome
                 .context_updates
-                .insert("human.gate.text".to_string(), serde_json::json!(text));
+                .insert(keys::HUMAN_GATE_TEXT.to_string(), serde_json::json!(text));
             return Ok(outcome);
         }
 
@@ -231,10 +232,10 @@ fn make_choice_outcome(key: &str, label: &str, to: &str) -> Outcome {
     outcome.suggested_next_ids = vec![to.to_string()];
     outcome
         .context_updates
-        .insert("human.gate.selected".to_string(), serde_json::json!(key));
+        .insert(keys::HUMAN_GATE_SELECTED.to_string(), serde_json::json!(key));
     outcome
         .context_updates
-        .insert("human.gate.label".to_string(), serde_json::json!(label));
+        .insert(keys::HUMAN_GATE_LABEL.to_string(), serde_json::json!(label));
     outcome
 }
 
@@ -362,7 +363,7 @@ mod tests {
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
         // Auto-approve picks first option key "A"
         assert_eq!(
-            outcome.context_updates.get("human.gate.selected"),
+            outcome.context_updates.get(keys::HUMAN_GATE_SELECTED),
             Some(&serde_json::json!("A"))
         );
         assert_eq!(outcome.suggested_next_ids, vec!["approve"]);
@@ -418,7 +419,7 @@ mod tests {
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
         assert_eq!(outcome.suggested_next_ids, vec!["freeform_target"]);
         assert_eq!(
-            outcome.context_updates.get("human.gate.text"),
+            outcome.context_updates.get(keys::HUMAN_GATE_TEXT),
             Some(&serde_json::json!("custom input"))
         );
     }
