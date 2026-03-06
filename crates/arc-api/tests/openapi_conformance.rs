@@ -31,7 +31,7 @@ fn load_spec() -> openapiv3::OpenAPI {
         .unwrap()
         .parent()
         .unwrap()
-        .join("openapi/arc-api.yaml");
+        .join("docs/api-reference/arc-api.yaml");
     let text = std::fs::read_to_string(&spec_path).expect("failed to read spec");
     serde_yaml::from_str(&text).expect("failed to parse spec")
 }

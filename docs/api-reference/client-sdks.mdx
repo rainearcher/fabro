@@ -3,7 +3,7 @@ title: "Client SDKs"
 description: "Language-specific clients generated from the Arc OpenAPI spec"
 ---
 
-The Arc API is defined by an OpenAPI 3.1 specification (`openapi/arc-api.yaml` in the repository) that serves as the single source of truth for all endpoints, request/response schemas, and parameter definitions. The spec is also available at runtime from the server at `GET /openapi.json`. Both client SDKs below are generated directly from this spec.
+The Arc API is defined by an OpenAPI 3.1 specification (`docs/api-reference/arc-api.yaml` in the repository) that serves as the single source of truth for all endpoints, request/response schemas, and parameter definitions. The spec is also available at runtime from the server at `GET /openapi.json`. Both client SDKs below are generated directly from this spec.
 
 ## TypeScript (Axios)
 
@@ -18,7 +18,7 @@ cd packages/arc-api-client
 bun run generate
 ```
 
-This runs `openapi-generator-cli` against `openapi/arc-api.yaml` and writes the generated source into `packages/arc-api-client/src/`.
+This runs `openapi-generator-cli` against `docs/api-reference/arc-api.yaml` and writes the generated source into `packages/arc-api-client/src/`.
 
 ### Usage
 
@@ -40,7 +40,7 @@ The `arc-types` crate generates Rust structs and enums from the OpenAPI componen
 
 ### How It Works
 
-A `build.rs` script reads `openapi/arc-api.yaml`, extracts `components/schemas`, and feeds them to typify. The generated code is written to `OUT_DIR` and included via:
+A `build.rs` script reads `docs/api-reference/arc-api.yaml`, extracts `components/schemas`, and feeds them to typify. The generated code is written to `OUT_DIR` and included via:
 
 ```rust
 // crates/arc-types/src/lib.rs
