@@ -42,9 +42,14 @@ Full light mode support with a theme toggle in the web app.
 
 ---
 
+<Accordion title="Fixes">
+- Fixed non-transient infrastructure failures (like invalid API keys) triggering retries instead of failing immediately
+- Fixed UTF-8 string slicing panics when truncating multi-byte characters in progress output
+</Accordion>
+
+<Accordion title="Improvements">
 - Interactive SVG graph rendering with animated nodes showing which stage is currently executing
 - Failure signatures and circuit breakers detect deterministic failure cycles (like the same syntax error on every retry) and short-circuit them, saving tokens and time
 - Stall watchdog detects hung pipeline handlers and reports them instead of silently blocking
 - File-based structured tracing across all crates controlled by `ARC_LOG`
-- Fixes non-transient infrastructure failures (like invalid API keys) triggering retries instead of failing immediately
-- Fixes UTF-8 string slicing panics when truncating multi-byte characters in progress output
+</Accordion>

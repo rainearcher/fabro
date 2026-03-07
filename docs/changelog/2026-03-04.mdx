@@ -41,9 +41,17 @@ Add `wait.timer` nodes to workflows that pause for a configured duration. Useful
 
 ---
 
+<Accordion title="API">
+- All error responses now use a consistent JSON structure with error codes and messages
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed HTTP 529 (Overloaded) responses from LLM providers being misclassified as non-retryable
+- Fixed progress display panic when tool calls contain long whitespace sequences
+</Accordion>
+
+<Accordion title="Improvements">
 - Gemini 3.1 Flash Lite added to the model catalog for ultra-fast, low-cost tasks
 - Multi-provider ensemble demo workflow showing fan-out across models and result merging
 - Parallel branches show in progress UI; sandbox details with hyperlinks display during runs
-- All API error responses now use a consistent JSON structure with error codes and messages
-- Fixes HTTP 529 (Overloaded) responses from LLM providers being misclassified as non-retryable
-- Fixes progress display panic when tool calls contain long whitespace sequences
+</Accordion>

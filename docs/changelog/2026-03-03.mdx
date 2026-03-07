@@ -49,9 +49,14 @@ url = "http://localhost:5173"
 
 ---
 
+<Accordion title="Fixes">
+- Fixed JWT `sub` claim using the GitHub API URL instead of the profile URL, causing identity mismatches
+- Fixed stale configuration persisting after `arc setup` until a manual restart
+</Accordion>
+
+<Accordion title="Improvements">
 - New indicatif-based progress display for `arc run start` shows real-time stage progress, tool calls, model names, and timing
 - Mercury provider updated to `mercury-2`; estimated output speed (tok/s) added to `arc models list`
 - Run defaults in `server.toml` are inherited by all workflow runs, so you don't have to repeat sandbox, model, or concurrency settings
 - `ARC_JWT_PUBLIC_KEY` and `ARC_JWT_PRIVATE_KEY` accept base64-encoded PEM strings for containerized deployments
-- Fixes JWT `sub` claim using the GitHub API URL instead of the profile URL, causing identity mismatches
-- Fixes stale configuration persisting after `arc setup` until a manual restart
+</Accordion>

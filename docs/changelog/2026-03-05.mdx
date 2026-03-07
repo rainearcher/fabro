@@ -131,8 +131,13 @@ stage_b [type="prompt"];
 
 ---
 
+<Accordion title="Fixes">
+- Fixed a server-side error message that could leak to the browser in production
+- Fixed a crash in the web UI when loading run stages (`apiStages.map` on non-array response)
+- Fixed Docker demo build and verifications API response parsing
+</Accordion>
+
+<Accordion title="Improvements">
 - MODEL column in CLI tables widened from 24 to 30 characters to avoid truncating longer model names
-- Fixes a server-side error message that could leak to the browser in production
-- Fixes a crash in the web UI when loading run stages (`apiStages.map` on non-array response)
-- Fixes Docker demo build and verifications API response parsing
 - Unknown `$variable` placeholders in DOT prompts now produce clear error messages instead of being silently passed through
+</Accordion>
