@@ -384,6 +384,22 @@ impl CodergenBackend for AgentCliBackend {
                 .await
                 .map_err(|e| ArcError::handler(format!("Failed to poll CLI command: {e}")))?;
             let status = poll_result.stdout.trim();
+
+            // Sync CLI output to stage_dir for visibility (best-effort)
+            for (remote, local) in [
+                (&stdout_path, "cli_stdout.log"),
+                (&stderr_path, "cli_stderr.log"),
+            ] {
+                if let Ok(r) = sandbox
+                    .exec_command(&format!("cat {remote}"), 30_000, None, None, None)
+                    .await
+                {
+                    if !r.stdout.is_empty() {
+                        let _ = tokio::fs::write(stage_dir.join(local), &r.stdout).await;
+                    }
+                }
+            }
+
             if status != "running" {
                 break status.parse::<i32>().unwrap_or(-1);
             }
