@@ -18,9 +18,9 @@
 | 7 | examples/clone-substack/clone-substack.dot | PASS | 578 lines |
 | 8 | examples/definition-of-done/spec-dod-multimodel.dot | PASS | fixed condition quoting + fallbacks |
 | 9 | examples/definition-of-done/spec-dod.dot | PASS | fixed condition quoting + fallbacks |
-| 10 | examples/nlspec-conformance/n-l-spec-conformance.dot | PASS | warning: goal_gate without retry_target |
+| 10 | examples/nlspec-conformance/n-l-spec-conformance.dot | PASS | added retry_target="fix" to goal_gate node |
 | 11 | examples/semantic-port/semantic-port.dot | PASS | added fallback edges |
-| 12 | examples/solitaire/build-solitaire.dot | PASS | warning: missing retry_target |
+| 12 | examples/solitaire/build-solitaire.dot | PASS | fixed fallback_retry_target to match node name |
 | 13 | execution/context/example.dot | PASS | added start/exit |
 | 14 | execution/failures/example.dot | PASS | added start/exit |
 | 15 | execution/failures/example-02.dot | PASS | added start/exit |

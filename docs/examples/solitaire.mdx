@@ -20,7 +20,7 @@ digraph BuildSolitaire {
         rankdir=LR,
         default_max_retry=3,
         retry_target="impl_setup",
-        fallback_retry_target="impl_game_logic",
+        fallback_retry_target="impl_logic",
         model_stylesheet="
             *       { llm_model: claude-sonnet; llm_provider: anthropic; }
             .hard   { llm_model: claude-opus;   llm_provider: anthropic; }
@@ -207,11 +207,11 @@ The graph sets two levels of retry targets:
 ```dot
 graph [
     retry_target="impl_setup",
-    fallback_retry_target="impl_game_logic"
+    fallback_retry_target="impl_logic"
 ]
 ```
 
-If a node fails and has no local retry target, Arc jumps back to `impl_setup` to re-attempt from project setup. If that target itself can't recover, Arc falls back further to `impl_game_logic`. This creates a cascading recovery strategy without cluttering every node with retry configuration.
+If a node fails and has no local retry target, Arc jumps back to `impl_setup` to re-attempt from project setup. If that target itself can't recover, Arc falls back further to `impl_logic`. This creates a cascading recovery strategy without cluttering every node with retry configuration.
 
 ### Three-tier model routing
 

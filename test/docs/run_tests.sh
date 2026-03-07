@@ -31,8 +31,14 @@ run_one() {
     case "$PHASE" in
         validate)
             if "$ARC" validate "$dot" > "$result_file.log" 2>&1; then
-                echo "PASS" > "$result_file"
-                echo "  PASS  $rel"
+                if grep -qi 'warn' "$result_file.log"; then
+                    echo "FAIL" > "$result_file"
+                    echo "  FAIL  $rel (warnings)"
+                    grep -i 'warn' "$result_file.log" | head -3 >&2
+                else
+                    echo "PASS" > "$result_file"
+                    echo "  PASS  $rel"
+                fi
             else
                 echo "FAIL" > "$result_file"
                 echo "  FAIL  $rel"

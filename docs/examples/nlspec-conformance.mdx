@@ -48,7 +48,7 @@ digraph NLSpecConformance {
     gate_quick [shape=diamond, label="Quick suite passing?"]
 
     // Phase 4: Full conformance
-    test_full [label="Full Conformance", shape=parallelogram, script="make conformance-full 2>&1 || true", goal_gate=true]
+    test_full [label="Full Conformance", shape=parallelogram, script="make conformance-full 2>&1 || true", goal_gate=true, retry_target="fix"]
     gate_full [shape=diamond, label="All tests passing?"]
 
     // Wiring

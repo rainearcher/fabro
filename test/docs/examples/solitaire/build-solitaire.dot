@@ -4,7 +4,7 @@ digraph BuildSolitaire {
         rankdir=LR,
         default_max_retry=3,
         retry_target="impl_setup",
-        fallback_retry_target="impl_game_logic",
+        fallback_retry_target="impl_logic",
         model_stylesheet="
             *       { llm_model: claude-sonnet; llm_provider: anthropic; }
             .hard   { llm_model: claude-opus;   llm_provider: anthropic; }
