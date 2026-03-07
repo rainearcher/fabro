@@ -223,6 +223,11 @@ impl<'de> Deserialize<'de> for ContentPart {
 }
 
 impl ContentPart {
+    /// Kind string for opaque OpenAI reasoning output items.
+    pub const OPENAI_REASONING: &str = "openai_reasoning";
+    /// Kind string for opaque OpenAI message output items.
+    pub const OPENAI_MESSAGE: &str = "openai_message";
+
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text(text.into())
     }

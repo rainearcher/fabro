@@ -224,7 +224,7 @@ fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Val
                 // required so that reasoning items can find their "required following
                 // item" during Responses API round-tripping.
                 let has_opaque_message = msg.content.iter().any(|p| {
-                    matches!(p, ContentPart::Other { kind, .. } if kind == "openai_message")
+                    matches!(p, ContentPart::Other { kind, .. } if kind == ContentPart::OPENAI_MESSAGE)
                 });
                 for part in &msg.content {
                     match part {
@@ -261,7 +261,7 @@ fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Val
                         }
                         // Round-trip opaque items back to the API
                         ContentPart::Other { kind, data }
-                            if kind == "openai_reasoning" || kind == "openai_message" =>
+                            if kind == ContentPart::OPENAI_REASONING || kind == ContentPart::OPENAI_MESSAGE =>
                         {
                             input.push(data.clone());
                         }
@@ -414,7 +414,7 @@ fn parse_output(output: &[serde_json::Value]) -> (Vec<ContentPart>, bool) {
                 // The item's `id` and `status` fields are required so that reasoning
                 // items preceding it can find their "required following item."
                 parts.push(ContentPart::Other {
-                    kind: "openai_message".to_string(),
+                    kind: ContentPart::OPENAI_MESSAGE.to_string(),
                     data: item.clone(),
                 });
                 if let Some(content) = item.get("content").and_then(|c| c.as_array()) {
@@ -433,7 +433,7 @@ fn parse_output(output: &[serde_json::Value]) -> (Vec<ContentPart>, bool) {
             }
             Some("reasoning") => {
                 parts.push(ContentPart::Other {
-                    kind: "openai_reasoning".to_string(),
+                    kind: ContentPart::OPENAI_REASONING.to_string(),
                     data: item.clone(),
                 });
             }
@@ -827,14 +827,14 @@ fn handle_response_completed(
     // Reasoning items must precede function calls for Responses API round-trip
     for item in &state.reasoning_items {
         content_parts.push(ContentPart::Other {
-            kind: "openai_reasoning".to_string(),
+            kind: ContentPart::OPENAI_REASONING.to_string(),
             data: item.clone(),
         });
     }
     // Preserve full message output items for Responses API round-tripping
     for item in &state.message_items {
         content_parts.push(ContentPart::Other {
-            kind: "openai_message".to_string(),
+            kind: ContentPart::OPENAI_MESSAGE.to_string(),
             data: item.clone(),
         });
     }
@@ -1330,7 +1330,7 @@ mod tests {
         // First part is the reasoning item
         match &parts[0] {
             ContentPart::Other { kind, data } => {
-                assert_eq!(kind, "openai_reasoning");
+                assert_eq!(kind, ContentPart::OPENAI_REASONING);
                 assert_eq!(data["type"], "reasoning");
                 assert_eq!(data["id"], "rs_abc123");
             }
@@ -1367,8 +1367,8 @@ mod tests {
         assert!(has_tool_calls);
         // reasoning + openai_message + text + function_call
         assert_eq!(parts.len(), 4);
-        assert!(matches!(&parts[0], ContentPart::Other { kind, .. } if kind == "openai_reasoning"));
-        assert!(matches!(&parts[1], ContentPart::Other { kind, data } if kind == "openai_message" && data["id"] == "msg_xyz"));
+        assert!(matches!(&parts[0], ContentPart::Other { kind, .. } if kind == ContentPart::OPENAI_REASONING));
+        assert!(matches!(&parts[1], ContentPart::Other { kind, data } if kind == ContentPart::OPENAI_MESSAGE && data["id"] == "msg_xyz"));
         assert!(matches!(&parts[2], ContentPart::Text(t) if t == "Hello"));
         assert!(matches!(&parts[3], ContentPart::ToolCall(_)));
     }
@@ -1387,7 +1387,7 @@ mod tests {
             role: Role::Assistant,
             content: vec![
                 ContentPart::Other {
-                    kind: "openai_reasoning".to_string(),
+                    kind: ContentPart::OPENAI_REASONING.to_string(),
                     data: reasoning,
                 },
                 ContentPart::ToolCall(tc),
@@ -1431,11 +1431,11 @@ mod tests {
             role: Role::Assistant,
             content: vec![
                 ContentPart::Other {
-                    kind: "openai_reasoning".to_string(),
+                    kind: ContentPart::OPENAI_REASONING.to_string(),
                     data: reasoning,
                 },
                 ContentPart::Other {
-                    kind: "openai_message".to_string(),
+                    kind: ContentPart::OPENAI_MESSAGE.to_string(),
                     data: opaque_message,
                 },
                 ContentPart::text("Checking now."),

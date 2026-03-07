@@ -39,7 +39,7 @@ impl History {
         for turn in &mut self.turns {
             if let Turn::Assistant { provider_parts, .. } = turn {
                 provider_parts.retain(|p| {
-                    !matches!(p, ContentPart::Other { kind, .. } if kind == "openai_reasoning" || kind == "openai_message")
+                    !matches!(p, ContentPart::Other { kind, .. } if kind == ContentPart::OPENAI_REASONING || kind == ContentPart::OPENAI_MESSAGE)
                 });
             }
         }
@@ -285,7 +285,7 @@ mod tests {
     fn assistant_turn_preserves_provider_parts() {
         let mut history = History::default();
         let reasoning_item = ContentPart::Other {
-            kind: "openai_reasoning".to_string(),
+            kind: ContentPart::OPENAI_REASONING.to_string(),
             data: serde_json::json!({"type": "reasoning", "id": "rs_abc"}),
         };
         let tc = ToolCall::new("call_1", "search", serde_json::json!({}));
@@ -301,7 +301,7 @@ mod tests {
         assert_eq!(messages.len(), 1);
         // Provider parts come first, then tool calls
         assert!(
-            matches!(&messages[0].content[0], ContentPart::Other { kind, .. } if kind == "openai_reasoning")
+            matches!(&messages[0].content[0], ContentPart::Other { kind, .. } if kind == ContentPart::OPENAI_REASONING)
         );
         assert!(matches!(&messages[0].content[1], ContentPart::ToolCall(_)));
     }
@@ -421,7 +421,7 @@ mod tests {
             timestamp: SystemTime::now(),
         });
         let reasoning = ContentPart::Other {
-            kind: "openai_reasoning".into(),
+            kind: ContentPart::OPENAI_REASONING.into(),
             data: serde_json::json!({"type": "reasoning", "id": "rs_abc"}),
         };
         let tc = ToolCall::new("call_1", "search", serde_json::json!({}));
@@ -501,7 +501,7 @@ mod tests {
                 content: format!("response {i}"),
                 tool_calls: vec![],
                 provider_parts: vec![ContentPart::Other {
-                    kind: "openai_reasoning".into(),
+                    kind: ContentPart::OPENAI_REASONING.into(),
                     data: serde_json::json!({"type": "reasoning", "id": format!("rs_{i}")}),
                 }],
                 usage: Usage::default(),
