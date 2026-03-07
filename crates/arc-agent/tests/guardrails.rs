@@ -1,31 +1,15 @@
-use arc_agent::cli::default_model;
 use arc_agent::{AnthropicProfile, GeminiProfile, OpenAiProfile, ProviderProfile};
 use arc_llm::catalog;
 use arc_llm::provider::Provider;
 
 #[test]
-fn every_default_model_exists_in_catalog() {
-    for &provider in Provider::ALL {
-        let model = default_model(provider);
-        assert!(
-            catalog::get_model_info(model).is_some(),
-            "default_model for {:?} is '{}' but it is not in the catalog",
-            provider,
-            model
-        );
-    }
-}
-
-#[test]
 fn profile_context_window_matches_catalog_for_default_models() {
     for &provider in Provider::ALL {
-        let model = default_model(provider);
-        let catalog_info = catalog::get_model_info(model).unwrap_or_else(|| {
-            panic!(
-                "default_model '{}' for {:?} not in catalog",
-                model, provider
-            )
-        });
+        let catalog_info = catalog::default_model_for_provider(provider.as_str())
+            .unwrap_or_else(|| {
+                panic!("no default model for {:?} in catalog", provider)
+            });
+        let model = &catalog_info.id;
 
         let profile: Box<dyn ProviderProfile> = match provider {
             Provider::OpenAi => Box::new(OpenAiProfile::new(model)),

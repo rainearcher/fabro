@@ -169,7 +169,7 @@ mod tests {
         assert!(m.default);
 
         let m = default_model_for_provider("openai").unwrap();
-        assert_eq!(m.id, "gpt-5.2");
+        assert_eq!(m.id, "gpt-5.4");
 
         let m = default_model_for_provider("gemini").unwrap();
         assert_eq!(m.id, "gemini-3.1-pro-preview");
@@ -221,7 +221,7 @@ mod tests {
         assert_eq!(info.id, "claude-opus-4-6");
 
         let info = get_model_info("sonnet").unwrap();
-        assert_eq!(info.id, "claude-sonnet-4-5");
+        assert_eq!(info.id, "claude-sonnet-4-6");
 
         let info = get_model_info("codex").unwrap();
         assert_eq!(info.id, "gpt-5.3-codex");
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn list_models_by_provider() {
         let anthropic = list_models(Some("anthropic"));
-        assert_eq!(anthropic.len(), 3);
+        assert_eq!(anthropic.len(), 4);
         assert!(anthropic.iter().all(|m| m.provider == "anthropic"));
 
         let openai = list_models(Some("openai"));
@@ -323,7 +323,7 @@ mod tests {
         assert!(m.supports_reasoning);
         assert_eq!(m.input_cost_per_million, Some(2.5));
         assert_eq!(m.output_cost_per_million, Some(15.0));
-        assert!(!m.default);
+        assert!(m.default);
     }
 
     #[test]

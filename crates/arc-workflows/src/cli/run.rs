@@ -35,19 +35,6 @@ use super::{
     RunArgs, SandboxProvider,
 };
 
-/// Return the default model string for a given provider.
-fn default_model_for_provider(provider: Provider) -> &'static str {
-    match provider {
-        Provider::Anthropic => "claude-opus-4-6",
-        Provider::OpenAi => "gpt-5.2",
-        Provider::Gemini => "gemini-3.1-pro-preview",
-        Provider::Kimi => "kimi-k2.5",
-        Provider::Zai => "glm-4.7",
-        Provider::Minimax => "minimax-m2.5",
-        Provider::Inception => "mercury",
-    }
-}
-
 /// Resolve model and provider through the full precedence chain:
 /// CLI flag > TOML config > run defaults > DOT graph attrs > provider-specific defaults.
 /// Then resolve through the catalog for alias expansion.
@@ -87,7 +74,9 @@ fn resolve_model_provider(
                 .as_deref()
                 .and_then(|s| s.parse::<Provider>().ok())
                 .unwrap_or(Provider::Anthropic);
-            default_model_for_provider(provider_enum).to_string()
+            arc_llm::catalog::default_model_for_provider(provider_enum.as_str())
+                .map(|m| m.id)
+                .unwrap_or_else(|| provider_enum.as_str().to_string())
         });
 
     // Resolve model alias through catalog
@@ -1501,50 +1490,6 @@ async fn generate_retro(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn default_model_for_anthropic() {
-        assert_eq!(
-            default_model_for_provider(Provider::Anthropic),
-            "claude-opus-4-6"
-        );
-    }
-
-    #[test]
-    fn default_model_for_openai() {
-        assert_eq!(default_model_for_provider(Provider::OpenAi), "gpt-5.2");
-    }
-
-    #[test]
-    fn default_model_for_gemini() {
-        assert_eq!(
-            default_model_for_provider(Provider::Gemini),
-            "gemini-3.1-pro-preview"
-        );
-    }
-
-    #[test]
-    fn default_model_for_kimi() {
-        assert_eq!(default_model_for_provider(Provider::Kimi), "kimi-k2.5");
-    }
-
-    #[test]
-    fn default_model_for_zai() {
-        assert_eq!(default_model_for_provider(Provider::Zai), "glm-4.7");
-    }
-
-    #[test]
-    fn default_model_for_minimax() {
-        assert_eq!(
-            default_model_for_provider(Provider::Minimax),
-            "minimax-m2.5"
-        );
-    }
-
-    #[test]
-    fn default_model_for_inception() {
-        assert_eq!(default_model_for_provider(Provider::Inception), "mercury");
-    }
 
     #[test]
     fn resolve_model_provider_defaults() {

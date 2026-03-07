@@ -95,18 +95,6 @@ impl AgentArgs {
     }
 }
 
-pub fn default_model(provider: Provider) -> &'static str {
-    match provider {
-        Provider::OpenAi => "gpt-5.2-codex",
-        Provider::Gemini => "gemini-3.1-pro-preview",
-        Provider::Anthropic => "claude-opus-4-6",
-        Provider::Kimi => "kimi-k2.5",
-        Provider::Zai => "glm-4.7",
-        Provider::Minimax => "minimax-m2.5",
-        Provider::Inception => "mercury",
-    }
-}
-
 fn tool_category(name: &str) -> &'static str {
     match name {
         "read_file" | "read_many_files" | "grep" | "glob" | "list_dir" => "read",
@@ -392,12 +380,13 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
     }
 
     // Resolve model and build profile
-    let model = args
-        .model
-        .as_deref()
-        .unwrap_or_else(|| default_model(provider));
+    let model = args.model.unwrap_or_else(|| {
+            arc_llm::catalog::default_model_for_provider(provider.as_str())
+                .map(|m| m.id)
+                .unwrap_or_else(|| provider.as_str().to_string())
+        });
     eprintln!("{}", styles.dim.apply_to(format!("Using model: {model}")));
-    let mut profile = build_profile(provider, model, Some(client.clone()));
+    let mut profile = build_profile(provider, &model, Some(client.clone()));
 
     // Build sandbox
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -690,43 +679,6 @@ mod tests {
         assert!(is_auto_approved(PermissionLevel::Full, "subagent"));
         assert!(is_auto_approved(PermissionLevel::Full, "write"));
         assert!(is_auto_approved(PermissionLevel::Full, "shell"));
-    }
-
-    // default_model tests
-
-    #[test]
-    fn default_model_anthropic() {
-        assert_eq!(default_model(Provider::Anthropic), "claude-opus-4-6");
-    }
-
-    #[test]
-    fn default_model_openai() {
-        assert_eq!(default_model(Provider::OpenAi), "gpt-5.2-codex");
-    }
-
-    #[test]
-    fn default_model_gemini() {
-        assert_eq!(default_model(Provider::Gemini), "gemini-3.1-pro-preview");
-    }
-
-    #[test]
-    fn default_model_kimi() {
-        assert_eq!(default_model(Provider::Kimi), "kimi-k2.5");
-    }
-
-    #[test]
-    fn default_model_zai() {
-        assert_eq!(default_model(Provider::Zai), "glm-4.7");
-    }
-
-    #[test]
-    fn default_model_minimax() {
-        assert_eq!(default_model(Provider::Minimax), "minimax-m2.5");
-    }
-
-    #[test]
-    fn default_model_inception() {
-        assert_eq!(default_model(Provider::Inception), "mercury");
     }
 
     // build_tool_approval non-interactive tests

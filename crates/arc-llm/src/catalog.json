@@ -26,6 +26,20 @@
     "input_cost_per_million": 3.0,
     "output_cost_per_million": 15.0,
     "estimated_output_tps": 50,
+    "aliases": []
+  },
+  {
+    "id": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "display_name": "Claude Sonnet 4.6",
+    "context_window": 200000,
+    "max_output": 64000,
+    "supports_tools": true,
+    "supports_vision": true,
+    "supports_reasoning": true,
+    "input_cost_per_million": 3.0,
+    "output_cost_per_million": 15.0,
+    "estimated_output_tps": 50,
     "aliases": ["sonnet", "claude-sonnet"]
   },
   {
@@ -54,8 +68,7 @@
     "input_cost_per_million": 1.75,
     "output_cost_per_million": 14.0,
     "estimated_output_tps": 65,
-    "aliases": ["gpt5"],
-    "default": true
+    "aliases": ["gpt5"]
   },
   {
     "id": "gpt-5-mini",
@@ -111,7 +124,8 @@
     "input_cost_per_million": 2.5,
     "output_cost_per_million": 15.0,
     "estimated_output_tps": 70,
-    "aliases": ["gpt54"]
+    "aliases": ["gpt54"],
+    "default": true
   },
   {
     "id": "gpt-5.4-pro",
