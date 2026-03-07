@@ -149,14 +149,9 @@ pub fn checkpoint_commit(
     tracing::debug!(path = %work_dir.display(), node_id, "Creating git checkpoint commit");
     // Stage everything (with optional excludes)
     let mut cmd = git_cmd(work_dir);
-    cmd.args(["add", "-A", "--"]);
-    if excludes.is_empty() {
-        cmd.arg(".");
-    } else {
-        cmd.arg(".");
-        for glob in excludes {
-            cmd.arg(format!(":(glob,exclude){glob}"));
-        }
+    cmd.args(["add", "-A", "--", "."]);
+    for glob in excludes {
+        cmd.arg(format!(":(glob,exclude){glob}"));
     }
     let output = cmd
         .output()
