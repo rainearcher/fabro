@@ -6,7 +6,7 @@ use crate::graph::{is_llm_handler_type, AttrValue, Graph};
 
 use super::{Diagnostic, LintRule, Severity};
 
-/// Returns all 20 built-in lint rules.
+/// Returns all built-in lint rules.
 #[must_use]
 pub fn built_in_rules() -> Vec<Box<dyn LintRule>> {
     vec![
@@ -30,6 +30,7 @@ pub fn built_in_rules() -> Vec<Box<dyn LintRule>> {
         Box::new(OrphanCustomOutcomeRule),
         Box::new(ScriptAbsoluteCdRule),
         Box::new(StylesheetModelKnownRule),
+        Box::new(UnresolvedFileRefRule),
     ]
 }
 
@@ -968,6 +969,53 @@ impl LintRule for StylesheetModelKnownRule {
                 }
             }
         }
+        diagnostics
+    }
+}
+
+// --- Rule 21: unresolved_file_ref (ERROR) ---
+
+struct UnresolvedFileRefRule;
+
+impl LintRule for UnresolvedFileRefRule {
+    fn name(&self) -> &'static str {
+        "unresolved_file_ref"
+    }
+
+    fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+
+        for node in graph.nodes.values() {
+            if let Some(AttrValue::String(prompt)) = node.attrs.get("prompt") {
+                if prompt.starts_with('@') {
+                    diagnostics.push(Diagnostic {
+                        rule: self.name().to_string(),
+                        severity: Severity::Error,
+                        message: format!(
+                            "Node '{}' has unresolved file reference: {prompt}",
+                            node.id
+                        ),
+                        node_id: Some(node.id.clone()),
+                        edge: None,
+                        fix: Some("Check that the path is relative to the .dot file's directory and the file exists".to_string()),
+                    });
+                }
+            }
+        }
+
+        if let Some(AttrValue::String(goal)) = graph.attrs.get("goal") {
+            if goal.starts_with('@') {
+                diagnostics.push(Diagnostic {
+                    rule: self.name().to_string(),
+                    severity: Severity::Error,
+                    message: format!("Graph goal has unresolved file reference: {goal}"),
+                    node_id: None,
+                    edge: None,
+                    fix: Some("Check that the path is relative to the .dot file's directory and the file exists".to_string()),
+                });
+            }
+        }
+
         diagnostics
     }
 }
@@ -2853,6 +2901,58 @@ mod tests {
     fn stylesheet_model_known_rule_no_stylesheet() {
         let g = minimal_graph();
         let rule = StylesheetModelKnownRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // unresolved_file_ref rule tests
+
+    #[test]
+    fn unresolved_file_ref_rule_prompt() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("@prompts/simplify.md".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        g.edges.push(Edge::new("start", "work"));
+        g.edges.push(Edge::new("work", "exit"));
+
+        let rule = UnresolvedFileRefRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert!(d[0].message.contains("@prompts/simplify.md"));
+        assert_eq!(d[0].node_id, Some("work".to_string()));
+    }
+
+    #[test]
+    fn unresolved_file_ref_rule_goal() {
+        let mut g = minimal_graph();
+        g.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("@goal.md".to_string()),
+        );
+
+        let rule = UnresolvedFileRefRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert!(d[0].message.contains("@goal.md"));
+    }
+
+    #[test]
+    fn unresolved_file_ref_rule_resolved_prompt() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Do the work".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+
+        let rule = UnresolvedFileRefRule;
         let d = rule.apply(&g);
         assert!(d.is_empty());
     }
