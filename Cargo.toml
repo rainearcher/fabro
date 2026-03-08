@@ -51,8 +51,8 @@ jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 openssh = "0.11"
-daytona-sdk = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "be9adf6", package = "daytona-sdk" }
-daytona-api-client = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "be9adf6", package = "daytona-api-client" }
+daytona-sdk = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "03b7c06", package = "daytona-sdk" }
+daytona-api-client = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "03b7c06", package = "daytona-api-client" }
 
 # regex is extremely slow in debug builds (~10s to compile gitleaks patterns)
 [profile.dev.package.regex]
