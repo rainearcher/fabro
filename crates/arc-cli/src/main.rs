@@ -217,11 +217,12 @@ async fn main() -> Result<()> {
             arc_agent::cli::run_with_args(args).await?
         }
         Command::Run { command } => match command {
-            RunCommand::Start(args) => {
+            RunCommand::Start(mut args) => {
                 let styles: &'static arc_util::terminal::Styles =
                     Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
                 let server_config = arc_api::server_config::load_server_config(None)?;
                 let cli_config = cli_config::load_cli_config(None)?;
+                args.verbose = args.verbose || cli_config.verbose;
                 let github_app = build_github_app_credentials(&server_config);
 
                 let cli_author = cli_config.git.as_ref().map(|g| &g.author);
@@ -279,6 +280,8 @@ async fn main() -> Result<()> {
             arc_api::serve::serve_command(args, styles).await?;
         }
         Command::Doctor { verbose, live } => {
+            let cli_config = cli_config::load_cli_config(None)?;
+            let verbose = verbose || cli_config.verbose;
             let exit_code = doctor::run_doctor(verbose, live).await;
             std::process::exit(exit_code);
         }

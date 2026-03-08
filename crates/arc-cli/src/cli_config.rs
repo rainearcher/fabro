@@ -52,6 +52,8 @@ pub struct CliConfig {
     pub llm: Option<LlmDefaults>,
     pub git: Option<CliGitConfig>,
     #[serde(default)]
+    pub verbose: bool,
+    #[serde(default)]
     pub log: arc_api::server_config::LogConfig,
 }
 
@@ -348,6 +350,12 @@ email = "me@local"
     fn parse_git_author_absent() {
         let config: CliConfig = toml::from_str("").unwrap();
         assert_eq!(config.git, None);
+    }
+
+    #[test]
+    fn parse_verbose_true() {
+        let config: CliConfig = toml::from_str("verbose = true").unwrap();
+        assert!(config.verbose);
     }
 
     #[test]
