@@ -20,7 +20,7 @@ pub struct CheckpointConfig {
 #[serde(deny_unknown_fields)]
 pub struct WorkflowRunConfig {
     pub version: u32,
-    pub goal: String,
+    pub goal: Option<String>,
     pub graph: String,
     pub directory: Option<String>,
     pub llm: Option<LlmConfig>,
@@ -514,11 +514,21 @@ graph = "workflow.dot"
 "#;
         let config = parse_run_config(toml).unwrap();
         assert_eq!(config.version, 1);
-        assert_eq!(config.goal, "Run tests");
+        assert_eq!(config.goal.as_deref(), Some("Run tests"));
         assert_eq!(config.graph, "workflow.dot");
         assert!(config.directory.is_none());
         assert!(config.llm.is_none());
         assert!(config.setup.is_none());
+    }
+
+    #[test]
+    fn parse_toml_without_goal() {
+        let toml = r#"
+version = 1
+graph = "workflow.dot"
+"#;
+        let config = parse_run_config(toml).unwrap();
+        assert!(config.goal.is_none());
     }
 
     #[test]
@@ -538,7 +548,7 @@ commands = ["pip install -r requirements.txt", "npm install"]
 timeout_ms = 60000
 "#;
         let config = parse_run_config(toml).unwrap();
-        assert_eq!(config.goal, "Full workflow");
+        assert_eq!(config.goal.as_deref(), Some("Full workflow"));
         assert_eq!(config.directory.as_deref(), Some("/tmp/repo"));
 
         let llm = config.llm.unwrap();

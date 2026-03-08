@@ -36,10 +36,16 @@ use super::{
     RunArgs, SandboxProvider,
 };
 
-/// Apply a CLI `--goal` override to the graph, if provided.
-fn apply_goal_override(graph: &mut crate::graph::types::Graph, cli_goal: Option<&str>) {
-    if let Some(goal) = cli_goal {
-        debug!(goal = %goal, "CLI --goal overriding graph goal");
+/// Apply goal to the graph from TOML config or CLI flag.
+/// Precedence: CLI `--goal` > TOML `goal` > DOT `graph [goal="..."]`.
+fn apply_goal_override(
+    graph: &mut crate::graph::types::Graph,
+    cli_goal: Option<&str>,
+    toml_goal: Option<&str>,
+) {
+    let goal = cli_goal.or(toml_goal);
+    if let Some(goal) = goal {
+        debug!(goal = %goal, "overriding graph goal");
         graph.attrs.insert(
             "goal".to_string(),
             crate::graph::types::AttrValue::String(goal.to_string()),
@@ -248,7 +254,8 @@ pub async fn run_command(
         dot_dir.to_path_buf(),
     )));
     let (mut graph, diagnostics) = builder.prepare(&source)?;
-    apply_goal_override(&mut graph, args.goal.as_deref());
+    let toml_goal = run_cfg.as_ref().and_then(|c| c.goal.as_deref());
+    apply_goal_override(&mut graph, args.goal.as_deref(), toml_goal);
 
     // Inline @file references in the (possibly overridden) goal
     if let Some(crate::graph::types::AttrValue::String(goal)) = graph.attrs.get("goal") {
@@ -1009,7 +1016,7 @@ async fn run_from_branch(
     };
 
     let (mut graph, diagnostics) = crate::workflow::WorkflowBuilder::new().prepare(&source)?;
-    apply_goal_override(&mut graph, args.goal.as_deref());
+    apply_goal_override(&mut graph, args.goal.as_deref(), None);
 
     eprintln!(
         "{} {} from branch {} ({})",
@@ -1587,15 +1594,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn apply_goal_override_replaces_graph_goal() {
+    fn apply_goal_override_cli_wins_over_toml() {
         use crate::graph::types::{AttrValue, Graph};
         let mut graph = Graph::new("test");
         graph.attrs.insert(
             "goal".to_string(),
             AttrValue::String("original".to_string()),
         );
-        apply_goal_override(&mut graph, Some("CLI goal"));
+        apply_goal_override(&mut graph, Some("CLI goal"), Some("TOML goal"));
         assert_eq!(graph.goal(), "CLI goal");
+    }
+
+    #[test]
+    fn apply_goal_override_toml_wins_over_dot() {
+        use crate::graph::types::{AttrValue, Graph};
+        let mut graph = Graph::new("test");
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("original".to_string()),
+        );
+        apply_goal_override(&mut graph, None, Some("TOML goal"));
+        assert_eq!(graph.goal(), "TOML goal");
     }
 
     #[test]
@@ -1606,7 +1625,7 @@ mod tests {
             "goal".to_string(),
             AttrValue::String("original".to_string()),
         );
-        apply_goal_override(&mut graph, None);
+        apply_goal_override(&mut graph, None, None);
         assert_eq!(graph.goal(), "original");
     }
 
@@ -1626,7 +1645,7 @@ mod tests {
         let defaults = RunDefaults::default();
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
-            goal: "test".to_string(),
+            goal: Some("test".to_string()),
             graph: "test.dot".to_string(),
             directory: None,
             llm: Some(run_config::LlmConfig {
@@ -1667,7 +1686,7 @@ mod tests {
         let defaults = RunDefaults::default();
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
-            goal: "test".to_string(),
+            goal: Some("test".to_string()),
             graph: "test.dot".to_string(),
             directory: None,
             llm: Some(run_config::LlmConfig {
@@ -1743,7 +1762,7 @@ mod tests {
         };
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
-            goal: "test".to_string(),
+            goal: Some("test".to_string()),
             graph: "test.dot".to_string(),
             directory: None,
             llm: Some(run_config::LlmConfig {
@@ -1766,7 +1785,7 @@ mod tests {
     fn resolve_preserve_sandbox_cli_wins() {
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
-            goal: "test".into(),
+            goal: Some("test".to_string()),
             graph: "w.dot".into(),
             directory: None,
             llm: None,
@@ -1790,7 +1809,7 @@ mod tests {
     fn resolve_preserve_sandbox_toml_wins_over_defaults() {
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
-            goal: "test".into(),
+            goal: Some("test".to_string()),
             graph: "w.dot".into(),
             directory: None,
             llm: None,
