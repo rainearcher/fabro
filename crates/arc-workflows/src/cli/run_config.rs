@@ -589,13 +589,17 @@ graph = "p.dot"
     }
 
     #[test]
-    fn missing_required_fields() {
+    fn goal_is_optional() {
         let no_goal = r#"
 version = 1
 graph = "p.dot"
 "#;
-        assert!(parse_run_config(no_goal).is_err());
+        let config = parse_run_config(no_goal).unwrap();
+        assert!(config.goal.is_none());
+    }
 
+    #[test]
+    fn graph_is_required() {
         let no_graph = r#"
 version = 1
 goal = "x"
