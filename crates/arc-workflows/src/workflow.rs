@@ -1,6 +1,10 @@
+use std::path::Path;
+
 use crate::error::ArcError;
 use crate::graph::Graph;
-use crate::transform::{StylesheetApplicationTransform, Transform, VariableExpansionTransform};
+use crate::transform::{
+    FileInliningTransform, StylesheetApplicationTransform, Transform, VariableExpansionTransform,
+};
 use crate::validation::{self, Diagnostic};
 
 /// Builder for configuring and executing a workflow preparation.
@@ -29,11 +33,38 @@ impl WorkflowBuilder {
     ///
     /// Returns an error if parsing or validation fails.
     pub fn prepare(&self, dot_source: &str) -> Result<(Graph, Vec<Diagnostic>), ArcError> {
+        self.prepare_inner(dot_source, None)
+    }
+
+    /// Prepare a workflow with file inlining: parse DOT, apply built-in transforms
+    /// including `FileInliningTransform`, then custom transforms, then validate.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parsing or validation fails.
+    pub fn prepare_with_file_inlining(
+        &self,
+        dot_source: &str,
+        base_dir: &Path,
+    ) -> Result<(Graph, Vec<Diagnostic>), ArcError> {
+        self.prepare_inner(dot_source, Some(base_dir))
+    }
+
+    fn prepare_inner(
+        &self,
+        dot_source: &str,
+        base_dir: Option<&Path>,
+    ) -> Result<(Graph, Vec<Diagnostic>), ArcError> {
         let mut graph = crate::parser::parse(dot_source)?;
 
         // Built-in transforms (PreambleTransform moved to engine execution time)
         VariableExpansionTransform.apply(&mut graph);
         StylesheetApplicationTransform.apply(&mut graph);
+
+        // File inlining when base_dir is provided
+        if let Some(dir) = base_dir {
+            FileInliningTransform::new(dir.to_path_buf()).apply(&mut graph);
+        }
 
         // Custom transforms
         for transform in &self.transforms {
@@ -51,12 +82,25 @@ impl Default for WorkflowBuilder {
     }
 }
 
-/// Convenience function: parse DOT, apply built-in transforms, validate, return graph.
+/// Convenience: read a DOT file, apply built-in transforms including file inlining, validate.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read, parsed, or validated.
+pub fn prepare_from_file(path: &Path) -> Result<(Graph, Vec<Diagnostic>), ArcError> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|e| ArcError::Parse(format!("Failed to read {}: {e}", path.display())))?;
+    let dot_dir = path.parent().unwrap_or(Path::new("."));
+    WorkflowBuilder::new().prepare_with_file_inlining(&source, dot_dir)
+}
+
+/// Convenience: parse DOT source (no file inlining), apply built-in transforms, validate.
+/// Returns the graph or an error if validation produces Error-severity diagnostics.
 ///
 /// # Errors
 ///
 /// Returns an error if parsing fails or if validation produces Error-severity diagnostics.
-pub fn prepare_workflow(dot_source: &str) -> Result<Graph, ArcError> {
+pub fn prepare_from_source(dot_source: &str) -> Result<Graph, ArcError> {
     let builder = WorkflowBuilder::new();
     let (graph, diagnostics) = builder.prepare(dot_source)?;
 
@@ -85,15 +129,15 @@ mod tests {
     }"#;
 
     #[test]
-    fn prepare_workflow_minimal() {
-        let graph = prepare_workflow(MINIMAL_DOT).unwrap();
+    fn prepare_from_source_minimal() {
+        let graph = prepare_from_source(MINIMAL_DOT).unwrap();
         assert_eq!(graph.name, "Test");
         assert!(graph.find_start_node().is_some());
         assert!(graph.find_exit_node().is_some());
     }
 
     #[test]
-    fn prepare_workflow_applies_variable_expansion() {
+    fn prepare_from_source_applies_variable_expansion() {
         let dot = r#"digraph Test {
             graph [goal="Fix bugs"]
             start [shape=Mdiamond]
@@ -101,7 +145,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let graph = prepare_workflow(dot).unwrap();
+        let graph = prepare_from_source(dot).unwrap();
         let prompt = graph.nodes["work"]
             .attrs
             .get("prompt")
@@ -111,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_workflow_applies_stylesheet() {
+    fn prepare_from_source_applies_stylesheet() {
         let dot = r#"digraph Test {
             graph [goal="Test", model_stylesheet="* { llm_model: sonnet; }"]
             start [shape=Mdiamond]
@@ -119,7 +163,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let graph = prepare_workflow(dot).unwrap();
+        let graph = prepare_from_source(dot).unwrap();
         assert_eq!(
             graph.nodes["work"].attrs.get("llm_model"),
             Some(&AttrValue::String("sonnet".into()))
@@ -127,18 +171,18 @@ mod tests {
     }
 
     #[test]
-    fn prepare_workflow_returns_error_on_invalid_dot() {
-        let result = prepare_workflow("not a graph");
+    fn prepare_from_source_returns_error_on_invalid_dot() {
+        let result = prepare_from_source("not a graph");
         assert!(result.is_err());
     }
 
     #[test]
-    fn prepare_workflow_returns_error_on_validation_failure() {
+    fn prepare_from_source_returns_error_on_validation_failure() {
         let dot = r#"digraph Test {
             graph [goal="Test"]
             work [label="Work"]
         }"#;
-        let result = prepare_workflow(dot);
+        let result = prepare_from_source(dot);
         assert!(result.is_err());
     }
 

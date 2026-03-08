@@ -249,11 +249,8 @@ pub async fn run_command(
         None => source,
     };
     let dot_dir = dot_path.parent().unwrap_or(std::path::Path::new("."));
-    let mut builder = WorkflowBuilder::new();
-    builder.register_transform(Box::new(crate::transform::FileInliningTransform::new(
-        dot_dir.to_path_buf(),
-    )));
-    let (mut graph, diagnostics) = builder.prepare(&source)?;
+    let (mut graph, diagnostics) =
+        WorkflowBuilder::new().prepare_with_file_inlining(&source, dot_dir)?;
     let toml_goal = run_cfg.as_ref().and_then(|c| c.goal.as_deref());
     apply_goal_override(&mut graph, args.goal.as_deref(), toml_goal);
 
@@ -1009,13 +1006,13 @@ async fn run_from_branch(
         .ok_or_else(|| anyhow::anyhow!("no graph.dot found on metadata branch for run {run_id}"))?;
 
     // If --pipeline was also provided, use it instead (allows overriding)
-    let source = if let Some(ref workflow_path) = args.workflow {
-        super::read_dot_file(workflow_path)?
+    let (mut graph, diagnostics) = if let Some(ref workflow_path) = args.workflow {
+        let source = super::read_dot_file(workflow_path)?;
+        let dot_dir = workflow_path.parent().unwrap_or(std::path::Path::new("."));
+        crate::workflow::WorkflowBuilder::new().prepare_with_file_inlining(&source, dot_dir)?
     } else {
-        source
+        crate::workflow::WorkflowBuilder::new().prepare(&source)?
     };
-
-    let (mut graph, diagnostics) = crate::workflow::WorkflowBuilder::new().prepare(&source)?;
     apply_goal_override(&mut graph, args.goal.as_deref(), None);
 
     eprintln!(

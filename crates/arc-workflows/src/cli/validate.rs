@@ -2,9 +2,9 @@ use anyhow::bail;
 use arc_util::terminal::Styles;
 
 use crate::validation::Severity;
-use crate::workflow::WorkflowBuilder;
+use crate::workflow::prepare_from_file;
 
-use super::{print_diagnostics, read_dot_file, ValidateArgs};
+use super::{print_diagnostics, ValidateArgs};
 
 /// Parse and validate a workflow file without executing it.
 ///
@@ -12,13 +12,7 @@ use super::{print_diagnostics, read_dot_file, ValidateArgs};
 ///
 /// Returns an error if the file cannot be read, parsed, or has validation errors.
 pub fn validate_command(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<()> {
-    let source = read_dot_file(&args.workflow)?;
-    let dot_dir = args.workflow.parent().unwrap_or(std::path::Path::new("."));
-    let mut builder = WorkflowBuilder::new();
-    builder.register_transform(Box::new(crate::transform::FileInliningTransform::new(
-        dot_dir.to_path_buf(),
-    )));
-    let (graph, diagnostics) = builder.prepare(&source)?;
+    let (graph, diagnostics) = prepare_from_file(&args.workflow)?;
 
     eprintln!(
         "{} ({} nodes, {} edges)",

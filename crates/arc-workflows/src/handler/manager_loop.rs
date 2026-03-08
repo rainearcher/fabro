@@ -13,7 +13,7 @@ use crate::engine::{RunConfig, WorkflowRunEngine};
 use crate::error::ArcError;
 use crate::graph::{Graph, Node};
 use crate::outcome::{Outcome, StageStatus};
-use crate::workflow::prepare_workflow;
+use crate::workflow::{prepare_from_file, prepare_from_source};
 
 use super::{EngineServices, Handler};
 
@@ -42,23 +42,31 @@ fn parse_duration_str(s: &str) -> Duration {
     Duration::from_secs(45)
 }
 
-/// Read DOT source from node attributes: inline `stack.child_dot_source` or
-/// file path `stack.child_dotfile`.
-fn read_child_dot(node: &Node) -> Result<String, ArcError> {
+/// Parse a child workflow graph from node attributes: inline `stack.child_dot_source`
+/// (no file inlining) or file path `stack.child_dotfile` (with file inlining).
+fn parse_child_graph(node: &Node) -> Result<Graph, ArcError> {
     if let Some(dot) = node
         .attrs
         .get("stack.child_dot_source")
         .and_then(|v| v.as_str())
     {
-        return Ok(dot.to_string());
+        return prepare_from_source(dot);
     }
     if let Some(path) = node
         .attrs
         .get("stack.child_dotfile")
         .and_then(|v| v.as_str())
     {
-        return std::fs::read_to_string(path)
-            .map_err(|e| ArcError::handler(format!("Failed to read child dotfile {path}: {e}")));
+        let (graph, diagnostics) = prepare_from_file(std::path::Path::new(path))?;
+        let errors: Vec<&crate::validation::Diagnostic> = diagnostics
+            .iter()
+            .filter(|d| d.severity == crate::validation::Severity::Error)
+            .collect();
+        if !errors.is_empty() {
+            let messages: Vec<String> = errors.iter().map(|d| d.message.clone()).collect();
+            return Err(ArcError::Validation(messages.join("; ")));
+        }
+        return Ok(graph);
     }
     Err(ArcError::handler("No child DOT source".to_string()))
 }
@@ -113,13 +121,8 @@ impl Handler for SubWorkflowHandler {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        // Read and parse child DOT source
-        let dot_source = match read_child_dot(node) {
-            Ok(s) => s,
-            Err(e) => return Ok(Outcome::fail_classify(e.to_string())),
-        };
-
-        let child_graph = match prepare_workflow(&dot_source) {
+        // Read and parse child workflow graph
+        let child_graph = match parse_child_graph(node) {
             Ok(g) => g,
             Err(e) => {
                 return Ok(Outcome::fail_classify(format!(
