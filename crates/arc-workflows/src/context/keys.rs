@@ -85,13 +85,14 @@ pub fn is_engine_internal_key(key: &str) -> bool {
 }
 
 /// Fidelity mode controlling how much prior context is provided to LLM sessions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Fidelity {
     /// Complete context, no summarization — sessions share a thread.
     Full,
     /// Minimal: only graph goal and run ID.
     Truncate,
     /// Structured nested-bullet summary (default).
+    #[default]
     Compact,
     /// Brief textual summary (~600 token target).
     SummaryLow,
@@ -109,12 +110,6 @@ impl Fidelity {
             Self::Full => Self::SummaryHigh,
             other => other,
         }
-    }
-}
-
-impl Default for Fidelity {
-    fn default() -> Self {
-        Self::Compact
     }
 }
 

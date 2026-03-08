@@ -623,7 +623,40 @@ pub async fn run_chat_via_server(args: ChatArgs, server: &ServerConnection) -> R
             continue;
         }
 
-        if session_id.is_none() {
+        if let Some(sid) = &session_id {
+            // Subsequent messages: send message
+            let body = serde_json::json!({ "content": trimmed });
+            let url = format!("{}/sessions/{sid}/messages", server.base_url);
+            let response = server
+                .client
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .with_context(|| format!("Failed to connect to server at {}", server.base_url))?;
+
+            let status = response.status();
+            if !status.is_success() {
+                let text = response.text().await.unwrap_or_default();
+                bail!("Server returned {status}: {text}");
+            }
+
+            // Stream events
+            let events_url = format!("{}/sessions/{sid}/events", server.base_url);
+            let events_response = server
+                .client
+                .get(&events_url)
+                .send()
+                .await
+                .context("Failed to connect to event stream")?;
+
+            if !events_response.status().is_success() {
+                let text = events_response.text().await.unwrap_or_default();
+                bail!("Event stream returned error: {text}");
+            }
+
+            stream_session_text(events_response).await?;
+        } else {
             // First message: create session
             let mut body = serde_json::json!({ "content": trimmed });
             if let Some(ref model) = args.model {
@@ -667,7 +700,7 @@ pub async fn run_chat_via_server(args: ChatArgs, server: &ServerConnection) -> R
                 .get(&events_url)
                 .send()
                 .await
-                .with_context(|| format!("Failed to connect to event stream"))?;
+                .context("Failed to connect to event stream")?;
 
             if !events_response.status().is_success() {
                 let text = events_response.text().await.unwrap_or_default();
@@ -676,40 +709,6 @@ pub async fn run_chat_via_server(args: ChatArgs, server: &ServerConnection) -> R
 
             stream_session_text(events_response).await?;
             session_id = Some(sid);
-        } else {
-            // Subsequent messages: send message
-            let sid = session_id.as_ref().unwrap();
-            let body = serde_json::json!({ "content": trimmed });
-            let url = format!("{}/sessions/{sid}/messages", server.base_url);
-            let response = server
-                .client
-                .post(&url)
-                .json(&body)
-                .send()
-                .await
-                .with_context(|| format!("Failed to connect to server at {}", server.base_url))?;
-
-            let status = response.status();
-            if !status.is_success() {
-                let text = response.text().await.unwrap_or_default();
-                bail!("Server returned {status}: {text}");
-            }
-
-            // Stream events
-            let events_url = format!("{}/sessions/{sid}/events", server.base_url);
-            let events_response = server
-                .client
-                .get(&events_url)
-                .send()
-                .await
-                .with_context(|| format!("Failed to connect to event stream"))?;
-
-            if !events_response.status().is_success() {
-                let text = events_response.text().await.unwrap_or_default();
-                bail!("Event stream returned error: {text}");
-            }
-
-            stream_session_text(events_response).await?;
         }
     }
 

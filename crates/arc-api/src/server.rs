@@ -137,7 +137,7 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
         let demo = demo_router.clone();
         let real = real_router.clone();
         async move {
-            if req.headers().get("x-arc-demo").map_or(false, |v| v == "1") {
+            if req.headers().get("x-arc-demo").is_some_and(|v| v == "1") {
                 demo.oneshot(req).await
             } else {
                 real.oneshot(req).await

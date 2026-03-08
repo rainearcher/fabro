@@ -294,8 +294,7 @@ pub async fn send_message(
                         created_at: now,
                     }));
                 session.updated_at = now;
-                let seq = session.generation_seq.fetch_add(1, Ordering::Relaxed) + 1;
-                seq
+                session.generation_seq.fetch_add(1, Ordering::Relaxed) + 1
             }
             None => return ApiError::not_found("Session not found.").into_response(),
         }
@@ -354,7 +353,7 @@ pub async fn stream_session_events(
                             .data(serde_json::json!({"message": message}).to_string()),
                     ),
                 };
-                sse.map(|e| Ok::<_, std::convert::Infallible>(e))
+                sse.map(Ok::<_, std::convert::Infallible>)
             }
             Err(_) => None,
         });

@@ -159,7 +159,7 @@ impl WorkflowRunConfig {
         // Union checkpoint exclude globs from defaults and task config, dedup
         if !defaults.checkpoint.exclude_globs.is_empty() {
             let mut merged = defaults.checkpoint.exclude_globs.clone();
-            merged.extend(self.checkpoint.exclude_globs.drain(..));
+            merged.append(&mut self.checkpoint.exclude_globs);
             merged.sort();
             merged.dedup();
             self.checkpoint.exclude_globs = merged;

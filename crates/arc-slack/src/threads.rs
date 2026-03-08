@@ -3,15 +3,14 @@ use std::sync::Mutex;
 
 use serde_json::Value;
 
+#[derive(Default)]
 pub struct ThreadRegistry {
     ts_to_question: Mutex<HashMap<String, String>>,
 }
 
 impl ThreadRegistry {
     pub fn new() -> Self {
-        Self {
-            ts_to_question: Mutex::new(HashMap::new()),
-        }
+        Self::default()
     }
 
     pub fn register(&self, message_ts: &str, question_id: &str) {

@@ -187,28 +187,28 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
             let tool_calls = response.tool_calls();
             let mut tool_results = Vec::new();
 
-            if !tool_calls.is_empty()
-                && response.finish_reason == FinishReason::ToolCalls
-                && params.tools.is_some()
-                && max_tool_rounds > 0
-            {
-                debug!(
-                    tool_calls = tool_calls.len(),
-                    round = round,
-                    "Executing tool calls"
-                );
-                let tools = params.tools.as_ref().expect("checked above");
-                if tools.iter().any(|t| t.is_active()) {
-                    let tool_refs: Vec<&Tool> =
-                        tools.iter().map(std::convert::AsRef::as_ref).collect();
-                    tool_results = execute_all_tools_with_repair(
-                        &tool_refs,
-                        &tool_calls,
-                        &messages,
-                        abort_signal.as_ref(),
-                        params.repair_tool_call.as_ref(),
-                    )
-                    .await;
+            if let Some(tools) = &params.tools {
+                if !tool_calls.is_empty()
+                    && response.finish_reason == FinishReason::ToolCalls
+                    && max_tool_rounds > 0
+                {
+                    debug!(
+                        tool_calls = tool_calls.len(),
+                        round = round,
+                        "Executing tool calls"
+                    );
+                    if tools.iter().any(|t| t.is_active()) {
+                        let tool_refs: Vec<&Tool> =
+                            tools.iter().map(std::convert::AsRef::as_ref).collect();
+                        tool_results = execute_all_tools_with_repair(
+                            &tool_refs,
+                            &tool_calls,
+                            &messages,
+                            abort_signal.as_ref(),
+                            params.repair_tool_call.as_ref(),
+                        )
+                        .await;
+                    }
                 }
             }
 

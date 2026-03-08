@@ -17,6 +17,16 @@ pub use openssh_runner::OpensshRunner;
 const WORKING_DIRECTORY: &str = "/home/exedev";
 const PROVIDER: &str = "exe";
 
+/// Factory function type for creating data-plane SSH runners.
+type DataSshFactory = Box<
+    dyn Fn(
+            &str,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Box<dyn SshRunner>, String>> + Send>,
+        > + Send
+        + Sync,
+>;
+
 /// Output from an SSH command execution.
 pub struct SshOutput {
     pub stdout: Vec<u8>,
@@ -59,14 +69,7 @@ pub struct ExeSandbox {
     /// Factory for creating data-plane SSH runners, used during initialize().
     /// In production, this connects to the VM host via OpensshRunner.
     /// In tests, this is replaced with a closure that returns a MockSshRunner.
-    data_ssh_factory: Box<
-        dyn Fn(
-                &str,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<Box<dyn SshRunner>, String>> + Send>,
-            > + Send
-            + Sync,
-    >,
+    data_ssh_factory: DataSshFactory,
 }
 
 impl ExeSandbox {

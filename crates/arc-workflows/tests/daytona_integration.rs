@@ -119,7 +119,7 @@ async fn daytona_exec_command_cancelled() {
 
     let token = tokio_util::sync::CancellationToken::new();
     let token_clone = token.clone();
-    
+
     // Cancel the token shortly after starting
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -149,8 +149,8 @@ async fn daytona_exec_command_local_timeout() {
     // Use a tiny timeout_ms of 100ms, our local timeout is 100 + 2000 = 2100ms.
     // If the server doesn't enforce the timeout properly or drops the connection,
     // our local timeout should catch it. To simulate this without making a bad server,
-    // we can't easily force the local timeout to hit before the server timeout 
-    // without mocking. But if we run `sleep 10` and Daytona does NOT respect the 
+    // we can't easily force the local timeout to hit before the server timeout
+    // without mocking. But if we run `sleep 10` and Daytona does NOT respect the
     // short timeout parameter, the local 2.1s timeout will definitely fire.
     // Let's at least test that a 100ms timeout works and doesn't run for 10s.
     let start = std::time::Instant::now();
@@ -160,11 +160,14 @@ async fn daytona_exec_command_local_timeout() {
         .unwrap();
 
     let duration = start.elapsed();
-    
-    // It should either fail with Daytona's timeout (duration < 2000ms) or our 
-    // local timeout (duration ~2100ms). Both are valid success conditions for 
+
+    // It should either fail with Daytona's timeout (duration < 2000ms) or our
+    // local timeout (duration ~2100ms). Both are valid success conditions for
     // the system as a whole avoiding a stall.
-    assert!(duration < std::time::Duration::from_millis(3000), "Command stalled for longer than the local timeout mechanism");
+    assert!(
+        duration < std::time::Duration::from_millis(3000),
+        "Command stalled for longer than the local timeout mechanism"
+    );
     assert!(result.exit_code != 0);
 
     env.cleanup().await.unwrap();

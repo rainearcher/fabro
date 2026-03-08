@@ -274,7 +274,7 @@ pub async fn run_command(
 
     let goal = graph.goal();
     if !goal.is_empty() {
-        let first_line = goal.lines().next().unwrap_or(&goal);
+        let first_line = goal.lines().next().unwrap_or(goal);
         eprintln!("{} {first_line}\n", styles.bold.apply_to("Goal:"));
     }
 
@@ -1211,6 +1211,7 @@ fn print_final_output(logs_dir: &std::path::Path, styles: &Styles) {
 /// Boots the sandbox (init + cleanup), checks LLM provider availability,
 /// resolves the model/provider through the full precedence chain, and prints
 /// a styled check report.
+#[allow(clippy::too_many_arguments)]
 async fn run_preflight(
     graph: &crate::graph::types::Graph,
     run_cfg: &Option<run_config::WorkflowRunConfig>,

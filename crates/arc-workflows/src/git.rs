@@ -164,6 +164,7 @@ pub fn merge_ff_only(work_dir: &Path, sha: &str) -> Result<()> {
 /// Stage all changes and commit in `work_dir` with a structured message
 /// including trailers for completed node count and shadow commit pointer.
 /// Returns the new commit SHA.
+#[allow(clippy::too_many_arguments)]
 pub fn checkpoint_commit(
     work_dir: &Path,
     run_id: &str,

@@ -57,6 +57,10 @@ mod mtls_e2e {
             "1",
             "-subj",
             &format!("/CN={ca_cn}"),
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
+            "-addext",
+            "keyUsage=critical,keyCertSign,cRLSign",
         ]);
 
         // Server key + cert signed by CA
@@ -124,6 +128,9 @@ mod mtls_e2e {
             "-subj",
             &format!("/CN={client_cn}"),
         ]);
+        // Client extension file to produce a v3 certificate
+        let client_ext_path = dir.join("client.ext");
+        std::fs::write(&client_ext_path, "basicConstraints=CA:FALSE\n").unwrap();
         run_openssl(&[
             "x509",
             "-req",
@@ -138,6 +145,8 @@ mod mtls_e2e {
             client_cert_path.to_str().unwrap(),
             "-days",
             "1",
+            "-extfile",
+            client_ext_path.to_str().unwrap(),
         ]);
 
         PkiPaths {

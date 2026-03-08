@@ -347,13 +347,13 @@ pub async fn list_retros(
             params
                 .workflow
                 .as_ref()
-                .map_or(true, |w| &r.workflow.slug == w)
+                .is_none_or(|w| &r.workflow.slug == w)
         })
         .filter(|r| {
             params
                 .smoothness
                 .as_ref()
-                .map_or(true, |s| r.smoothness.as_ref() == Some(s))
+                .is_none_or(|s| r.smoothness.as_ref() == Some(s))
         })
         .collect();
     paginated_response(
@@ -2525,6 +2525,7 @@ mod retros {
     use super::ts;
     use arc_types::*;
 
+    #[allow(clippy::too_many_arguments)]
     fn stage(
         id: &str,
         label: &str,

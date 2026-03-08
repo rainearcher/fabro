@@ -539,6 +539,7 @@ pub enum GitCheckpointMode {
 }
 
 /// Run a git checkpoint commit on the host filesystem (local/Docker bind-mount).
+#[allow(clippy::too_many_arguments)]
 pub async fn git_checkpoint_host(
     work_dir: PathBuf,
     run_id: String,
@@ -586,6 +587,7 @@ async fn git_diff_host(work_dir: PathBuf, base: String) -> Option<String> {
 pub const GIT_REMOTE: &str = "git -c maintenance.auto=0 -c gc.auto=0";
 
 /// Run a git checkpoint commit inside a remote sandbox.
+#[allow(clippy::too_many_arguments)]
 pub async fn git_checkpoint_remote(
     sandbox: &dyn Sandbox,
     run_id: &str,
