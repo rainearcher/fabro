@@ -1,5 +1,6 @@
 use crate::sandbox::Sandbox;
 use crate::tool_registry::RegisteredTool;
+use crate::truncation::{truncate_output, TruncationMode};
 use arc_llm::types::ToolDefinition;
 use std::sync::Arc;
 
@@ -152,7 +153,8 @@ pub async fn apply_patch_operations(
             }
             PatchOperation::Update { path, hunks } => {
                 let original = env.read_file(path, None, None).await?;
-                let updated = apply_hunks(&original, hunks)?;
+                let updated = apply_hunks(&original, hunks)
+                    .map_err(|err| format_patch_error(&err, path, &original))?;
                 env.write_file(path, &updated).await?;
                 results.push(format!("Updated file: {path}"));
             }
@@ -239,6 +241,17 @@ fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, String> {
     }
 
     Ok(lines.join("\n"))
+}
+
+fn format_patch_error(error: &str, path: &str, content: &str) -> String {
+    let numbered: String = content
+        .lines()
+        .enumerate()
+        .map(|(i, line)| format!("{}|{}", i + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let truncated = truncate_output(&numbered, 9_000, TruncationMode::HeadTail);
+    format!("{error}\n\nCurrent contents of {path}:\n{truncated}")
 }
 
 pub fn make_apply_patch_tool() -> RegisteredTool {
@@ -646,5 +659,56 @@ mod tests {
         let content = env.read_file("src/lib.rs", None, None).await.unwrap();
         assert!(content.contains("println!(\"new\")"));
         assert!(!content.contains("println!(\"old\")"));
+    }
+
+    #[test]
+    fn format_patch_error_includes_numbered_contents() {
+        let result = format_patch_error(
+            "Could not find context line in file: 'fn missing()'",
+            "src/lib.rs",
+            "fn hello() {\n    println!(\"hi\");\n}",
+        );
+        assert!(result.contains("Could not find context line in file: 'fn missing()'"));
+        assert!(result.contains("Current contents of src/lib.rs:"));
+        assert!(result.contains("1|fn hello() {"));
+        assert!(result.contains("2|    println!(\"hi\");"));
+        assert!(result.contains("3|}"));
+    }
+
+    #[test]
+    fn format_patch_error_truncates_large_files() {
+        let lines: Vec<String> = (1..=1_000)
+            .map(|i| format!("line number {:04}", i))
+            .collect();
+        let content = lines.join("\n");
+        let result = format_patch_error("some error", "big.txt", &content);
+        assert!(result.len() < 10_000);
+        assert!(result.contains("truncated") || result.contains("removed"));
+    }
+
+    #[tokio::test]
+    async fn apply_patch_error_includes_file_contents() {
+        let mut files = HashMap::new();
+        files.insert(
+            "src/game.py".to_string(),
+            "def real_fn():\n    pass".to_string(),
+        );
+        let env = MutableMockSandbox::new(files);
+
+        let ops = vec![PatchOperation::Update {
+            path: "src/game.py".into(),
+            hunks: vec![Hunk {
+                context_line: "def nonexistent():".into(),
+                changes: vec![
+                    Change::Remove("    old_body()".into()),
+                    Change::Add("    new_body()".into()),
+                ],
+            }],
+        }];
+
+        let err = apply_patch_operations(&ops, &env).await.unwrap_err();
+        assert!(err.contains("Could not find context line"));
+        assert!(err.contains("Current contents of src/game.py:"));
+        assert!(err.contains("1|def real_fn():"));
     }
 }

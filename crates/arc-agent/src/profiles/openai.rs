@@ -119,8 +119,8 @@ If completing the task requires writing or modifying files:
 and focused on the task.
 - Use `git log` and `git blame` to search the history of the codebase if additional context is needed.
 - NEVER add copyright or license headers unless specifically requested.
-- Do not waste tokens re-reading files after calling apply_patch on them. The tool call will \
-fail if it did not work.
+- When apply_patch fails, the error includes the current file contents — use them to construct \
+a corrected patch without re-reading the file.
 - Do not `git commit` your changes or create new git branches unless explicitly requested.
 
 # Validating Your Work
