@@ -94,6 +94,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;

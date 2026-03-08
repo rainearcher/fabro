@@ -107,6 +107,7 @@ pub struct AgentApiBackend {
     provider: Provider,
     fallback_chain: Vec<FallbackTarget>,
     sessions: Mutex<HashMap<String, Session>>,
+    env: HashMap<String, String>,
 }
 
 impl AgentApiBackend {
@@ -117,7 +118,14 @@ impl AgentApiBackend {
             provider,
             fallback_chain,
             sessions: Mutex::new(HashMap::new()),
+            env: HashMap::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
+        self.env = env;
+        self
     }
 
     async fn create_session(
@@ -130,6 +138,7 @@ impl AgentApiBackend {
             self.provider,
             node,
             sandbox,
+            &self.env,
         )
         .await
     }
@@ -139,6 +148,7 @@ impl AgentApiBackend {
         provider: Provider,
         node: &Node,
         sandbox: &Arc<dyn Sandbox>,
+        env: &HashMap<String, String>,
     ) -> Result<Session, ArcError> {
         let client = Client::from_env()
             .await
@@ -161,6 +171,7 @@ impl AgentApiBackend {
         let factory_client = client.clone();
         let factory_model = model.to_string();
         let factory_env = Arc::clone(sandbox);
+        let factory_tool_env = env.clone();
         let factory: SessionFactory = Arc::new(move || {
             let child_profile: Arc<dyn ProviderProfile> = match provider {
                 Provider::OpenAi => Arc::new(OpenAiProfile::new(&factory_model)),
@@ -170,18 +181,25 @@ impl AgentApiBackend {
                 Provider::Gemini => Arc::new(GeminiProfile::new(&factory_model)),
                 Provider::Anthropic => Arc::new(AnthropicProfile::new(&factory_model)),
             };
-            Session::new(
+            let mut session = Session::new(
                 factory_client.clone(),
                 child_profile,
                 Arc::clone(&factory_env),
                 SessionConfig::default(),
-            )
+            );
+            if !factory_tool_env.is_empty() {
+                session.set_tool_env(factory_tool_env.clone());
+            }
+            session
         });
 
         profile.register_subagent_tools(manager, factory, 0);
         let profile: Arc<dyn ProviderProfile> = Arc::from(profile);
 
-        let session = Session::new(client, profile, Arc::clone(sandbox), config);
+        let mut session = Session::new(client, profile, Arc::clone(sandbox), config);
+        if !env.is_empty() {
+            session.set_tool_env(env.clone());
+        }
 
         // Wire subagent event callback to parent session's emitter
         manager_for_callback
@@ -441,6 +459,7 @@ impl CodergenBackend for AgentApiBackend {
                         target_provider,
                         node,
                         sandbox,
+                        &self.env,
                     )
                     .await
                     {

@@ -40,6 +40,7 @@ pub struct Session {
     skills: Vec<Skill>,
     system_prompt: String,
     file_tracker: FileTracker,
+    tool_env: Option<std::collections::HashMap<String, String>>,
 }
 
 impl Session {
@@ -67,7 +68,12 @@ impl Session {
             skills: Vec::new(),
             system_prompt: String::new(),
             file_tracker: FileTracker::default(),
+            tool_env: None,
         }
+    }
+
+    pub fn set_tool_env(&mut self, env: std::collections::HashMap<String, String>) {
+        self.tool_env = Some(env);
     }
 
     /// Initialize session by discovering project docs and capturing environment context.
@@ -609,6 +615,7 @@ impl Session {
                 &self.config,
                 &self.event_emitter,
                 &self.id,
+                self.tool_env.as_ref(),
             )
             .await;
 

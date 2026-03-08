@@ -548,6 +548,7 @@ name: trimmed
         let ctx = crate::tool_registry::ToolContext {
             env,
             cancel: tokio_util::sync::CancellationToken::new(),
+            tool_env: None,
         };
         let result = (tool.executor)(args, ctx).await;
         assert_eq!(
@@ -566,6 +567,7 @@ name: trimmed
         let ctx = crate::tool_registry::ToolContext {
             env,
             cancel: tokio_util::sync::CancellationToken::new(),
+            tool_env: None,
         };
         let result = (tool.executor)(args, ctx).await;
         assert!(result.is_err());
@@ -582,6 +584,7 @@ name: trimmed
         let ctx = crate::tool_registry::ToolContext {
             env,
             cancel: tokio_util::sync::CancellationToken::new(),
+            tool_env: None,
         };
         let result = (tool.executor)(args, ctx).await;
         assert!(result.is_err());

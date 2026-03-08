@@ -219,9 +219,10 @@ pub fn make_shell_tool_with_config(config: &SessionConfig) -> RegisteredTool {
                     .unwrap_or(default_timeout)
                     .min(max_timeout);
 
+                tracing::debug!(env_var_count = ctx.tool_env.as_ref().map_or(0, |e| e.len()), "Injecting sandbox env vars into tool execution");
                 let result = ctx
                     .env
-                    .exec_command(command, timeout_ms, None, None, Some(ctx.cancel))
+                    .exec_command(command, timeout_ms, None, ctx.tool_env.as_ref(), Some(ctx.cancel))
                     .await?;
 
                 let mut output = String::new();
@@ -534,7 +535,7 @@ pub(crate) fn make_web_fetch_tool(summarizer: Option<WebFetchSummarizer>) -> Reg
                 );
 
                 let result = ctx.env
-                    .exec_command(&command, timeout_ms, None, None, Some(ctx.cancel))
+                    .exec_command(&command, timeout_ms, None, ctx.tool_env.as_ref(), Some(ctx.cancel))
                     .await?;
 
                 if result.exit_code != 0 {
@@ -611,6 +612,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -635,6 +637,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -651,6 +654,7 @@ mod tests {
             ToolContext {
                 env: env_clone,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -680,6 +684,7 @@ mod tests {
             ToolContext {
                 env: env_clone,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -707,6 +712,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -731,6 +737,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -759,6 +766,7 @@ mod tests {
             ToolContext {
                 env: env_clone,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -786,6 +794,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -804,6 +813,7 @@ mod tests {
             ToolContext {
                 env: env_clone,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -828,6 +838,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -854,11 +865,79 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
         let output = result.unwrap();
         assert!(output.starts_with("Command timed out.\n"));
+    }
+
+    #[tokio::test]
+    async fn shell_passes_tool_env_to_exec_command() {
+        let tool = make_shell_tool();
+        let env = Arc::new(MockSandbox::default());
+        let env_clone: Arc<dyn Sandbox> = env.clone();
+        let mut tool_env = HashMap::new();
+        tool_env.insert("MY_KEY".into(), "my_value".into());
+        let _result = (tool.executor)(
+            serde_json::json!({"command": "echo $MY_KEY"}),
+            ToolContext {
+                env: env_clone,
+                cancel: CancellationToken::new(),
+                tool_env: Some(tool_env.clone()),
+            },
+        )
+        .await;
+        let captured = env.captured_env_vars.lock().unwrap().clone();
+        assert_eq!(captured, Some(tool_env));
+    }
+
+    #[tokio::test]
+    async fn shell_passes_none_env_when_tool_env_is_none() {
+        let tool = make_shell_tool();
+        let env = Arc::new(MockSandbox::default());
+        let env_clone: Arc<dyn Sandbox> = env.clone();
+        let _result = (tool.executor)(
+            serde_json::json!({"command": "echo hello"}),
+            ToolContext {
+                env: env_clone,
+                cancel: CancellationToken::new(),
+                tool_env: None,
+            },
+        )
+        .await;
+        let captured = env.captured_env_vars.lock().unwrap().clone();
+        assert_eq!(captured, None);
+    }
+
+    #[tokio::test]
+    async fn web_fetch_passes_tool_env_to_exec_command() {
+        let tool = make_web_fetch_tool(None);
+        let env = Arc::new(MockSandbox {
+            exec_result: ExecResult {
+                stdout: "fetched content".into(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
+                duration_ms: 100,
+            },
+            ..Default::default()
+        });
+        let env_clone: Arc<dyn Sandbox> = env.clone();
+        let mut tool_env = HashMap::new();
+        tool_env.insert("API_KEY".into(), "secret".into());
+        let _result = (tool.executor)(
+            serde_json::json!({"url": "https://example.com"}),
+            ToolContext {
+                env: env_clone,
+                cancel: CancellationToken::new(),
+                tool_env: Some(tool_env.clone()),
+            },
+        )
+        .await;
+        let captured = env.captured_env_vars.lock().unwrap().clone();
+        assert_eq!(captured, Some(tool_env));
     }
 
     #[tokio::test]
@@ -876,6 +955,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -896,6 +976,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -913,6 +994,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -932,6 +1014,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -984,6 +1067,7 @@ mod tests {
             ToolContext {
                 env: env_clone,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -1020,6 +1104,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -1040,6 +1125,7 @@ mod tests {
             ToolContext {
                 env: env_clone,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -1061,6 +1147,7 @@ mod tests {
             ToolContext {
                 env: env_clone,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -1091,6 +1178,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -1117,6 +1205,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -1160,6 +1249,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -1189,6 +1279,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -1251,6 +1342,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;
@@ -1301,6 +1393,7 @@ mod tests {
             ToolContext {
                 env,
                 cancel: CancellationToken::new(),
+                tool_env: None,
             },
         )
         .await;

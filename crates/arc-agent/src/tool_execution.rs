@@ -5,6 +5,7 @@ use crate::tool_registry::ToolRegistry;
 use crate::truncation::truncate_tool_output;
 use crate::types::AgentEvent;
 use arc_llm::types::ToolResult;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -20,6 +21,7 @@ pub async fn execute_tool_calls(
     config: &SessionConfig,
     emitter: &EventEmitter,
     session_id: &str,
+    tool_env: Option<&HashMap<String, String>>,
 ) -> Vec<ToolResult> {
     if parallel && tool_calls.len() > 1 {
         execute_tool_calls_parallel(
@@ -31,6 +33,7 @@ pub async fn execute_tool_calls(
             config,
             emitter,
             session_id,
+            tool_env,
         )
         .await
     } else {
@@ -43,6 +46,7 @@ pub async fn execute_tool_calls(
             config,
             emitter,
             session_id,
+            tool_env,
         )
         .await
     }
@@ -58,6 +62,7 @@ async fn execute_tool_calls_sequential(
     config: &SessionConfig,
     emitter: &EventEmitter,
     session_id: &str,
+    tool_env: Option<&HashMap<String, String>>,
 ) -> Vec<ToolResult> {
     let mut results = Vec::new();
     for tc in tool_calls {
@@ -75,6 +80,7 @@ async fn execute_tool_calls_sequential(
             config,
             emitter,
             session_id,
+            tool_env,
         )
         .await;
         results.push(result);
@@ -92,7 +98,9 @@ async fn execute_tool_calls_parallel(
     config: &SessionConfig,
     emitter: &EventEmitter,
     session_id: &str,
+    tool_env: Option<&HashMap<String, String>>,
 ) -> Vec<ToolResult> {
+    let tool_env = tool_env.cloned();
     let futures: Vec<_> = tool_calls
         .iter()
         .map(|tc| {
@@ -103,6 +111,7 @@ async fn execute_tool_calls_parallel(
             let tc = tc.clone();
             let session_id = session_id.to_owned();
             let tool_approval = tool_approval.cloned();
+            let tool_env = tool_env.clone();
             // Look up the tool before spawning since ToolRegistry is not Send.
             let registered_tool = registry.get(&tc.name).cloned();
             async move {
@@ -115,6 +124,7 @@ async fn execute_tool_calls_parallel(
                     &config,
                     &emitter,
                     &session_id,
+                    tool_env.as_ref(),
                 )
                 .await
             }
@@ -135,6 +145,7 @@ pub async fn execute_and_emit_one_tool(
     config: &SessionConfig,
     emitter: &EventEmitter,
     session_id: &str,
+    tool_env: Option<&HashMap<String, String>>,
 ) -> ToolResult {
     execute_and_emit_one_tool_with_lookup(
         tc,
@@ -145,6 +156,7 @@ pub async fn execute_and_emit_one_tool(
         config,
         emitter,
         session_id,
+        tool_env,
     )
     .await
 }
@@ -160,6 +172,7 @@ async fn execute_and_emit_one_tool_with_lookup(
     config: &SessionConfig,
     emitter: &EventEmitter,
     session_id: &str,
+    tool_env: Option<&HashMap<String, String>>,
 ) -> ToolResult {
     emitter.emit(
         session_id.to_owned(),
@@ -178,6 +191,7 @@ async fn execute_and_emit_one_tool_with_lookup(
         env,
         tool_approval,
         cancel_token,
+        tool_env,
     )
     .await;
 
@@ -210,6 +224,7 @@ async fn execute_one_tool(
     env: Arc<dyn Sandbox>,
     tool_approval: Option<&ToolApprovalFn>,
     cancel_token: CancellationToken,
+    tool_env: Option<&HashMap<String, String>>,
 ) -> ToolResult {
     if let Some(approval_fn) = tool_approval {
         if let Err(denial_message) = approval_fn(tool_name, arguments) {
@@ -228,6 +243,7 @@ async fn execute_one_tool(
             let ctx = crate::tool_registry::ToolContext {
                 env,
                 cancel: cancel_token,
+                tool_env: tool_env.cloned(),
             };
             match (tool.executor)(arguments.clone(), ctx).await {
                 Ok(output) => ToolResult::success(tool_call_id, serde_json::json!(output)),

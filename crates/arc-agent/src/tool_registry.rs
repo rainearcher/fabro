@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 pub struct ToolContext {
     pub env: Arc<dyn Sandbox>,
     pub cancel: CancellationToken,
+    pub tool_env: Option<HashMap<String, String>>,
 }
 
 pub type ToolExecutor = Arc<
@@ -178,6 +179,7 @@ mod tests {
         let ctx = ToolContext {
             env,
             cancel: CancellationToken::new(),
+            tool_env: None,
         };
         let result = (tool.executor)(serde_json::json!({}), ctx).await;
         assert_eq!(result.unwrap(), "ok");

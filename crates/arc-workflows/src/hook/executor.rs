@@ -365,6 +365,7 @@ impl HookExecutorImpl {
                     let ctx = arc_agent::tool_registry::ToolContext {
                         env: sandbox.clone(),
                         cancel: cancel.child_token(),
+                        tool_env: None,
                     };
                     let result = match tool {
                         Some(t) => match (t.executor)(tc.arguments.clone(), ctx).await {

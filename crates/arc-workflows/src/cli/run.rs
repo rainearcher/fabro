@@ -671,7 +671,8 @@ pub async fn run_command(
             if dry_run_mode {
                 None
             } else {
-                let api = AgentApiBackend::new(model.clone(), provider_enum, fallback_chain.clone());
+                let api = AgentApiBackend::new(model.clone(), provider_enum, fallback_chain.clone())
+                    .with_env(sandbox_env.clone());
                 let cli = AgentCliBackend::new(model.clone(), provider_enum)
                     .with_env(sandbox_env.clone());
                 Some(Box::new(BackendRouter::new(Box::new(api), cli)))
