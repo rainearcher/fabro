@@ -704,7 +704,10 @@ pub async fn run_command(
     let run_id = worktree_run_id
         .or(daytona_run_id)
         .unwrap_or_else(|| ulid::Ulid::new().to_string());
-    eprintln!("{} {run_id}", styles.bold.apply_to("Run:"));
+    progress_ui
+        .lock()
+        .expect("progress lock poisoned")
+        .show_run_id(&run_id);
     // Set up metadata branch for git checkpointing (host or remote)
     let meta_branch = if worktree_work_dir.is_some() || daytona_base_sha.is_some() {
         Some(crate::git::MetadataStore::branch_name(&run_id))
