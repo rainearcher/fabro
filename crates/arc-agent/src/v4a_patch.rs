@@ -1,4 +1,4 @@
-use crate::sandbox::Sandbox;
+use crate::sandbox::{format_lines_numbered, Sandbox};
 use crate::tool_registry::RegisteredTool;
 use crate::truncation::{truncate_output, TruncationMode};
 use arc_llm::types::ToolDefinition;
@@ -244,12 +244,7 @@ fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, String> {
 }
 
 fn format_patch_error(error: &str, path: &str, content: &str) -> String {
-    let numbered: String = content
-        .lines()
-        .enumerate()
-        .map(|(i, line)| format!("{}|{}", i + 1, line))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let numbered = format_lines_numbered(content, None, None);
     let truncated = truncate_output(&numbered, 9_000, TruncationMode::HeadTail);
     format!("{error}\n\nCurrent contents of {path}:\n{truncated}")
 }
@@ -670,9 +665,9 @@ mod tests {
         );
         assert!(result.contains("Could not find context line in file: 'fn missing()'"));
         assert!(result.contains("Current contents of src/lib.rs:"));
-        assert!(result.contains("1|fn hello() {"));
-        assert!(result.contains("2|    println!(\"hi\");"));
-        assert!(result.contains("3|}"));
+        assert!(result.contains("1 | fn hello() {"));
+        assert!(result.contains("2 |     println!(\"hi\");"));
+        assert!(result.contains("3 | }"));
     }
 
     #[test]
@@ -709,6 +704,6 @@ mod tests {
         let err = apply_patch_operations(&ops, &env).await.unwrap_err();
         assert!(err.contains("Could not find context line"));
         assert!(err.contains("Current contents of src/game.py:"));
-        assert!(err.contains("1|def real_fn():"));
+        assert!(err.contains("1 | def real_fn():"));
     }
 }
