@@ -15,13 +15,31 @@ pub enum Change {
 pub struct Hunk {
     pub context_line: String,
     pub changes: Vec<Change>,
+    pub end_of_file: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PatchOperation {
     Add { path: String, content: String },
     Delete { path: String },
-    Update { path: String, hunks: Vec<Hunk> },
+    Update {
+        path: String,
+        new_path: Option<String>,
+        hunks: Vec<Hunk>,
+    },
+}
+
+fn is_hunk_start(line: &str) -> bool {
+    line == "@@" || line.starts_with("@@ ")
+}
+
+fn extract_context_line(line: &str) -> String {
+    if line == "@@" {
+        String::new()
+    } else {
+        let raw = line.strip_prefix("@@ ").unwrap_or(line);
+        raw.strip_suffix(" @@").unwrap_or(raw).trim().to_string()
+    }
 }
 
 /// Parses a v4a format patch string into a list of patch operations.
@@ -29,9 +47,19 @@ pub enum PatchOperation {
 /// # Errors
 /// Returns an error if the patch format is invalid.
 pub fn parse_v4a_patch(text: &str) -> Result<Vec<PatchOperation>, String> {
-    let lines: Vec<&str> = text.lines().collect();
+    let mut lines: Vec<&str> = text.lines().collect();
     let mut ops = Vec::new();
     let mut i = 0;
+
+    // Strip heredoc wrapper
+    if let Some(first) = lines.first() {
+        let trimmed = first.trim();
+        if trimmed == "<<EOF" || trimmed == "<<'EOF'" || trimmed == "<<\"EOF\"" {
+            if lines.last().map(|l| l.trim()) == Some("EOF") {
+                lines = lines[1..lines.len() - 1].to_vec();
+            }
+        }
+    }
 
     // Find "*** Begin Patch"
     while i < lines.len() {
@@ -77,26 +105,38 @@ pub fn parse_v4a_patch(text: &str) -> Result<Vec<PatchOperation>, String> {
         } else if let Some(path) = line.strip_prefix("*** Update File: ") {
             let path = path.to_string();
             i += 1;
+
+            // Check for *** Move to:
+            let new_path = if i < lines.len() {
+                if let Some(np) = lines[i].trim().strip_prefix("*** Move to: ") {
+                    i += 1;
+                    Some(np.to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             let mut hunks = Vec::new();
             while i < lines.len() {
                 let l = lines[i];
-                if l.starts_with("*** ") && !l.starts_with("@@ ") {
+                if l.starts_with("*** ") && !is_hunk_start(l) {
                     break;
                 }
-                if l == "@@" || (l.starts_with("@@ ") && l.ends_with(" @@")) {
-                    let context_line = if l == "@@" {
-                        String::new()
-                    } else {
-                        l[3..l.len() - 3].to_string()
-                    };
+                if is_hunk_start(l) {
+                    // Consume stacked @@ lines, keeping the last context
+                    let mut context_line = extract_context_line(l);
                     i += 1;
+                    while i < lines.len() && is_hunk_start(lines[i]) {
+                        context_line = extract_context_line(lines[i]);
+                        i += 1;
+                    }
+
                     let mut changes = Vec::new();
                     while i < lines.len() {
                         let cl = lines[i];
-                        if cl.starts_with("*** ")
-                            || cl == "@@"
-                            || (cl.starts_with("@@ ") && cl.ends_with(" @@"))
-                        {
+                        if cl.starts_with("*** ") || is_hunk_start(cl) {
                             break;
                         }
                         if let Some(removed) = cl.strip_prefix('-') {
@@ -114,15 +154,30 @@ pub fn parse_v4a_patch(text: &str) -> Result<Vec<PatchOperation>, String> {
                         }
                         i += 1;
                     }
+
+                    // Check for *** End of File marker
+                    let end_of_file =
+                        if i < lines.len() && lines[i].trim() == "*** End of File" {
+                            i += 1;
+                            true
+                        } else {
+                            false
+                        };
+
                     hunks.push(Hunk {
                         context_line,
                         changes,
+                        end_of_file,
                     });
                 } else {
-                    return Err(format!("Expected @@ context @@ line, got: {l}"));
+                    return Err(format!("Expected @@ context line, got: {l}"));
                 }
             }
-            ops.push(PatchOperation::Update { path, hunks });
+            ops.push(PatchOperation::Update {
+                path,
+                new_path,
+                hunks,
+            });
         } else {
             return Err(format!("Unexpected line in patch: {line}"));
         }
@@ -151,12 +206,22 @@ pub async fn apply_patch_operations(
                 env.delete_file(path).await?;
                 results.push(format!("Deleted file: {path}"));
             }
-            PatchOperation::Update { path, hunks } => {
+            PatchOperation::Update {
+                path,
+                new_path,
+                hunks,
+            } => {
                 let original = env.read_file(path, None, None).await?;
                 let updated = apply_hunks(&original, hunks)
                     .map_err(|err| format_patch_error(&err, path, &original))?;
-                env.write_file(path, &updated).await?;
-                results.push(format!("Updated file: {path}"));
+                let dest = new_path.as_deref().unwrap_or(path);
+                env.write_file(dest, &updated).await?;
+                if new_path.is_some() {
+                    env.delete_file(path).await?;
+                    results.push(format!("Moved file: {path} → {dest}"));
+                } else {
+                    results.push(format!("Updated file: {path}"));
+                }
             }
         }
     }
@@ -164,23 +229,106 @@ pub async fn apply_patch_operations(
     Ok(results.join("\n"))
 }
 
+fn normalize_char(c: char) -> char {
+    match c {
+        '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' => '\'',
+        '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{201F}' => '"',
+        '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}'
+        | '\u{2212}' => '-',
+        '\u{00A0}' | '\u{2007}' | '\u{202F}' => ' ',
+        other => other,
+    }
+}
+
+fn normalize_unicode(s: &str) -> String {
+    s.chars().map(normalize_char).collect()
+}
+
+fn find_line_match(lines: &[String], target: &str, start: usize) -> Option<usize> {
+    let slice = &lines[start..];
+
+    // Pass 1: exact
+    if let Some(pos) = slice.iter().position(|l| l.as_str() == target) {
+        return Some(start + pos);
+    }
+    // Pass 2: trim_end
+    let target_te = target.trim_end();
+    if let Some(pos) = slice.iter().position(|l| l.trim_end() == target_te) {
+        return Some(start + pos);
+    }
+    // Pass 3: trim
+    let target_t = target.trim();
+    if let Some(pos) = slice.iter().position(|l| l.trim() == target_t) {
+        return Some(start + pos);
+    }
+    // Pass 4: unicode normalization
+    let target_n = normalize_unicode(target_t);
+    slice
+        .iter()
+        .position(|l| normalize_unicode(l.trim()) == target_n)
+        .map(|p| start + p)
+}
+
+fn find_line_match_reverse(lines: &[String], target: &str) -> Option<usize> {
+    // Pass 1: exact
+    if let Some(pos) = lines.iter().rposition(|l| l.as_str() == target) {
+        return Some(pos);
+    }
+    // Pass 2: trim_end
+    let target_te = target.trim_end();
+    if let Some(pos) = lines.iter().rposition(|l| l.trim_end() == target_te) {
+        return Some(pos);
+    }
+    // Pass 3: trim
+    let target_t = target.trim();
+    if let Some(pos) = lines.iter().rposition(|l| l.trim() == target_t) {
+        return Some(pos);
+    }
+    // Pass 4: unicode normalization
+    let target_n = normalize_unicode(target_t);
+    lines
+        .iter()
+        .rposition(|l| normalize_unicode(l.trim()) == target_n)
+}
+
 fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, String> {
     let mut lines: Vec<String> = content.lines().map(String::from).collect();
+    let mut cursor = 0;
 
-    // Apply hunks in reverse order to preserve line indices
-    for hunk in hunks.iter().rev() {
+    for hunk in hunks {
         let has_explicit_context = !hunk.context_line.is_empty();
 
-        let context_pos = if has_explicit_context {
-            lines
-                .iter()
-                .position(|l| l.trim() == hunk.context_line.trim())
-                .ok_or_else(|| {
-                    format!(
-                        "Could not find context line in file: '{}'",
-                        hunk.context_line
-                    )
-                })?
+        let context_pos = if hunk.end_of_file {
+            if has_explicit_context {
+                find_line_match_reverse(&lines, &hunk.context_line)
+            } else {
+                let first_match_text = hunk
+                    .changes
+                    .iter()
+                    .find_map(|c| match c {
+                        Change::Remove(t) | Change::Context(t) => Some(t.as_str()),
+                        Change::Add(_) => None,
+                    })
+                    .ok_or(
+                        "Hunk with bare @@ has no remove or context lines to locate position",
+                    )?;
+                find_line_match_reverse(&lines, first_match_text)
+            }
+            .ok_or_else(|| {
+                let target = if has_explicit_context {
+                    &hunk.context_line
+                } else {
+                    "first change line"
+                };
+                format!("Could not find context line in file: '{target}'")
+            })?
+        } else if has_explicit_context {
+            find_line_match(&lines, &hunk.context_line, cursor).ok_or_else(|| {
+                format!(
+                    "Could not find context line in file: '{}'",
+                    hunk.context_line
+                )
+            })?
         } else {
             // Bare @@ — locate position from the first remove or context line
             let first_match_text = hunk
@@ -191,12 +339,8 @@ fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, String> {
                     Change::Add(_) => None,
                 })
                 .ok_or("Hunk with bare @@ has no remove or context lines to locate position")?;
-            lines
-                .iter()
-                .position(|l| l.trim() == first_match_text.trim())
-                .ok_or_else(|| {
-                    format!("Could not find line in file: '{first_match_text}'")
-                })?
+            find_line_match(&lines, first_match_text, cursor)
+                .ok_or_else(|| format!("Could not find line in file: '{first_match_text}'"))?
         };
 
         // Build what we expect to find and what to replace with
@@ -237,7 +381,9 @@ fn apply_hunks(content: &str, hunks: &[Hunk]) -> Result<String, String> {
 
         // Replace the range
         let end = (context_pos + total_original_lines).min(lines.len());
+        let replacement_len = new_lines.len();
         lines.splice(context_pos..end, new_lines);
+        cursor = context_pos + replacement_len;
     }
 
     Ok(lines.join("\n"))
@@ -336,10 +482,16 @@ mod tests {
         let ops = parse_v4a_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         match &ops[0] {
-            PatchOperation::Update { path, hunks } => {
+            PatchOperation::Update {
+                path,
+                new_path,
+                hunks,
+            } => {
                 assert_eq!(path, "src/lib.rs");
+                assert_eq!(*new_path, None);
                 assert_eq!(hunks.len(), 1);
                 assert_eq!(hunks[0].context_line, "fn hello()");
+                assert!(!hunks[0].end_of_file);
                 assert_eq!(hunks[0].changes.len(), 2);
                 assert_eq!(
                     hunks[0].changes[0],
@@ -387,7 +539,7 @@ mod tests {
         let ops = parse_v4a_patch(patch).unwrap();
         assert_eq!(ops.len(), 1);
         match &ops[0] {
-            PatchOperation::Update { path, hunks } => {
+            PatchOperation::Update { path, hunks, .. } => {
                 assert_eq!(path, "src/game.py");
                 assert_eq!(hunks.len(), 1);
                 assert_eq!(hunks[0].context_line, "");
@@ -432,9 +584,11 @@ mod tests {
 
         let ops = vec![PatchOperation::Update {
             path: "src/game.py".into(),
+            new_path: None,
             hunks: vec![
                 Hunk {
                     context_line: String::new(),
+                    end_of_file: false,
                     changes: vec![
                         Change::Remove("from src.cards import Suit".into()),
                         Change::Add("from src.cards import Card, Suit".into()),
@@ -442,6 +596,7 @@ mod tests {
                 },
                 Hunk {
                     context_line: String::new(),
+                    end_of_file: false,
                     changes: vec![
                         Change::Remove("    stock: list = field(default_factory=list)".into()),
                         Change::Remove("    waste: list = field(default_factory=list)".into()),
@@ -556,8 +711,10 @@ mod tests {
 
         let ops = vec![PatchOperation::Update {
             path: "src/lib.rs".into(),
+            new_path: None,
             hunks: vec![Hunk {
                 context_line: String::new(),
+                end_of_file: false,
                 changes: vec![
                     Change::Context("fn unchanged() {".into()),
                     Change::Remove("    old_line();".into()),
@@ -585,9 +742,11 @@ mod tests {
 
         let ops = vec![PatchOperation::Update {
             path: "src/lib.rs".into(),
+            new_path: None,
             hunks: vec![
                 Hunk {
                     context_line: "def setup():".into(),
+                    end_of_file: false,
                     changes: vec![
                         Change::Remove("    old_setup()".into()),
                         Change::Add("    new_setup()".into()),
@@ -595,6 +754,7 @@ mod tests {
                 },
                 Hunk {
                     context_line: String::new(),
+                    end_of_file: false,
                     changes: vec![
                         Change::Remove("    old_teardown()".into()),
                         Change::Add("    new_teardown()".into()),
@@ -639,8 +799,10 @@ mod tests {
 
         let ops = vec![PatchOperation::Update {
             path: "src/lib.rs".into(),
+            new_path: None,
             hunks: vec![Hunk {
                 context_line: "fn hello() {".into(),
+                end_of_file: false,
                 changes: vec![
                     Change::Remove("    println!(\"old\");".into()),
                     Change::Add("    println!(\"new\");".into()),
@@ -692,8 +854,10 @@ mod tests {
 
         let ops = vec![PatchOperation::Update {
             path: "src/game.py".into(),
+            new_path: None,
             hunks: vec![Hunk {
                 context_line: "def nonexistent():".into(),
+                end_of_file: false,
                 changes: vec![
                     Change::Remove("    old_body()".into()),
                     Change::Add("    new_body()".into()),
@@ -705,5 +869,266 @@ mod tests {
         assert!(err.contains("Could not find context line"));
         assert!(err.contains("Current contents of src/game.py:"));
         assert!(err.contains("1 | def real_fn():"));
+    }
+
+    // Phase 0: Forward-order hunk application
+
+    #[test]
+    fn apply_hunks_bare_at_at_searches_forward_from_previous_hunk() {
+        let content = "def foo():\n    pass\n\ndef bar():\n    pass";
+        let hunks = vec![
+            Hunk {
+                context_line: String::new(),
+                end_of_file: false,
+                changes: vec![
+                    Change::Remove("    pass".into()),
+                    Change::Add("    return 1".into()),
+                ],
+            },
+            Hunk {
+                context_line: String::new(),
+                end_of_file: false,
+                changes: vec![
+                    Change::Remove("    pass".into()),
+                    Change::Add("    return 2".into()),
+                ],
+            },
+        ];
+        let result = apply_hunks(content, &hunks).unwrap();
+        assert!(result.contains("return 1"));
+        assert!(result.contains("return 2"));
+        assert!(!result.contains("    pass"));
+    }
+
+    // Phase 1: Context without trailing @@
+
+    #[test]
+    fn parse_v4a_context_without_trailing_markers() {
+        let patch = "\
+*** Begin Patch
+*** Update File: src/hello.py
+@@ def hello():
+-    print(\"old\")
++    print(\"new\")
+*** End Patch";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        match &ops[0] {
+            PatchOperation::Update { hunks, .. } => {
+                assert_eq!(hunks[0].context_line, "def hello():");
+            }
+            _ => panic!("Expected Update operation"),
+        }
+    }
+
+    // Phase 2: Stacked @@ anchors
+
+    #[test]
+    fn parse_v4a_stacked_context_uses_last() {
+        let patch = "\
+*** Begin Patch
+*** Update File: src/foo.py
+@@ class Foo:
+@@   def bar(self):
+-        pass
++        return 42
+*** End Patch";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        match &ops[0] {
+            PatchOperation::Update { hunks, .. } => {
+                assert_eq!(hunks.len(), 1);
+                assert_eq!(hunks[0].context_line, "def bar(self):");
+            }
+            _ => panic!("Expected Update operation"),
+        }
+    }
+
+    // Phase 3: *** End of File
+
+    #[test]
+    fn parse_v4a_end_of_file_marker() {
+        let patch = "\
+*** Begin Patch
+*** Update File: src/lib.py
+@@
+-    pass
++    return 1
+*** End of File
+*** End Patch";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        match &ops[0] {
+            PatchOperation::Update { hunks, .. } => {
+                assert_eq!(hunks.len(), 1);
+                assert!(hunks[0].end_of_file);
+            }
+            _ => panic!("Expected Update operation"),
+        }
+    }
+
+    #[test]
+    fn apply_hunks_end_of_file_searches_backward() {
+        // Two functions with identical "pass" line — End of File matches the last one
+        let content = "def foo():\n    pass\n\ndef bar():\n    pass";
+        let hunks = vec![Hunk {
+            context_line: String::new(),
+            end_of_file: true,
+            changes: vec![
+                Change::Remove("    pass".into()),
+                Change::Add("    return 99".into()),
+            ],
+        }];
+        let result = apply_hunks(content, &hunks).unwrap();
+        // First "pass" should be untouched, second should be replaced
+        assert_eq!(
+            result,
+            "def foo():\n    pass\n\ndef bar():\n    return 99"
+        );
+    }
+
+    // Phase 4: *** Move to:
+
+    #[test]
+    fn parse_v4a_move_to() {
+        let patch = "\
+*** Begin Patch
+*** Update File: src/old.py
+*** Move to: src/new.py
+@@ def hello():
+-    pass
++    return 1
+*** End Patch";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        match &ops[0] {
+            PatchOperation::Update {
+                path,
+                new_path,
+                hunks,
+            } => {
+                assert_eq!(path, "src/old.py");
+                assert_eq!(*new_path, Some("src/new.py".to_string()));
+                assert_eq!(hunks.len(), 1);
+            }
+            _ => panic!("Expected Update operation"),
+        }
+    }
+
+    #[tokio::test]
+    async fn apply_patch_move_to_renames_file() {
+        let mut files = HashMap::new();
+        files.insert(
+            "src/old.py".to_string(),
+            "def hello():\n    pass".to_string(),
+        );
+        let env = MutableMockSandbox::new(files);
+
+        let ops = vec![PatchOperation::Update {
+            path: "src/old.py".into(),
+            new_path: Some("src/new.py".into()),
+            hunks: vec![Hunk {
+                context_line: "def hello():".into(),
+                end_of_file: false,
+                changes: vec![
+                    Change::Remove("    pass".into()),
+                    Change::Add("    return 1".into()),
+                ],
+            }],
+        }];
+
+        let result = apply_patch_operations(&ops, &env).await.unwrap();
+        assert!(result.contains("Moved file"));
+
+        // New path exists with updated content
+        let content = env.read_file("src/new.py", None, None).await.unwrap();
+        assert_eq!(content, "def hello():\n    return 1");
+
+        // Old path is deleted
+        let old = env.read_file("src/old.py", None, None).await;
+        assert!(old.is_err());
+    }
+
+    // Phase 5: Fuzzy matching
+
+    #[test]
+    fn apply_hunks_prefers_exact_match_over_trimmed() {
+        // Line 0 has leading spaces, line 1 is exact match
+        let content = "  indented\nindented";
+        let hunks = vec![Hunk {
+            context_line: "indented".into(),
+            end_of_file: false,
+            changes: vec![Change::Add("extra".into())],
+        }];
+        let result = apply_hunks(content, &hunks).unwrap();
+        // Should match line 1 (exact), so "extra" inserted after "indented" (line 1)
+        assert_eq!(result, "  indented\nindented\nextra");
+    }
+
+    #[test]
+    fn apply_hunks_fuzzy_unicode_normalization() {
+        let content = "print(\u{201C}hello\u{201D})";
+        let hunks = vec![Hunk {
+            context_line: "print(\"hello\")".into(),
+            end_of_file: false,
+            changes: vec![Change::Add("print(\"world\")".into())],
+        }];
+        let result = apply_hunks(content, &hunks).unwrap();
+        // Original line preserved, new line added after
+        assert!(result.contains("print(\u{201C}hello\u{201D})"));
+        assert!(result.contains("print(\"world\")"));
+    }
+
+    // Phase 6: Heredoc stripping
+
+    #[test]
+    fn parse_v4a_strips_heredoc_wrapper() {
+        let patch = "\
+<<'EOF'
+*** Begin Patch
+*** Update File: src/lib.rs
+@@ fn hello():
+-    pass
++    return 1
+*** End Patch
+EOF";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        assert_eq!(ops.len(), 1);
+        match &ops[0] {
+            PatchOperation::Update { hunks, .. } => {
+                assert_eq!(hunks[0].context_line, "fn hello():");
+            }
+            _ => panic!("Expected Update operation"),
+        }
+    }
+
+    #[test]
+    fn parse_v4a_strips_heredoc_unquoted() {
+        let patch = "\
+<<EOF
+*** Begin Patch
+*** Add File: src/a.rs
++// hello
+*** End Patch
+EOF";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(&ops[0], PatchOperation::Add { .. }));
+    }
+
+    #[test]
+    fn parse_v4a_strips_heredoc_double_quoted() {
+        let patch = "\
+<<\"EOF\"
+*** Begin Patch
+*** Delete File: src/old.rs
+*** End Patch
+EOF";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(&ops[0], PatchOperation::Delete { .. }));
     }
 }
