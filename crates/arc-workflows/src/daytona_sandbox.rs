@@ -876,7 +876,7 @@ impl Sandbox for DaytonaSandbox {
         timeout_ms: u64,
         working_dir: Option<&str>,
         env_vars: Option<&HashMap<String, String>>,
-        _cancel_token: Option<tokio_util::sync::CancellationToken>,
+        cancel_token: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<ExecResult, String> {
         let sandbox = self.sandbox()?;
         let start = Instant::now();
@@ -920,10 +920,35 @@ impl Sandbox for DaytonaSandbox {
         // Wrap with `bash -c` so pipes, env vars, and shell features work.
         // The Daytona API uses direct exec, not a shell.
         let wrapped = wrap_bash_command(&command_with_env);
-        let result = process_svc
-            .execute_command(&wrapped, options)
-            .await
-            .map_err(|e| format!("Failed to execute command: {e}"))?;
+        
+        let timeout_duration = std::time::Duration::from_millis(timeout_ms + 5000); // 5s grace period
+        let token = cancel_token.unwrap_or_default();
+        
+        let exec_future = process_svc.execute_command(&wrapped, options);
+        
+        let result = tokio::select! {
+            res = exec_future => {
+                res.map_err(|e| format!("Failed to execute command: {e}"))?
+            }
+            () = tokio::time::sleep(timeout_duration) => {
+                return Ok(ExecResult {
+                    stdout: String::new(),
+                    stderr: "Command timed out locally".to_string(),
+                    exit_code: -1,
+                    timed_out: true,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                });
+            }
+            () = token.cancelled() => {
+                return Ok(ExecResult {
+                    stdout: String::new(),
+                    stderr: "Command cancelled".to_string(),
+                    exit_code: -1,
+                    timed_out: true,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                });
+            }
+        };
 
         let duration_ms = start.elapsed().as_millis() as u64;
 

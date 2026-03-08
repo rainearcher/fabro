@@ -1131,4 +1131,335 @@ EOF";
         assert_eq!(ops.len(), 1);
         assert!(matches!(&ops[0], PatchOperation::Delete { .. }));
     }
+
+    // ---- End-to-end tests: raw patch text → parse → apply → verify ----
+
+    #[tokio::test]
+    async fn e2e_canonical_format_multi_hunk_update() {
+        // Realistic Python file with canonical @@ format (no trailing @@)
+        let mut files = HashMap::new();
+        files.insert(
+            "src/game.py".to_string(),
+            "\
+from dataclasses import dataclass, field
+from src.cards import Suit
+import random
+
+@dataclass
+class GameState:
+    stock: list = field(default_factory=list)
+    waste: list = field(default_factory=list)
+    tableau: list = field(default_factory=list)
+
+    def deal(self):
+        random.shuffle(self.stock)
+        for i in range(7):
+            self.tableau.append(self.stock.pop())
+
+    def draw(self):
+        if self.stock:
+            self.waste.append(self.stock.pop())
+"
+            .to_string(),
+        );
+        let env = MutableMockSandbox::new(files);
+
+        let patch = "\
+*** Begin Patch
+*** Update File: src/game.py
+@@ from dataclasses import dataclass, field
+-from src.cards import Suit
++from src.cards import Card, Suit
+@@ class GameState:
+-    stock: list = field(default_factory=list)
+-    waste: list = field(default_factory=list)
+-    tableau: list = field(default_factory=list)
++    stock: list[Card] = field(default_factory=list)
++    waste: list[Card] = field(default_factory=list)
++    tableau: list[Card] = field(default_factory=list)
+@@ def draw(self):
+-        if self.stock:
+-            self.waste.append(self.stock.pop())
++        card = self.stock.pop() if self.stock else None
++        if card:
++            self.waste.append(card)
+*** End Patch";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        apply_patch_operations(&ops, &env).await.unwrap();
+
+        let content = env.read_file("src/game.py", None, None).await.unwrap();
+        assert!(content.contains("from src.cards import Card, Suit"));
+        assert!(content.contains("stock: list[Card]"));
+        assert!(content.contains("waste: list[Card]"));
+        assert!(content.contains("tableau: list[Card]"));
+        assert!(content.contains("card = self.stock.pop()"));
+        assert!(content.contains("self.waste.append(card)"));
+        // Untouched lines preserved
+        assert!(content.contains("from dataclasses import dataclass, field"));
+        assert!(content.contains("import random"));
+        assert!(content.contains("def deal(self):"));
+        assert!(content.contains("random.shuffle(self.stock)"));
+    }
+
+    #[tokio::test]
+    async fn e2e_multi_operation_add_update_delete() {
+        let mut files = HashMap::new();
+        files.insert(
+            "src/old_util.py".to_string(),
+            "def old_helper():\n    pass\n".to_string(),
+        );
+        files.insert(
+            "src/main.py".to_string(),
+            "\
+from old_util import old_helper
+
+def main():
+    old_helper()
+    print(\"done\")
+"
+            .to_string(),
+        );
+        let env = MutableMockSandbox::new(files);
+
+        let patch = "\
+*** Begin Patch
+*** Add File: src/new_util.py
++def new_helper():
++    return 42
+*** Delete File: src/old_util.py
+*** Update File: src/main.py
+@@ from old_util import old_helper
+-from old_util import old_helper
++from new_util import new_helper
+@@ def main():
+-    old_helper()
++    result = new_helper()
++    print(f\"result: {result}\")
+*** End Patch";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        let result = apply_patch_operations(&ops, &env).await.unwrap();
+
+        assert!(result.contains("Added file: src/new_util.py"));
+        assert!(result.contains("Deleted file: src/old_util.py"));
+        assert!(result.contains("Updated file: src/main.py"));
+
+        let new_util = env.read_file("src/new_util.py", None, None).await.unwrap();
+        assert_eq!(new_util, "def new_helper():\n    return 42");
+
+        assert!(env.read_file("src/old_util.py", None, None).await.is_err());
+
+        let main = env.read_file("src/main.py", None, None).await.unwrap();
+        assert!(main.contains("from new_util import new_helper"));
+        assert!(main.contains("result = new_helper()"));
+        assert!(main.contains("print(\"done\")"));
+    }
+
+    #[tokio::test]
+    async fn e2e_heredoc_stacked_context_end_of_file_and_move() {
+        let mut files = HashMap::new();
+        files.insert(
+            "src/models/user.py".to_string(),
+            "\
+class User:
+    def __init__(self, name):
+        self.name = name
+        self.active = True
+
+    def greet(self):
+        return f\"Hello, {self.name}\"
+
+    def deactivate(self):
+        self.active = False
+"
+            .to_string(),
+        );
+        let env = MutableMockSandbox::new(files);
+
+        // Heredoc-wrapped patch with stacked @@, End of File, and Move to
+        let patch = "\
+<<'EOF'
+*** Begin Patch
+*** Update File: src/models/user.py
+*** Move to: src/models/account.py
+@@ class User:
+@@     def __init__(self, name):
+-        self.name = name
+-        self.active = True
++        self.name = name
++        self.email = None
++        self.active = True
+@@ class User:
+@@     def deactivate(self):
+-        self.active = False
++        self.active = False
++        self.email = None
+*** End of File
+*** End Patch
+EOF";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        let result = apply_patch_operations(&ops, &env).await.unwrap();
+
+        assert!(result.contains("Moved file"));
+
+        // Old path gone
+        assert!(env
+            .read_file("src/models/user.py", None, None)
+            .await
+            .is_err());
+
+        // New path has updated content
+        let content = env
+            .read_file("src/models/account.py", None, None)
+            .await
+            .unwrap();
+        assert!(content.contains("self.email = None"));
+        assert!(content.contains("self.active = True"));
+        assert!(content.contains("def greet(self):"));
+        // The End of File hunk should have matched the LAST deactivate method
+        let deactivate_pos = content.rfind("def deactivate").unwrap();
+        let after_deactivate = &content[deactivate_pos..];
+        assert!(after_deactivate.contains("self.email = None"));
+    }
+
+    #[tokio::test]
+    async fn e2e_forward_cursor_with_duplicate_patterns() {
+        // File has three identical "pass" lines; three bare @@ hunks should
+        // replace them in order thanks to forward cursor
+        let mut files = HashMap::new();
+        files.insert(
+            "src/stubs.py".to_string(),
+            "\
+def alpha():
+    pass
+
+def beta():
+    pass
+
+def gamma():
+    pass
+"
+            .to_string(),
+        );
+        let env = MutableMockSandbox::new(files);
+
+        let patch = "\
+*** Begin Patch
+*** Update File: src/stubs.py
+@@ def alpha():
+-    pass
++    return \"a\"
+@@ def beta():
+-    pass
++    return \"b\"
+@@ def gamma():
+-    pass
++    return \"c\"
+*** End Patch";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        apply_patch_operations(&ops, &env).await.unwrap();
+
+        let content = env.read_file("src/stubs.py", None, None).await.unwrap();
+        assert!(content.contains("return \"a\""));
+        assert!(content.contains("return \"b\""));
+        assert!(content.contains("return \"c\""));
+        assert!(!content.contains("    pass"));
+    }
+
+    #[tokio::test]
+    async fn e2e_fuzzy_matching_with_trailing_whitespace() {
+        // File has trailing whitespace on lines; patch doesn't
+        let mut files = HashMap::new();
+        files.insert(
+            "src/lib.rs".to_string(),
+            "fn main() {  \n    println!(\"hello\");  \n}\n".to_string(),
+        );
+        let env = MutableMockSandbox::new(files);
+
+        let patch = "\
+*** Begin Patch
+*** Update File: src/lib.rs
+@@ fn main() {
+-    println!(\"hello\");
++    println!(\"world\");
+*** End Patch";
+
+        let ops = parse_v4a_patch(patch).unwrap();
+        apply_patch_operations(&ops, &env).await.unwrap();
+
+        let content = env.read_file("src/lib.rs", None, None).await.unwrap();
+        assert!(content.contains("println!(\"world\")"));
+        assert!(!content.contains("println!(\"hello\")"));
+    }
+
+    #[tokio::test]
+    async fn e2e_through_tool_executor() {
+        use crate::config::SessionConfig;
+        use crate::session::Session;
+        use crate::test_support::{
+            make_client, text_response, tool_call_response, MockLlmProvider, TestProfile,
+        };
+        use crate::tool_registry::ToolRegistry;
+
+        // Set up sandbox with a file
+        let mut files = HashMap::new();
+        files.insert(
+            "src/app.py".to_string(),
+            "\
+def greet(name):
+    return f\"Hi, {name}\"
+
+def farewell(name):
+    return f\"Bye, {name}\"
+"
+            .to_string(),
+        );
+        let env = Arc::new(MutableMockSandbox::new(files));
+
+        // Register apply_patch tool
+        let mut registry = ToolRegistry::new();
+        registry.register(make_apply_patch_tool());
+
+        // The patch an LLM would produce (canonical format)
+        let patch_text = "\
+*** Begin Patch
+*** Update File: src/app.py
+@@ def greet(name):
+-    return f\"Hi, {name}\"
++    return f\"Hello, {name}!\"
+@@ def farewell(name):
+-    return f\"Bye, {name}\"
++    return f\"Goodbye, {name}!\"
+*** End Patch";
+
+        let responses = vec![
+            tool_call_response(
+                "apply_patch",
+                "call_1",
+                serde_json::json!({"patch": patch_text}),
+            ),
+            text_response("Done! Updated greet and farewell functions."),
+        ];
+
+        let provider = Arc::new(MockLlmProvider::new(responses));
+        let client = make_client(provider).await;
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let mut session = Session::new(
+            client,
+            profile,
+            env.clone(),
+            SessionConfig::default(),
+        );
+        session.initialize().await;
+        session.process_input("Update the greeting functions").await.unwrap();
+
+        let content = env.read_file("src/app.py", None, None).await.unwrap();
+        assert!(content.contains("Hello, {name}!"));
+        assert!(content.contains("Goodbye, {name}!"));
+        assert!(!content.contains("Hi, {name}"));
+        assert!(!content.contains("Bye, {name}"));
+    }
 }
