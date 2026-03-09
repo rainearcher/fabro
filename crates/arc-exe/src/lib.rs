@@ -806,6 +806,18 @@ impl Sandbox for ExeSandbox {
             _ => String::new(),
         }
     }
+
+    fn is_remote(&self) -> bool {
+        true
+    }
+
+    async fn ssh_access_command(&self) -> Result<Option<String>, String> {
+        self.ssh_command().map(Some)
+    }
+
+    fn origin_url(&self) -> Option<&str> {
+        self.origin_url.get().map(String::as_str)
+    }
 }
 
 #[cfg(test)]

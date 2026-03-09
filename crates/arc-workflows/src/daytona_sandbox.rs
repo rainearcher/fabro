@@ -762,6 +762,18 @@ impl Sandbox for DaytonaSandbox {
             .unwrap_or_default()
     }
 
+    fn is_remote(&self) -> bool {
+        true
+    }
+
+    async fn ssh_access_command(&self) -> Result<Option<String>, String> {
+        self.create_ssh_access().await.map(Some)
+    }
+
+    fn origin_url(&self) -> Option<&str> {
+        self.origin_url.get().map(String::as_str)
+    }
+
     async fn refresh_push_credentials(&self) -> Result<(), String> {
         let origin_url = match self.origin_url.get() {
             Some(url) => url,

@@ -33,6 +33,12 @@ pub enum SandboxProvider {
     Exe,
 }
 
+impl SandboxProvider {
+    pub fn is_remote(&self) -> bool {
+        matches!(self, Self::Daytona | Self::Exe)
+    }
+}
+
 impl fmt::Display for SandboxProvider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

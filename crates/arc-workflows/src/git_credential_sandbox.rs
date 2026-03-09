@@ -14,21 +14,12 @@ use crate::github_app::GitHubAppCredentials;
 /// without depending on `github_app` (which lives in `arc-workflows`).
 pub struct GitCredentialSandbox {
     inner: Arc<dyn Sandbox>,
-    origin_url: Option<String>,
     github_app: Option<GitHubAppCredentials>,
 }
 
 impl GitCredentialSandbox {
-    pub fn new(
-        inner: Arc<dyn Sandbox>,
-        origin_url: Option<String>,
-        github_app: Option<GitHubAppCredentials>,
-    ) -> Self {
-        Self {
-            inner,
-            origin_url,
-            github_app,
-        }
+    pub fn new(inner: Arc<dyn Sandbox>, github_app: Option<GitHubAppCredentials>) -> Self {
+        Self { inner, github_app }
     }
 }
 
@@ -134,7 +125,7 @@ impl Sandbox for GitCredentialSandbox {
     }
 
     async fn refresh_push_credentials(&self) -> Result<(), String> {
-        let origin_url = match &self.origin_url {
+        let origin_url = match self.inner.origin_url() {
             Some(url) => url,
             None => return Ok(()),
         };
@@ -169,5 +160,17 @@ impl Sandbox for GitCredentialSandbox {
 
     async fn set_autostop_interval(&self, minutes: i32) -> Result<(), String> {
         self.inner.set_autostop_interval(minutes).await
+    }
+
+    fn is_remote(&self) -> bool {
+        self.inner.is_remote()
+    }
+
+    async fn ssh_access_command(&self) -> Result<Option<String>, String> {
+        self.inner.ssh_access_command().await
+    }
+
+    fn origin_url(&self) -> Option<&str> {
+        self.inner.origin_url()
     }
 }

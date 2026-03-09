@@ -395,11 +395,10 @@ pub async fn run_command(
         crate::daytona_sandbox::detect_repo_info(&original_cwd)
             .map(|(url, branch)| (Some(url), branch))
             .unwrap_or((None, None));
-    let git_clean = match sandbox_provider {
-        SandboxProvider::Local | SandboxProvider::Docker => {
-            crate::git::ensure_clean(&original_cwd).is_ok()
-        }
-        SandboxProvider::Daytona | SandboxProvider::Exe => false,
+    let git_clean = if sandbox_provider.is_remote() {
+        false
+    } else {
+        crate::git::ensure_clean(&original_cwd).is_ok()
     };
 
     if args.preflight {
@@ -587,8 +586,6 @@ pub async fn run_command(
     // Wrap emitter in Arc now so we can share it with exec env callbacks
     let emitter = Arc::new(emitter);
 
-    let mut daytona_sandbox_ref: Option<Arc<crate::daytona_sandbox::DaytonaSandbox>> = None;
-    let mut exe_sandbox_ref: Option<Arc<arc_exe::ExeSandbox>> = None;
     let sandbox: Arc<dyn Sandbox> = match sandbox_provider {
         SandboxProvider::Docker => {
             let config = DockerSandboxConfig {
@@ -618,9 +615,7 @@ pub async fn run_command(
             env.set_event_callback(Arc::new(move |event| {
                 emitter_cb.emit(&crate::event::WorkflowRunEvent::Sandbox { event });
             }));
-            let daytona_arc = Arc::new(env);
-            daytona_sandbox_ref = Some(Arc::clone(&daytona_arc));
-            daytona_arc
+            Arc::new(env)
         }
         SandboxProvider::Exe => {
             let clone_params = resolve_exe_clone_params(&original_cwd, github_app.as_ref()).await;
@@ -639,9 +634,7 @@ pub async fn run_command(
             env.set_event_callback(Arc::new(move |event| {
                 emitter_cb.emit(&crate::event::WorkflowRunEvent::Sandbox { event });
             }));
-            let exe_arc = Arc::new(env);
-            exe_sandbox_ref = Some(Arc::clone(&exe_arc));
-            exe_arc
+            Arc::new(env)
         }
         SandboxProvider::Local => {
             let mut env = LocalSandbox::new(cwd.clone());
@@ -694,32 +687,33 @@ pub async fn run_command(
                 container_mount_point: None,
                 data_host: None,
             },
-            SandboxProvider::Exe => crate::sandbox_record::SandboxRecord {
-                provider: "exe".to_string(),
-                working_directory: sandbox.working_directory().to_string(),
-                identifier: exe_sandbox_ref
-                    .as_ref()
-                    .and_then(|e| e.vm_name().map(String::from)),
-                host_working_directory: None,
-                container_mount_point: None,
-                data_host: exe_sandbox_ref
-                    .as_ref()
-                    .and_then(|e| e.data_host().map(String::from)),
-            },
+            SandboxProvider::Exe => {
+                // Extract data_host from the ssh access command ("ssh <host>")
+                let data_host = sandbox
+                    .ssh_access_command()
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|cmd| cmd.strip_prefix("ssh ").map(String::from));
+                crate::sandbox_record::SandboxRecord {
+                    provider: "exe".to_string(),
+                    working_directory: sandbox.working_directory().to_string(),
+                    identifier: sandbox_info_opt,
+                    host_working_directory: None,
+                    container_mount_point: None,
+                    data_host,
+                }
+            }
         };
         if let Err(e) = record.save(&logs_dir.join("sandbox.json")) {
             tracing::warn!(error = %e, "Failed to save sandbox record");
         }
     }
 
-    // Wrap exe.dev sandbox with GitCredentialSandbox for push credential refresh
-    let sandbox: Arc<dyn Sandbox> = if sandbox_provider == SandboxProvider::Exe {
-        let origin_url = exe_sandbox_ref
-            .as_ref()
-            .and_then(|e| e.origin_url().map(String::from));
+    // Wrap remote sandbox with GitCredentialSandbox for push credential refresh
+    let sandbox: Arc<dyn Sandbox> = if sandbox.is_remote() {
         Arc::new(crate::git_credential_sandbox::GitCredentialSandbox::new(
             sandbox,
-            origin_url,
             github_app.clone(),
         ))
     } else {
@@ -744,10 +738,7 @@ pub async fn run_command(
     });
 
     // Set up git inside remote sandbox (Daytona or exe.dev) for checkpoint commits
-    let (remote_base_sha, remote_branch, remote_base_branch) = if matches!(
-        sandbox_provider,
-        SandboxProvider::Daytona | SandboxProvider::Exe
-    ) {
+    let (remote_base_sha, remote_branch, remote_base_branch) = if sandbox.is_remote() {
         match setup_remote_git(&*sandbox, &run_id).await {
             Ok((base, branch, base_br)) => (Some(base), Some(branch), base_br),
             Err(e) => {
@@ -764,35 +755,22 @@ pub async fn run_command(
 
     // Create SSH access if requested
     if args.ssh {
-        if let Some(ref daytona) = daytona_sandbox_ref {
-            match daytona.create_ssh_access().await {
-                Ok(ssh_command) => {
-                    emitter.emit(&crate::event::WorkflowRunEvent::SshAccessReady { ssh_command });
-                }
-                Err(e) => {
-                    eprintln!(
-                        "{} Failed to create SSH access: {e}",
-                        styles.yellow.apply_to("Warning:"),
-                    );
-                }
+        match sandbox.ssh_access_command().await {
+            Ok(Some(ssh_command)) => {
+                emitter.emit(&crate::event::WorkflowRunEvent::SshAccessReady { ssh_command });
             }
-        } else if let Some(ref exe) = exe_sandbox_ref {
-            match exe.ssh_command() {
-                Ok(ssh_command) => {
-                    emitter.emit(&crate::event::WorkflowRunEvent::SshAccessReady { ssh_command });
-                }
-                Err(e) => {
-                    eprintln!(
-                        "{} Failed to get exe.dev SSH command: {e}",
-                        styles.yellow.apply_to("Warning:"),
-                    );
-                }
+            Ok(None) => {
+                eprintln!(
+                    "{} --ssh only works with --sandbox daytona or exe, skipping.",
+                    styles.yellow.apply_to("Warning:"),
+                );
             }
-        } else {
-            eprintln!(
-                "{} --ssh only works with --sandbox daytona or exe, skipping.",
-                styles.yellow.apply_to("Warning:"),
-            );
+            Err(e) => {
+                eprintln!(
+                    "{} Failed to create SSH access: {e}",
+                    styles.yellow.apply_to("Warning:"),
+                );
+            }
         }
     }
 
@@ -940,13 +918,12 @@ pub async fn run_command(
         cancel_token: None,
         dry_run: dry_run_mode,
         run_id,
-        git_checkpoint: match sandbox_provider {
-            SandboxProvider::Local | SandboxProvider::Docker => {
-                worktree_work_dir.map(GitCheckpointMode::Host)
-            }
-            SandboxProvider::Daytona | SandboxProvider::Exe => remote_base_sha
+        git_checkpoint: if sandbox.is_remote() {
+            remote_base_sha
                 .as_ref()
-                .map(|_| GitCheckpointMode::Remote(original_cwd.clone())),
+                .map(|_| GitCheckpointMode::Remote(original_cwd.clone()))
+        } else {
+            worktree_work_dir.map(GitCheckpointMode::Host)
         },
         base_sha: worktree_base_sha.or(remote_base_sha),
         run_branch: worktree_branch.or(remote_branch),
@@ -1337,7 +1314,6 @@ async fn run_from_branch(
 
     let emitter = Arc::new(EventEmitter::new());
     let mut worktree_path: Option<PathBuf> = None;
-    let mut exe_sandbox_ref: Option<Arc<arc_exe::ExeSandbox>> = None;
 
     let sandbox: Arc<dyn arc_agent::Sandbox> = match sandbox_provider {
         SandboxProvider::Local | SandboxProvider::Docker => {
@@ -1371,9 +1347,7 @@ async fn run_from_branch(
             env.set_event_callback(Arc::new(move |event| {
                 emitter_cb.emit(&crate::event::WorkflowRunEvent::Sandbox { event });
             }));
-            let exe_arc = Arc::new(env);
-            exe_sandbox_ref = Some(Arc::clone(&exe_arc));
-            exe_arc
+            Arc::new(env)
         }
         SandboxProvider::Daytona => {
             bail!("--run-branch resume is not yet supported with --sandbox daytona");
@@ -1381,11 +1355,11 @@ async fn run_from_branch(
     };
 
     // Initialize remote sandboxes and checkout the run branch
-    if sandbox_provider == SandboxProvider::Exe {
+    if sandbox.is_remote() {
         sandbox
             .initialize()
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to initialize exe.dev sandbox: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("Failed to initialize sandbox: {e}"))?;
 
         // Fetch and checkout the run branch inside the sandbox
         let fetch_cmd = format!("git fetch origin {run_branch} && git checkout {run_branch}");
@@ -1402,14 +1376,10 @@ async fn run_from_branch(
         }
     }
 
-    // Wrap exe.dev sandbox with GitCredentialSandbox for push credential refresh
-    let sandbox: Arc<dyn arc_agent::Sandbox> = if sandbox_provider == SandboxProvider::Exe {
-        let origin_url = exe_sandbox_ref
-            .as_ref()
-            .and_then(|e| e.origin_url().map(String::from));
+    // Wrap remote sandbox with GitCredentialSandbox for push credential refresh
+    let sandbox: Arc<dyn arc_agent::Sandbox> = if sandbox.is_remote() {
         Arc::new(crate::git_credential_sandbox::GitCredentialSandbox::new(
             sandbox,
-            origin_url,
             github_app.clone(),
         ))
     } else {
@@ -1468,13 +1438,12 @@ async fn run_from_branch(
         cancel_token: None,
         dry_run: dry_run_mode,
         run_id,
-        git_checkpoint: match sandbox_provider {
-            SandboxProvider::Local | SandboxProvider::Docker => worktree_path
+        git_checkpoint: if sandbox.is_remote() {
+            Some(GitCheckpointMode::Remote(original_cwd.clone()))
+        } else {
+            worktree_path
                 .as_ref()
-                .map(|wt| GitCheckpointMode::Host(wt.clone())),
-            SandboxProvider::Daytona | SandboxProvider::Exe => {
-                Some(GitCheckpointMode::Remote(original_cwd.clone()))
-            }
+                .map(|wt| GitCheckpointMode::Host(wt.clone()))
         },
         base_sha,
         run_branch: Some(run_branch.to_string()),
@@ -1496,9 +1465,7 @@ async fn run_from_branch(
 
     // Restore cwd (worktree is kept for `arc cp` access; pruned separately)
     let _ = std::env::set_current_dir(&original_cwd);
-    if sandbox_provider == SandboxProvider::Exe {
-        let _ = sandbox.cleanup().await;
-    }
+    let _ = sandbox.cleanup().await;
 
     // Auto-derive retro
     if !args.no_retro {

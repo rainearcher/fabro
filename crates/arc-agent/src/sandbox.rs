@@ -109,6 +109,18 @@ macro_rules! delegate_sandbox {
                 self.$field.set_autostop_interval(minutes).await
             }
 
+            fn is_remote(&self) -> bool {
+                self.$field.is_remote()
+            }
+
+            async fn ssh_access_command(&self) -> Result<Option<String>, String> {
+                self.$field.ssh_access_command().await
+            }
+
+            fn origin_url(&self) -> Option<&str> {
+                self.$field.origin_url()
+            }
+
             async fn read_file(
                 &self,
                 path: &str,
@@ -381,6 +393,21 @@ pub trait Sandbox: Send + Sync {
     /// Default is a no-op; Daytona overrides to call the Daytona API.
     async fn set_autostop_interval(&self, _minutes: i32) -> Result<(), String> {
         Ok(())
+    }
+
+    /// Whether this sandbox runs on a remote machine (e.g. Daytona, exe.dev).
+    fn is_remote(&self) -> bool {
+        false
+    }
+
+    /// Return an SSH command string for connecting to this sandbox, if supported.
+    async fn ssh_access_command(&self) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    /// The display URL of the cloned origin remote, if known.
+    fn origin_url(&self) -> Option<&str> {
+        None
     }
 
     /// Record that the agent has explicitly read (seen) the given file path.
