@@ -388,7 +388,7 @@ impl Sandbox for ExeSandbox {
         let start = Instant::now();
 
         if let Some(vm_name) = self.vm_name.get() {
-            let cmd = format!("rm {vm_name}");
+            let cmd = format!("rm {}", shell_quote(vm_name));
             if let Err(e) = self.mgmt_ssh.run_command(&cmd).await {
                 let err = format!("Failed to destroy exe.dev VM: {e}");
                 self.emit(SandboxEvent::CleanupFailed {
