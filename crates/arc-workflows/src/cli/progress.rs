@@ -102,6 +102,23 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+fn last_line_truncated(s: &str, max: usize) -> String {
+    let line = s
+        .trim()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .next_back()
+        .unwrap_or("")
+        .trim();
+    if line.len() > max {
+        let mut t: String = line.chars().take(max - 3).collect();
+        t.push_str("...");
+        t
+    } else {
+        line.to_string()
+    }
+}
+
 fn shorten_path(path: &str) -> String {
     if let Ok(cwd) = std::env::current_dir() {
         if let Ok(rel) = std::path::Path::new(path).strip_prefix(&cwd) {
@@ -338,7 +355,8 @@ impl ProgressUI {
             } => {
                 self.finish_stage(node_id, name, red_cross(), "");
                 let red = Style::new().red();
-                self.insert_info_line(&format!("{} {}", red.apply_to("Error:"), failure.message,));
+                let summary = last_line_truncated(&failure.message, 120);
+                self.insert_info_line(&format!("{} {}", red.apply_to("Error:"), summary));
             }
             WorkflowRunEvent::ParallelStarted { .. } => {
                 // The fork stage is the (only) active stage at this point.
