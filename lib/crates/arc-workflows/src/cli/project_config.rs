@@ -68,6 +68,50 @@ pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, 
     Ok(None)
 }
 
+/// Resolve a workflow argument to a path.
+///
+/// - If the arg has a file extension (`.toml`, `.dot`, etc.), return it as-is.
+/// - If no extension, attempt project-based resolution: find `arc.toml`, resolve
+///   `{arc_root}/workflows/{name}/workflow.toml`. Falls back to literal arg if
+///   no project config or no matching workflow file.
+pub fn resolve_workflow_arg(arg: &Path) -> PathBuf {
+    let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    resolve_workflow_arg_from(arg, &start)
+}
+
+fn resolve_workflow_arg_from(arg: &Path, start_dir: &Path) -> PathBuf {
+    if arg.extension().is_some() {
+        tracing::debug!(arg = %arg.display(), "Workflow arg has extension, returning as-is");
+        return arg.to_path_buf();
+    }
+
+    let name = arg.to_string_lossy();
+    match discover_project_config(start_dir) {
+        Ok(Some((config_path, config))) => {
+            let arc_root = resolve_arc_root(&config_path, &config);
+            let candidate = arc_root
+                .join("workflows")
+                .join(&*name)
+                .join("workflow.toml");
+            if candidate.is_file() {
+                tracing::debug!(arg = %arg.display(), resolved = %candidate.display(), "Resolved workflow name via project config");
+                candidate
+            } else {
+                tracing::debug!(arg = %arg.display(), candidate = %candidate.display(), "Workflow file not found, falling back to literal");
+                arg.to_path_buf()
+            }
+        }
+        Ok(None) => {
+            tracing::debug!(arg = %arg.display(), "No project config found, returning literal");
+            arg.to_path_buf()
+        }
+        Err(err) => {
+            tracing::debug!(arg = %arg.display(), error = %err, "Error discovering project config, returning literal");
+            arg.to_path_buf()
+        }
+    }
+}
+
 /// Resolve the arc root directory from a config file path and its config.
 /// The returned path is the directory containing `arc.toml` joined with the `root` value.
 pub fn resolve_arc_root(config_path: &Path, config: &ProjectConfig) -> PathBuf {
@@ -173,5 +217,71 @@ mod tests {
             },
         };
         assert_eq!(resolve_arc_root(config_path, &config), Path::new("/repo/."));
+    }
+
+    #[test]
+    fn resolve_workflow_arg_toml_extension_returned_as_is() {
+        let tmp = TempDir::new().unwrap();
+        let result = resolve_workflow_arg_from(Path::new("my-workflow.toml"), tmp.path());
+        assert_eq!(result, Path::new("my-workflow.toml"));
+    }
+
+    #[test]
+    fn resolve_workflow_arg_dot_extension_returned_as_is() {
+        let tmp = TempDir::new().unwrap();
+        let result = resolve_workflow_arg_from(Path::new("my-workflow.dot"), tmp.path());
+        assert_eq!(result, Path::new("my-workflow.dot"));
+    }
+
+    #[test]
+    fn resolve_workflow_arg_no_extension_no_config_returns_literal() {
+        let tmp = TempDir::new().unwrap();
+        let result = resolve_workflow_arg_from(Path::new("my-workflow"), tmp.path());
+        assert_eq!(result, Path::new("my-workflow"));
+    }
+
+    #[test]
+    fn resolve_workflow_arg_no_extension_with_config_and_workflow_file() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("arc.toml"), "version = 1\n").unwrap();
+        let wf_dir = tmp.path().join("workflows").join("my-workflow");
+        fs::create_dir_all(&wf_dir).unwrap();
+        fs::write(
+            wf_dir.join("workflow.toml"),
+            "version = 1\ngraph = \"workflow.dot\"\n",
+        )
+        .unwrap();
+
+        let result = resolve_workflow_arg_from(Path::new("my-workflow"), tmp.path());
+        assert_eq!(result, wf_dir.join("workflow.toml"));
+    }
+
+    #[test]
+    fn resolve_workflow_arg_no_extension_config_but_no_workflow_dir() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("arc.toml"), "version = 1\n").unwrap();
+
+        let result = resolve_workflow_arg_from(Path::new("my-workflow"), tmp.path());
+        assert_eq!(result, Path::new("my-workflow"));
+    }
+
+    #[test]
+    fn resolve_workflow_arg_custom_root_respected() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("arc.toml"),
+            "version = 1\n[arc]\nroot = \"arc/\"\n",
+        )
+        .unwrap();
+        let wf_dir = tmp.path().join("arc").join("workflows").join("factory");
+        fs::create_dir_all(&wf_dir).unwrap();
+        fs::write(
+            wf_dir.join("workflow.toml"),
+            "version = 1\ngraph = \"workflow.dot\"\n",
+        )
+        .unwrap();
+
+        let result = resolve_workflow_arg_from(Path::new("factory"), tmp.path());
+        assert_eq!(result, wf_dir.join("workflow.toml"));
     }
 }

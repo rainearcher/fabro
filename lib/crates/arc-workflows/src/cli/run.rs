@@ -274,6 +274,7 @@ pub async fn run_command(
         .workflow
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required unless --run-branch is provided"))?;
+    let workflow_path = &super::project_config::resolve_workflow_arg(workflow_path);
 
     // 0. Load run config if TOML, resolve DOT path, apply defaults
     let (dot_path, run_cfg) = if workflow_path.extension().is_some_and(|ext| ext == "toml") {
