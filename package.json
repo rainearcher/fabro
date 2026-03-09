@@ -1,5 +1,5 @@
 {
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": ["apps/*", "lib/packages/*"],
   "trustedDependencies": ["better-sqlite3"]
 }

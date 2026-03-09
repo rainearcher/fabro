@@ -30,7 +30,7 @@ The OpenAPI spec at `docs/api-reference/arc-api.yaml` is the source of truth for
 2. `cargo build -p arc-types` — build.rs regenerates Rust types via typify
 3. Write/update handler in `lib/crates/arc-api/src/server.rs`, add route to `build_router()`
 4. `cargo test -p arc-api` — conformance test catches spec/router drift
-5. `cd packages/arc-api-client && bun run generate` — regenerates TypeScript Axios client
+5. `cd lib/packages/arc-api-client && bun run generate` — regenerates TypeScript Axios client
 
 ## Architecture
 
@@ -53,9 +53,9 @@ Arc is an AI-powered workflow orchestration platform. Workflows are defined as D
 - **arc-git-storage** — Git-based storage with branch store and snapshots
 - **arc-util** — Shared utilities (redaction, telemetry, terminal formatting)
 
-### TypeScript (`apps/` and `packages/`)
+### TypeScript (`apps/` and `lib/packages/`)
 - **apps/arc-web** — React 19 + React Router + Vite + Tailwind CSS frontend
-- **packages/arc-api-client** — Auto-generated TypeScript Axios client from OpenAPI spec
+- **lib/packages/arc-api-client** — Auto-generated TypeScript Axios client from OpenAPI spec
 
 ### Key design patterns
 - **Sandbox trait** — Uniform interface for local, Docker, SSH (ExeSandbox), Sprites, and Daytona execution environments

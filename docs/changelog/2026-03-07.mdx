@@ -45,7 +45,7 @@ To migrate, update any scripts or aliases that reference the old command names.
 **Verification API paths have changed.** `/verifications` is now split into `/verification/criteria` and `/verification/controls`. The run sub-resource moved from `/runs/{id}/verifications` to `/runs/{id}/verification`.
 
 To migrate:
-1. Regenerate your TypeScript client: `cd packages/arc-api-client && bun run generate`
+1. Regenerate your TypeScript client: `cd lib/packages/arc-api-client && bun run generate`
 2. Update any direct API calls to use the new paths
 </Warning>
 

@@ -19,11 +19,11 @@ COPY --from=rust-builder /app/target/release/arc /usr/local/bin/arc
 
 COPY package.json bun.lock ./
 COPY apps/arc-web/package.json apps/arc-web/
-COPY packages/arc-api-client/package.json packages/arc-api-client/
+COPY lib/packages/arc-api-client/package.json lib/packages/arc-api-client/
 RUN bun install --frozen-lockfile
 
 COPY apps/arc-web apps/arc-web
-COPY packages/arc-api-client packages/arc-api-client
+COPY lib/packages/arc-api-client lib/packages/arc-api-client
 COPY docs docs
 COPY docker/entrypoint.ts .
 

@@ -17,7 +17,7 @@
     "baseUrl": ".",
     "paths": {
       "~/*": ["./app/*"],
-      "@qltysh/arc-api-client": ["../../packages/arc-api-client/src/index.ts"]
+      "@qltysh/arc-api-client": ["../../lib/packages/arc-api-client/src/index.ts"]
     },
     "esModuleInterop": true,
     "verbatimModuleSyntax": true,

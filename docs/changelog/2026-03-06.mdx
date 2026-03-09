@@ -31,7 +31,7 @@ When credentials are missing or misconfigured, Arc provides specific error messa
 **API response shapes have changed.** Flat fields are now nested into typed sub-objects (e.g. `model_id` becomes `model.id`), and relative time strings are replaced with ISO 8601 timestamps. Several endpoints were renamed: `retrieveRunSvg` is now `retrieveRunGraph`, `listRunCompare` is now `retrieveRunDiff`, and `RunListItemStatus` is now `BoardColumn`.
 
 To migrate:
-1. Regenerate your TypeScript client: `cd packages/arc-api-client && bun run generate`
+1. Regenerate your TypeScript client: `cd lib/packages/arc-api-client && bun run generate`
 2. Update any code that reads flat fields to use the new nested paths
 3. Update any code that displays timestamps — the API now returns ISO 8601 strings instead of pre-formatted relative times
 </Warning>
