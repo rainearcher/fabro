@@ -401,6 +401,13 @@ mod tests {
                 .map_err(|e| format!("Failed to write: {e}"))?;
             Ok(())
         }
+        async fn upload_file_from_local(
+            &self,
+            _local_path: &std::path::Path,
+            _remote_path: &str,
+        ) -> Result<(), String> {
+            Ok(())
+        }
         async fn initialize(&self) -> Result<(), String> {
             Ok(())
         }

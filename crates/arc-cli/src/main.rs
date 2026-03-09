@@ -55,6 +55,8 @@ enum Command {
     Validate(arc_workflows::cli::ValidateArgs),
     /// Parse a DOT file and print its AST
     Parse(arc_workflows::cli::ParseArgs),
+    /// Copy files to/from a run's sandbox
+    Cp(arc_workflows::cli::cp::CpArgs),
     /// List and test LLM models
     Model {
         #[command(subcommand)]
@@ -133,6 +135,7 @@ async fn main() -> Result<()> {
         Command::Run(_) => "run",
         Command::Validate(_) => "validate",
         Command::Parse(_) => "parse",
+        Command::Cp(_) => "cp",
         Command::Model { .. } => "model",
         Command::Serve(_) => "serve",
         Command::Doctor { .. } => "doctor",
@@ -291,6 +294,9 @@ async fn main() -> Result<()> {
         }
         Command::Parse(args) => {
             arc_workflows::cli::parse::parse_command(&args)?;
+        }
+        Command::Cp(args) => {
+            arc_workflows::cli::cp::cp_command(args).await?;
         }
         Command::Model { command } => {
             let cli_config = cli_config::load_cli_config(None)?;

@@ -69,6 +69,14 @@ macro_rules! delegate_sandbox {
                 self.$field.download_file_to_local(remote_path, local_path).await
             }
 
+            async fn upload_file_from_local(
+                &self,
+                local_path: &std::path::Path,
+                remote_path: &str,
+            ) -> Result<(), String> {
+                self.$field.upload_file_from_local(local_path, remote_path).await
+            }
+
             async fn initialize(&self) -> Result<(), String> {
                 self.$field.initialize().await
             }
@@ -344,6 +352,13 @@ pub trait Sandbox: Send + Sync {
         &self,
         remote_path: &str,
         local_path: &Path,
+    ) -> Result<(), String>;
+    /// Copy a file from the local filesystem into the sandbox.
+    /// Handles binary files correctly across all sandbox types.
+    async fn upload_file_from_local(
+        &self,
+        local_path: &Path,
+        remote_path: &str,
     ) -> Result<(), String>;
     async fn initialize(&self) -> Result<(), String>;
     async fn cleanup(&self) -> Result<(), String>;

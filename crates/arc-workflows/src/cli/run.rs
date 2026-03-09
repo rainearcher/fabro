@@ -598,7 +598,7 @@ pub async fn run_command(
             exe_arc
         }
         SandboxProvider::Local => {
-            let mut env = LocalSandbox::new(cwd);
+            let mut env = LocalSandbox::new(cwd.clone());
             let emitter_cb = Arc::clone(&emitter);
             env.set_event_callback(Arc::new(move |event| {
                 emitter_cb.emit(&crate::event::WorkflowRunEvent::Sandbox { event });
@@ -612,6 +612,55 @@ pub async fn run_command(
         .initialize()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to initialize sandbox: {e}"))?;
+
+    // Persist sandbox connection info for `arc cp`
+    {
+        let sandbox_info_opt = {
+            let info = sandbox.sandbox_info();
+            if info.is_empty() { None } else { Some(info) }
+        };
+        let record = match sandbox_provider {
+            SandboxProvider::Local => crate::sandbox_record::SandboxRecord {
+                provider: "local".to_string(),
+                working_directory: sandbox.working_directory().to_string(),
+                identifier: None,
+                host_working_directory: None,
+                container_mount_point: None,
+                data_host: None,
+            },
+            SandboxProvider::Docker => crate::sandbox_record::SandboxRecord {
+                provider: "docker".to_string(),
+                working_directory: sandbox.working_directory().to_string(),
+                identifier: sandbox_info_opt,
+                host_working_directory: Some(cwd.to_string_lossy().to_string()),
+                container_mount_point: Some(sandbox.working_directory().to_string()),
+                data_host: None,
+            },
+            SandboxProvider::Daytona => crate::sandbox_record::SandboxRecord {
+                provider: "daytona".to_string(),
+                working_directory: sandbox.working_directory().to_string(),
+                identifier: sandbox_info_opt,
+                host_working_directory: None,
+                container_mount_point: None,
+                data_host: None,
+            },
+            SandboxProvider::Exe => crate::sandbox_record::SandboxRecord {
+                provider: "exe".to_string(),
+                working_directory: sandbox.working_directory().to_string(),
+                identifier: exe_sandbox_ref
+                    .as_ref()
+                    .and_then(|e| e.vm_name().map(String::from)),
+                host_working_directory: None,
+                container_mount_point: None,
+                data_host: exe_sandbox_ref
+                    .as_ref()
+                    .and_then(|e| e.data_host().map(String::from)),
+            },
+        };
+        if let Err(e) = record.save(&logs_dir.join("sandbox.json")) {
+            tracing::warn!(error = %e, "Failed to save sandbox record");
+        }
+    }
 
     // Wrap exe.dev sandbox with GitCredentialSandbox for push credential refresh
     let sandbox: Arc<dyn Sandbox> = if sandbox_provider == SandboxProvider::Exe {

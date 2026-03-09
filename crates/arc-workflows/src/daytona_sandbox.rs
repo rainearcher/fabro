@@ -182,6 +182,24 @@ impl DaytonaSandbox {
         }
     }
 
+    /// Create a `DaytonaSandbox` from an already-existing Daytona SDK sandbox.
+    /// Used for reconnection (e.g. `arc cp`).
+    #[must_use]
+    pub fn from_existing(client: daytona_sdk::Client, sdk_sandbox: daytona_sdk::Sandbox) -> Self {
+        let sandbox_cell = tokio::sync::OnceCell::new();
+        let _ = sandbox_cell.set(sdk_sandbox);
+        Self {
+            config: DaytonaConfig::default(),
+            client,
+            github_app: None,
+            sandbox: sandbox_cell,
+            rg_available: tokio::sync::OnceCell::const_new(),
+            event_callback: None,
+            origin_url: tokio::sync::OnceCell::new(),
+            run_id: None,
+        }
+    }
+
     pub fn set_event_callback(&mut self, cb: SandboxEventCallback) {
         self.event_callback = Some(cb);
     }
@@ -406,6 +424,31 @@ impl Sandbox for DaytonaSandbox {
         tokio::fs::write(local_path, &bytes)
             .await
             .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
+
+        Ok(())
+    }
+
+    async fn upload_file_from_local(
+        &self,
+        local_path: &Path,
+        remote_path: &str,
+    ) -> Result<(), String> {
+        let sandbox = self.sandbox()?;
+        let resolved = self.resolve_path(remote_path);
+
+        let bytes = tokio::fs::read(local_path)
+            .await
+            .map_err(|e| format!("Failed to read {}: {e}", local_path.display()))?;
+
+        let fs_svc = sandbox
+            .fs()
+            .await
+            .map_err(|e| format!("Failed to get fs service: {e}"))?;
+
+        fs_svc
+            .upload_file_bytes(&resolved, &bytes)
+            .await
+            .map_err(|e| format!("Failed to upload file {resolved}: {e}"))?;
 
         Ok(())
     }

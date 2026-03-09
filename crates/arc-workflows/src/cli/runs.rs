@@ -183,7 +183,7 @@ fn parse_label_filters(label_args: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
-fn default_logs_base() -> PathBuf {
+pub(crate) fn default_logs_base() -> PathBuf {
     dirs::home_dir()
         .expect("could not determine home directory")
         .join(".arc")

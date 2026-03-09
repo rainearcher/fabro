@@ -382,6 +382,27 @@ impl Sandbox for LocalSandbox {
         Ok(())
     }
 
+    async fn upload_file_from_local(
+        &self,
+        local_path: &Path,
+        remote_path: &str,
+    ) -> Result<(), String> {
+        let full_path = self.resolve_path(remote_path);
+        if let Some(parent) = full_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
+        }
+        tokio::fs::copy(local_path, &full_path).await.map_err(|e| {
+            format!(
+                "Failed to copy {} to {}: {e}",
+                local_path.display(),
+                full_path.display()
+            )
+        })?;
+        Ok(())
+    }
+
     async fn initialize(&self) -> Result<(), String> {
         self.emit(SandboxEvent::Initializing {
             provider: "local".into(),

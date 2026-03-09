@@ -88,6 +88,15 @@ impl Sandbox for WorktreeSandbox {
             .download_file_to_local(remote_path, local_path)
             .await
     }
+    async fn upload_file_from_local(
+        &self,
+        local_path: &std::path::Path,
+        remote_path: &str,
+    ) -> Result<(), String> {
+        self.inner
+            .upload_file_from_local(local_path, remote_path)
+            .await
+    }
     async fn initialize(&self) -> Result<(), String> {
         self.inner.initialize().await
     }

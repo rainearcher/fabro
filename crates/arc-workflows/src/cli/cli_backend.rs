@@ -878,6 +878,9 @@ mod tests {
         async fn download_file_to_local(&self, _remote: &str, _local: &Path) -> Result<(), String> {
             Ok(())
         }
+        async fn upload_file_from_local(&self, _local: &Path, _remote: &str) -> Result<(), String> {
+            Ok(())
+        }
         async fn initialize(&self) -> Result<(), String> {
             Ok(())
         }

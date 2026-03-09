@@ -107,6 +107,16 @@ impl Sandbox for GitCredentialSandbox {
             .await
     }
 
+    async fn upload_file_from_local(
+        &self,
+        local_path: &std::path::Path,
+        remote_path: &str,
+    ) -> Result<(), String> {
+        self.inner
+            .upload_file_from_local(local_path, remote_path)
+            .await
+    }
+
     fn working_directory(&self) -> &str {
         self.inner.working_directory()
     }

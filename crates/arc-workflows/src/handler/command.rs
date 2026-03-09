@@ -647,6 +647,9 @@ mod tests {
         async fn download_file_to_local(&self, _: &str, _: &std::path::Path) -> Result<(), String> {
             unimplemented!()
         }
+        async fn upload_file_from_local(&self, _: &std::path::Path, _: &str) -> Result<(), String> {
+            unimplemented!()
+        }
         async fn initialize(&self) -> Result<(), String> {
             Ok(())
         }

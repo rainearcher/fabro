@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod cli_backend;
+pub mod cp;
 pub mod parse;
 pub mod progress;
 pub mod run;

@@ -189,6 +189,17 @@ impl Sandbox for MockSandbox {
         Ok(())
     }
 
+    async fn upload_file_from_local(
+        &self,
+        local_path: &std::path::Path,
+        _remote_path: &str,
+    ) -> Result<(), String> {
+        if !local_path.exists() {
+            return Err(format!("File not found: {}", local_path.display()));
+        }
+        Ok(())
+    }
+
     async fn initialize(&self) -> Result<(), String> {
         self.emit(crate::sandbox::SandboxEvent::Initializing {
             provider: "mock".into(),
@@ -348,6 +359,21 @@ impl Sandbox for MutableMockSandbox {
         tokio::fs::write(local_path, content.as_bytes())
             .await
             .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
+        Ok(())
+    }
+
+    async fn upload_file_from_local(
+        &self,
+        local_path: &std::path::Path,
+        remote_path: &str,
+    ) -> Result<(), String> {
+        let content = tokio::fs::read_to_string(local_path)
+            .await
+            .map_err(|e| format!("Failed to read {}: {e}", local_path.display()))?;
+        self.files
+            .lock()
+            .expect("files lock poisoned")
+            .insert(remote_path.to_string(), content);
         Ok(())
     }
 

@@ -18,6 +18,30 @@ pub use openssh_runner::OpensshRunner;
 const WORKING_DIRECTORY: &str = "/home/exedev";
 const PROVIDER: &str = "exe";
 
+/// No-op SSH runner used as a placeholder for the management plane
+/// when reconnecting to an existing VM via `from_existing`.
+struct NoopSshRunner;
+
+#[async_trait]
+impl SshRunner for NoopSshRunner {
+    async fn run_command(&self, _command: &str) -> Result<SshOutput, String> {
+        Err("NoopSshRunner: management plane not available on reconnected sandbox".to_string())
+    }
+    async fn run_command_with_timeout(
+        &self,
+        _command: &str,
+        _timeout: std::time::Duration,
+    ) -> Result<SshOutput, String> {
+        Err("NoopSshRunner: management plane not available on reconnected sandbox".to_string())
+    }
+    async fn upload_file(&self, _path: &str, _content: &[u8]) -> Result<(), String> {
+        Err("NoopSshRunner: management plane not available on reconnected sandbox".to_string())
+    }
+    async fn download_file(&self, _path: &str) -> Result<Vec<u8>, String> {
+        Err("NoopSshRunner: management plane not available on reconnected sandbox".to_string())
+    }
+}
+
 pub(crate) fn shell_quote(s: &str) -> String {
     shlex::try_quote(s).map_or_else(
         |_| format!("'{}'", s.replace('\'', "'\\''")),
@@ -127,9 +151,41 @@ impl ExeSandbox {
         }
     }
 
+    /// Create an `ExeSandbox` from a pre-connected data-plane SSH runner.
+    /// Used for reconnection (e.g. `arc cp`) when the VM already exists.
+    pub fn from_existing(data_ssh: Box<dyn SshRunner>) -> Self {
+        let data_cell = tokio::sync::OnceCell::new();
+        let _ = data_cell.set(data_ssh);
+        Self {
+            mgmt_ssh: Box::new(NoopSshRunner),
+            data_ssh: data_cell,
+            vm_name: tokio::sync::OnceCell::new(),
+            data_host: tokio::sync::OnceCell::new(),
+            rg_available: tokio::sync::OnceCell::const_new(),
+            event_callback: None,
+            data_ssh_factory: Box::new(|_: &str| {
+                Box::pin(async { Err("from_existing sandbox cannot create new SSH connections".to_string()) })
+            }),
+            config: ExeConfig::default(),
+            clone_params: None,
+            run_id: None,
+            origin_url: tokio::sync::OnceCell::new(),
+        }
+    }
+
     /// The display URL of the cloned origin remote, if a clone was performed.
     pub fn origin_url(&self) -> Option<&str> {
         self.origin_url.get().map(String::as_str)
+    }
+
+    /// The VM name, available after initialization.
+    pub fn vm_name(&self) -> Option<&str> {
+        self.vm_name.get().map(String::as_str)
+    }
+
+    /// The data-plane SSH host, available after initialization.
+    pub fn data_host(&self) -> Option<&str> {
+        self.data_host.get().map(String::as_str)
     }
 
     pub fn set_event_callback(&mut self, cb: SandboxEventCallback) {
@@ -706,6 +762,29 @@ impl Sandbox for ExeSandbox {
         tokio::fs::write(local_path, &bytes)
             .await
             .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
+
+        Ok(())
+    }
+
+    async fn upload_file_from_local(
+        &self,
+        local_path: &Path,
+        remote_path: &str,
+    ) -> Result<(), String> {
+        let ssh = self.data_ssh()?;
+        let resolved = if Path::new(remote_path).is_absolute() {
+            remote_path.to_string()
+        } else {
+            format!("{WORKING_DIRECTORY}/{remote_path}")
+        };
+
+        let bytes = tokio::fs::read(local_path)
+            .await
+            .map_err(|e| format!("Failed to read {}: {e}", local_path.display()))?;
+
+        ssh.upload_file(&resolved, &bytes)
+            .await
+            .map_err(|e| format!("Failed to upload file {resolved}: {e}"))?;
 
         Ok(())
     }

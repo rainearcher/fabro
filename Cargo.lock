@@ -340,6 +340,7 @@ dependencies = [
  "chrono",
  "rand 0.8.5",
  "serde",
+ "shlex",
  "tempfile",
  "tokio",
  "tokio-util",

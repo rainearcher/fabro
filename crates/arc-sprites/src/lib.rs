@@ -17,6 +17,13 @@ pub use cli_runner::CliSpriteRunner;
 const WORKING_DIRECTORY: &str = "/home/sprite";
 const PROVIDER: &str = "sprites";
 
+fn shell_quote(s: &str) -> String {
+    shlex::try_quote(s).map_or_else(
+        |_| format!("'{}'", s.replace('\'', "'\\''")),
+        |q| q.to_string(),
+    )
+}
+
 /// Output from a sprite CLI command execution.
 pub struct SpriteOutput {
     pub stdout: String,
@@ -52,12 +59,10 @@ pub struct SpritesSandbox {
     preview_url: tokio::sync::OnceCell<String>,
     rg_available: tokio::sync::OnceCell<bool>,
     event_callback: Option<SandboxEventCallback>,
-    preserve_sprite: bool,
 }
 
 impl SpritesSandbox {
     pub fn new(runner: Box<dyn SpriteRunner>, config: SpritesConfig) -> Self {
-        let preserve_sprite = config.sprite_name.is_some();
         Self {
             config,
             runner,
@@ -65,7 +70,6 @@ impl SpritesSandbox {
             preview_url: tokio::sync::OnceCell::new(),
             rg_available: tokio::sync::OnceCell::const_new(),
             event_callback: None,
-            preserve_sprite,
         }
     }
 
@@ -231,7 +235,7 @@ impl Sandbox for SpritesSandbox {
         });
         let start = Instant::now();
 
-        if !self.preserve_sprite {
+        if self.config.sprite_name.is_none() {
             if let Some(name) = self.sprite_name.get() {
                 let args = self.build_sprite_args(&["destroy", "-s", name, "-force"]);
                 let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
@@ -269,19 +273,19 @@ impl Sandbox for SpritesSandbox {
         if let Some(vars) = env_vars {
             for (key, value) in vars {
                 parts.push(format!(
-                    "export {}='{}';",
-                    key,
-                    value.replace('\'', "'\\''")
+                    "export {}={};",
+                    shell_quote(key),
+                    shell_quote(value)
                 ));
             }
         }
 
         if let Some(dir) = working_dir {
             let resolved = self.resolve_path(dir);
-            parts.push(format!("cd '{}'", resolved.replace('\'', "'\\''")));
+            parts.push(format!("cd {}", shell_quote(&resolved)));
             parts.push("&&".to_string());
         } else {
-            parts.push(format!("cd '{WORKING_DIRECTORY}'"));
+            parts.push(format!("cd {}", shell_quote(WORKING_DIRECTORY)));
             parts.push("&&".to_string());
         }
 
@@ -321,7 +325,7 @@ impl Sandbox for SpritesSandbox {
         limit: Option<usize>,
     ) -> Result<String, String> {
         let resolved = self.resolve_path(path);
-        let cmd = format!("cat '{}'", resolved.replace('\'', "'\\''"));
+        let cmd = format!("cat {}", shell_quote(&resolved));
 
         let result = self.exec_command(&cmd, 30_000, None, None, None).await?;
 
@@ -339,7 +343,7 @@ impl Sandbox for SpritesSandbox {
         if let Some(parent) = Path::new(&resolved).parent() {
             let parent_str = parent.to_string_lossy();
             if parent_str != "/" {
-                let mkdir_cmd = format!("mkdir -p '{}'", parent_str.replace('\'', "'\\''"));
+                let mkdir_cmd = format!("mkdir -p {}", shell_quote(&parent_str));
                 self.exec_command(&mkdir_cmd, 30_000, None, None, None)
                     .await?;
             }
@@ -348,9 +352,9 @@ impl Sandbox for SpritesSandbox {
         use base64::Engine;
         let encoded = base64::engine::general_purpose::STANDARD.encode(content.as_bytes());
         let cmd = format!(
-            "echo '{}' | base64 -d > '{}'",
+            "echo '{}' | base64 -d > {}",
             encoded,
-            resolved.replace('\'', "'\\''"),
+            shell_quote(&resolved),
         );
 
         let result = self.exec_command(&cmd, 30_000, None, None, None).await?;
@@ -363,7 +367,7 @@ impl Sandbox for SpritesSandbox {
 
     async fn delete_file(&self, path: &str) -> Result<(), String> {
         let resolved = self.resolve_path(path);
-        let cmd = format!("rm -f '{}'", resolved.replace('\'', "'\\''"));
+        let cmd = format!("rm -f {}", shell_quote(&resolved));
 
         let result = self.exec_command(&cmd, 30_000, None, None, None).await?;
         if result.exit_code != 0 {
@@ -374,7 +378,7 @@ impl Sandbox for SpritesSandbox {
 
     async fn file_exists(&self, path: &str) -> Result<bool, String> {
         let resolved = self.resolve_path(path);
-        let cmd = format!("test -e '{}'", resolved.replace('\'', "'\\''"));
+        let cmd = format!("test -e {}", shell_quote(&resolved));
 
         let result = self.exec_command(&cmd, 30_000, None, None, None).await?;
         Ok(result.exit_code == 0)
@@ -389,8 +393,8 @@ impl Sandbox for SpritesSandbox {
         let max_depth = depth.unwrap_or(1);
 
         let cmd = format!(
-            "find '{}' -mindepth 1 -maxdepth {} -printf '%y\\t%s\\t%P\\n'",
-            resolved.replace('\'', "'\\''"),
+            "find {} -mindepth 1 -maxdepth {} -printf '%y\\t%s\\t%P\\n'",
+            shell_quote(&resolved),
             max_depth,
         );
 
@@ -452,15 +456,15 @@ impl Sandbox for SpritesSandbox {
                 cmd.push_str(" -i");
             }
             if let Some(ref glob_filter) = options.glob_filter {
-                cmd.push_str(&format!(" --glob '{glob_filter}'"));
+                cmd.push_str(&format!(" --glob {}", shell_quote(glob_filter)));
             }
             if let Some(max) = options.max_results {
                 cmd.push_str(&format!(" --max-count {max}"));
             }
             cmd.push_str(&format!(
-                " -- '{}' '{}'",
-                pattern.replace('\'', "'\\''"),
-                resolved
+                " -- {} {}",
+                shell_quote(pattern),
+                shell_quote(&resolved)
             ));
             cmd
         } else {
@@ -469,15 +473,15 @@ impl Sandbox for SpritesSandbox {
                 cmd.push_str(" -i");
             }
             if let Some(ref glob_filter) = options.glob_filter {
-                cmd.push_str(&format!(" --include '{glob_filter}'"));
+                cmd.push_str(&format!(" --include {}", shell_quote(glob_filter)));
             }
             if let Some(max) = options.max_results {
                 cmd.push_str(&format!(" -m {max}"));
             }
             cmd.push_str(&format!(
-                " -- '{}' '{}'",
-                pattern.replace('\'', "'\\''"),
-                resolved
+                " -- {} {}",
+                shell_quote(pattern),
+                shell_quote(&resolved)
             ));
             cmd
         };
@@ -503,9 +507,9 @@ impl Sandbox for SpritesSandbox {
             .unwrap_or_else(|| WORKING_DIRECTORY.to_string());
 
         let cmd = format!(
-            "find '{}' -name '{}' -type f | sort",
-            base.replace('\'', "'\\''"),
-            pattern.replace('\'', "'\\''"),
+            "find {} -name {} -type f | sort",
+            shell_quote(&base),
+            shell_quote(pattern),
         );
 
         let result = self.exec_command(&cmd, 30_000, None, None, None).await?;
@@ -531,7 +535,7 @@ impl Sandbox for SpritesSandbox {
         local_path: &Path,
     ) -> Result<(), String> {
         let resolved = self.resolve_path(remote_path);
-        let cmd = format!("base64 '{}'", resolved.replace('\'', "'\\''"));
+        let cmd = format!("base64 {}", shell_quote(&resolved));
 
         let result = self.exec_command(&cmd, 30_000, None, None, None).await?;
         if result.exit_code != 0 {
@@ -551,6 +555,40 @@ impl Sandbox for SpritesSandbox {
         tokio::fs::write(local_path, &bytes)
             .await
             .map_err(|e| format!("Failed to write {}: {e}", local_path.display()))?;
+
+        Ok(())
+    }
+
+    async fn upload_file_from_local(
+        &self,
+        local_path: &Path,
+        remote_path: &str,
+    ) -> Result<(), String> {
+        let resolved = self.resolve_path(remote_path);
+
+        let bytes = tokio::fs::read(local_path)
+            .await
+            .map_err(|e| format!("Failed to read {}: {e}", local_path.display()))?;
+
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+        // Ensure parent directory exists
+        if let Some(parent) = Path::new(&resolved).parent() {
+            let mkdir_cmd = format!("mkdir -p {}", shell_quote(&parent.to_string_lossy()));
+            self.exec_command(&mkdir_cmd, 10_000, None, None, None)
+                .await?;
+        }
+
+        let cmd = format!(
+            "echo {} | base64 -d > {}",
+            shell_quote(&encoded),
+            shell_quote(&resolved)
+        );
+        let result = self.exec_command(&cmd, 30_000, None, None, None).await?;
+        if result.exit_code != 0 {
+            return Err(format!("Failed to write {resolved}: {}", result.stderr));
+        }
 
         Ok(())
     }
@@ -735,7 +773,7 @@ mod tests {
         let recorded = commands.lock().unwrap();
         let cmd = recorded[0].args.last().unwrap();
         assert!(
-            cmd.contains("cd '/tmp/work'"),
+            cmd.contains("cd /tmp/work"),
             "expected cd to working dir, got: {cmd}",
         );
     }
@@ -758,7 +796,7 @@ mod tests {
         let recorded = commands.lock().unwrap();
         let cmd = recorded[0].args.last().unwrap();
         assert!(
-            cmd.contains("export FOO='bar';"),
+            cmd.contains("export FOO=bar;"),
             "expected env var export, got: {cmd}",
         );
     }
@@ -820,7 +858,7 @@ mod tests {
         let recorded = commands.lock().unwrap();
         let cmd = recorded[0].args.last().unwrap();
         assert!(
-            cmd.contains("cat '/etc/hosts'"),
+            cmd.contains("cat /etc/hosts"),
             "expected absolute path in cat, got: {cmd}",
         );
         assert!(

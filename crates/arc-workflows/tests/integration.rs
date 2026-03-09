@@ -8926,6 +8926,10 @@ impl arc_agent::Sandbox for RemoteMockEnv {
         Err("not implemented".to_string())
     }
 
+    async fn upload_file_from_local(&self, _: &std::path::Path, _: &str) -> std::result::Result<(), String> {
+        Err("not implemented".to_string())
+    }
+
     fn working_directory(&self) -> &str {
         &self.working_dir
     }
@@ -9361,6 +9365,10 @@ impl arc_agent::Sandbox for CliTestEnv {
         Err("not implemented".to_string())
     }
 
+    async fn upload_file_from_local(&self, _: &std::path::Path, _: &str) -> Result<(), String> {
+        Err("not implemented".to_string())
+    }
+
     fn working_directory(&self) -> &str {
         "/tmp/test"
     }
@@ -9636,6 +9644,9 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
             Ok(())
         }
         async fn download_file_to_local(&self, _: &str, _: &std::path::Path) -> Result<(), String> {
+            Err("not implemented".to_string())
+        }
+        async fn upload_file_from_local(&self, _: &std::path::Path, _: &str) -> Result<(), String> {
             Err("not implemented".to_string())
         }
         fn working_directory(&self) -> &str {

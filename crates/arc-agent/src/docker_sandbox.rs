@@ -114,6 +114,22 @@ impl DockerSandbox {
         }
     }
 
+    /// Maps a container-space path to the corresponding host-space path
+    /// using the bind-mount configuration.
+    fn container_to_host_path(&self, remote_path: &str) -> Result<std::path::PathBuf, String> {
+        let container_path = self.resolve_container_path(remote_path);
+        if container_path.starts_with(&self.config.container_mount_point) {
+            let relative = &container_path[self.config.container_mount_point.len()..];
+            let relative = relative.strip_prefix('/').unwrap_or(relative);
+            Ok(std::path::PathBuf::from(&self.config.host_working_directory).join(relative))
+        } else {
+            Err(format!(
+                "Path {container_path} is outside the bind-mounted directory {}",
+                self.config.container_mount_point
+            ))
+        }
+    }
+
     /// Executes a command inside the container, returning `(stdout, stderr, exit_code)`.
     async fn docker_exec(
         &self,
@@ -275,19 +291,7 @@ impl Sandbox for DockerSandbox {
         remote_path: &str,
         local_path: &std::path::Path,
     ) -> Result<(), String> {
-        // Docker bind-mounts host_working_directory -> container_mount_point.
-        // Resolve the container path to the corresponding host path.
-        let container_path = self.resolve_container_path(remote_path);
-        let host_path = if container_path.starts_with(&self.config.container_mount_point) {
-            let relative = &container_path[self.config.container_mount_point.len()..];
-            let relative = relative.strip_prefix('/').unwrap_or(relative);
-            std::path::PathBuf::from(&self.config.host_working_directory).join(relative)
-        } else {
-            return Err(format!(
-                "Path {container_path} is outside the bind-mounted directory {}",
-                self.config.container_mount_point
-            ));
-        };
+        let host_path = self.container_to_host_path(remote_path)?;
 
         if let Some(parent) = local_path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -299,6 +303,28 @@ impl Sandbox for DockerSandbox {
                 "Failed to copy {} to {}: {e}",
                 host_path.display(),
                 local_path.display()
+            )
+        })?;
+        Ok(())
+    }
+
+    async fn upload_file_from_local(
+        &self,
+        local_path: &std::path::Path,
+        remote_path: &str,
+    ) -> Result<(), String> {
+        let host_path = self.container_to_host_path(remote_path)?;
+
+        if let Some(parent) = host_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("Failed to create parent dirs: {e}"))?;
+        }
+        tokio::fs::copy(local_path, &host_path).await.map_err(|e| {
+            format!(
+                "Failed to copy {} to {}: {e}",
+                local_path.display(),
+                host_path.display()
             )
         })?;
         Ok(())
