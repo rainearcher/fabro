@@ -1030,6 +1030,10 @@ pub async fn run_command(
                                 match result {
                                     Ok(Ok(Ok(()))) => {
                                         tracing::info!(run_branch, "Pushed run branch to origin");
+                                        eprintln!(
+                                            "{} {run_branch}",
+                                            styles.bold.apply_to("Pushed branch:")
+                                        );
                                     }
                                     Ok(Ok(Err(e))) => {
                                         tracing::warn!(error = %e, "Failed to push run branch");
