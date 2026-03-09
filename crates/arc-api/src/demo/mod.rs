@@ -1265,6 +1265,7 @@ mod runs {
             sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                 provider: Some("daytona".into()),
                 preserve: None,
+                local: None,
                 daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                     auto_stop_interval: Some(60),
                     labels: Some(std::collections::HashMap::from([(
@@ -1420,6 +1421,7 @@ mod workflows {
                     sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                         provider: Some("daytona".into()),
                         preserve: None,
+                        local: None,
                         daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                             auto_stop_interval: Some(60),
                             labels: Some(std::collections::HashMap::from([
@@ -1487,6 +1489,7 @@ mod workflows {
                     sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                         provider: Some("daytona".into()),
                         preserve: None,
+                        local: None,
                         daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                             auto_stop_interval: Some(120),
                             labels: Some(std::collections::HashMap::from([
@@ -1566,6 +1569,7 @@ mod workflows {
                     sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                         provider: Some("daytona".into()),
                         preserve: None,
+                        local: None,
                         daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                             auto_stop_interval: Some(120),
                             labels: Some(std::collections::HashMap::from([
@@ -1636,6 +1640,7 @@ mod workflows {
                     sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                         provider: Some("daytona".into()),
                         preserve: None,
+                        local: None,
                         daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                             auto_stop_interval: Some(180),
                             labels: Some(std::collections::HashMap::from([
@@ -3090,6 +3095,7 @@ mod settings {
                 sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                     provider: Some("daytona".into()),
                     preserve: None,
+                    local: None,
                     daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                         auto_stop_interval: Some(60),
                         labels: None,

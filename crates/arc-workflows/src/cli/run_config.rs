@@ -61,10 +61,27 @@ pub struct SetupConfig {
     pub timeout_ms: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeMode {
+    Always,
+    #[default]
+    Clean,
+    Dirty,
+    Never,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct LocalSandboxConfig {
+    #[serde(default)]
+    pub worktree_mode: WorktreeMode,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SandboxConfig {
     pub provider: Option<String>,
     pub preserve: Option<bool>,
+    pub local: Option<LocalSandboxConfig>,
     pub daytona: Option<DaytonaConfig>,
     pub exe: Option<arc_exe::ExeConfig>,
     pub env: Option<HashMap<String, String>>,
@@ -129,6 +146,9 @@ impl WorkflowRunConfig {
                 }
                 if task.preserve.is_none() {
                     task.preserve = default.preserve;
+                }
+                if task.local.is_none() {
+                    task.local = default.local.clone();
                 }
                 match (&mut task.daytona, &default.daytona) {
                     (Some(task_d), Some(default_d)) => {
@@ -953,6 +973,50 @@ provider = "docker"
     }
 
     #[test]
+    fn parse_toml_worktree_mode_always() {
+        let toml = r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[sandbox.local]
+worktree_mode = "always"
+"#;
+        let config = parse_run_config(toml).unwrap();
+        let local = config.sandbox.unwrap().local.unwrap();
+        assert_eq!(local.worktree_mode, WorktreeMode::Always);
+    }
+
+    #[test]
+    fn parse_toml_worktree_mode_defaults_to_clean() {
+        let toml = r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[sandbox]
+provider = "local"
+"#;
+        let config = parse_run_config(toml).unwrap();
+        let sandbox = config.sandbox.unwrap();
+        assert_eq!(sandbox.local, None);
+    }
+
+    #[test]
+    fn parse_toml_worktree_mode_empty_local_defaults_to_clean() {
+        let toml = r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[sandbox.local]
+"#;
+        let config = parse_run_config(toml).unwrap();
+        let local = config.sandbox.unwrap().local.unwrap();
+        assert_eq!(local.worktree_mode, WorktreeMode::Clean);
+    }
+
+    #[test]
     fn apply_defaults_merges_sandbox_preserve_task_wins() {
         let mut cfg = parse_run_config(
             r#"
@@ -969,6 +1033,7 @@ preserve = true
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: Some(false),
+                local: None,
                 daytona: None,
                 exe: None,
                 env: None,
@@ -996,6 +1061,7 @@ provider = "docker"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: Some(true),
+                local: None,
                 daytona: None,
                 exe: None,
                 env: None,
@@ -1023,6 +1089,7 @@ provider = "daytona"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                local: None,
                 daytona: Some(DaytonaConfig {
                     auto_stop_interval: Some(30),
                     ..DaytonaConfig::default()
@@ -1059,6 +1126,7 @@ auto_stop_interval = 60
             sandbox: Some(SandboxConfig {
                 provider: Some("daytona".into()),
                 preserve: None,
+                local: None,
                 daytona: Some(DaytonaConfig {
                     auto_stop_interval: Some(30),
                     labels: Some(HashMap::from([("env".into(), "prod".into())])),
@@ -1093,6 +1161,7 @@ env = "from_task"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                local: None,
                 daytona: Some(DaytonaConfig {
                     labels: Some(HashMap::from([
                         ("env".into(), "from_default".into()),
@@ -1130,6 +1199,7 @@ cpu = 2
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                local: None,
                 daytona: Some(DaytonaConfig {
                     snapshot: Some(DaytonaSnapshotConfig {
                         name: "default-snap".into(),
@@ -1169,6 +1239,7 @@ auto_stop_interval = 60
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                local: None,
                 daytona: Some(DaytonaConfig {
                     snapshot: Some(DaytonaSnapshotConfig {
                         name: "default-snap".into(),
@@ -1397,6 +1468,7 @@ network = "block"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                local: None,
                 daytona: Some(DaytonaConfig {
                     network: Some(crate::daytona_sandbox::DaytonaNetwork::AllowAll),
                     ..DaytonaConfig::default()
@@ -1430,6 +1502,7 @@ auto_stop_interval = 60
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                local: None,
                 daytona: Some(DaytonaConfig {
                     network: Some(crate::daytona_sandbox::DaytonaNetwork::AllowList(vec![
                         "10.0.0.0/8".into(),
@@ -1642,6 +1715,7 @@ SHARED = "from_task"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                local: None,
                 daytona: None,
                 exe: None,
                 env: Some(HashMap::from([
@@ -1675,6 +1749,7 @@ provider = "daytona"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                local: None,
                 daytona: None,
                 exe: None,
                 env: Some(HashMap::from([("KEY".into(), "val".into())])),

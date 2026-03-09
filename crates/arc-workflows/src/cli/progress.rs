@@ -681,6 +681,20 @@ impl ProgressUI {
         }
     }
 
+    pub fn show_worktree(&mut self, path: &Path) {
+        let path_str = super::tilde_path(path);
+        match &self.renderer {
+            ProgressRenderer::Tty(tty) => {
+                let bar = tty.multi.add(ProgressBar::new_spinner());
+                bar.set_style(style_static_dim());
+                bar.finish_with_message(format!("Worktree: {path_str}"));
+            }
+            ProgressRenderer::Plain => {
+                eprintln!("    Worktree: {path_str}");
+            }
+        }
+    }
+
     // ── Stages ──────────────────────────────────────────────────────────
 
     fn on_stage_started(&mut self, node_id: &str, name: &str, script: Option<&str>) {

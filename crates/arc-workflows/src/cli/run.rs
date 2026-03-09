@@ -159,6 +159,25 @@ fn resolve_preserve_sandbox(
         .unwrap_or(false)
 }
 
+/// Resolve worktree mode: TOML config > run defaults > Clean.
+fn resolve_worktree_mode(
+    run_cfg: Option<&WorkflowRunConfig>,
+    run_defaults: &RunDefaults,
+) -> run_config::WorktreeMode {
+    run_cfg
+        .and_then(|c| c.sandbox.as_ref())
+        .and_then(|s| s.local.as_ref())
+        .map(|l| l.worktree_mode)
+        .unwrap_or_else(|| {
+            run_defaults
+                .sandbox
+                .as_ref()
+                .and_then(|s| s.local.as_ref())
+                .map(|l| l.worktree_mode)
+                .unwrap_or_default()
+        })
+}
+
 /// Resolve daytona config: TOML config > run defaults.
 fn resolve_daytona_config(
     run_cfg: Option<&WorkflowRunConfig>,
@@ -519,20 +538,47 @@ pub async fn run_command(
     };
 
     // Set up git worktree for local execution (must happen before cwd is captured)
-    let (worktree_work_dir, _worktree_path, worktree_branch, worktree_base_sha) = if git_clean {
-        match setup_worktree(&original_cwd, &logs_dir, &run_id) {
-            Ok((wd, wt, branch, base)) => (Some(wd), Some(wt), Some(branch), Some(base)),
-            Err(e) => {
-                eprintln!(
-                    "{} Git worktree setup failed ({e}), running without worktree.",
-                    styles.yellow.apply_to("Warning:"),
-                );
-                (None, None, None, None)
-            }
-        }
-    } else {
-        (None, None, None, None)
+    let worktree_mode = resolve_worktree_mode(run_cfg.as_ref(), &run_defaults);
+    let should_create_worktree = match worktree_mode {
+        run_config::WorktreeMode::Always => true,
+        run_config::WorktreeMode::Clean => git_clean,
+        run_config::WorktreeMode::Dirty => !git_clean,
+        run_config::WorktreeMode::Never => false,
     };
+    debug!(
+        ?worktree_mode,
+        git_clean, should_create_worktree, "Resolved worktree mode"
+    );
+
+    if should_create_worktree && !git_clean {
+        eprintln!(
+            "{} Uncommitted changes will not be included in the worktree.",
+            styles.yellow.apply_to("Warning:"),
+        );
+    }
+
+    let (worktree_work_dir, _worktree_path, worktree_branch, worktree_base_sha) =
+        if should_create_worktree {
+            match setup_worktree(&original_cwd, &logs_dir, &run_id) {
+                Ok((wd, wt, branch, base)) => (Some(wd), Some(wt), Some(branch), Some(base)),
+                Err(e) => {
+                    eprintln!(
+                        "{} Git worktree setup failed ({e}), running without worktree.",
+                        styles.yellow.apply_to("Warning:"),
+                    );
+                    (None, None, None, None)
+                }
+            }
+        } else {
+            (None, None, None, None)
+        };
+
+    if let Some(ref wt) = _worktree_path {
+        progress_ui
+            .lock()
+            .expect("progress lock poisoned")
+            .show_worktree(wt);
+    }
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let daytona_config = resolve_daytona_config(run_cfg.as_ref(), &run_defaults);
@@ -2146,6 +2192,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: Some(false),
+                local: None,
                 daytona: None,
                 exe: None,
                 env: None,
@@ -2172,6 +2219,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: Some(true),
+                local: None,
                 daytona: None,
                 exe: None,
                 env: None,
@@ -2186,6 +2234,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: Some(false),
+                local: None,
                 daytona: None,
                 exe: None,
                 env: None,
@@ -2201,6 +2250,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: Some(true),
+                local: None,
                 daytona: None,
                 exe: None,
                 env: None,
@@ -2214,6 +2264,112 @@ mod tests {
     fn resolve_preserve_sandbox_defaults_to_false() {
         let defaults = RunDefaults::default();
         assert!(!resolve_preserve_sandbox(false, None, &defaults));
+    }
+
+    #[test]
+    fn resolve_worktree_mode_defaults_to_clean() {
+        let defaults = RunDefaults::default();
+        assert_eq!(
+            resolve_worktree_mode(None, &defaults),
+            run_config::WorktreeMode::Clean
+        );
+    }
+
+    #[test]
+    fn resolve_worktree_mode_from_toml() {
+        let cfg = run_config::WorkflowRunConfig {
+            version: 1,
+            goal: Some("test".into()),
+            graph: "w.dot".into(),
+            directory: None,
+            llm: None,
+            setup: None,
+            sandbox: Some(run_config::SandboxConfig {
+                provider: None,
+                preserve: None,
+                local: Some(run_config::LocalSandboxConfig {
+                    worktree_mode: run_config::WorktreeMode::Always,
+                }),
+                daytona: None,
+                exe: None,
+                env: None,
+            }),
+            vars: None,
+            hooks: Vec::new(),
+            checkpoint: Default::default(),
+            pull_request: None,
+            assets: None,
+        };
+        let defaults = RunDefaults::default();
+        assert_eq!(
+            resolve_worktree_mode(Some(&cfg), &defaults),
+            run_config::WorktreeMode::Always
+        );
+    }
+
+    #[test]
+    fn resolve_worktree_mode_from_defaults() {
+        let defaults = RunDefaults {
+            sandbox: Some(run_config::SandboxConfig {
+                provider: None,
+                preserve: None,
+                local: Some(run_config::LocalSandboxConfig {
+                    worktree_mode: run_config::WorktreeMode::Dirty,
+                }),
+                daytona: None,
+                exe: None,
+                env: None,
+            }),
+            ..RunDefaults::default()
+        };
+        assert_eq!(
+            resolve_worktree_mode(None, &defaults),
+            run_config::WorktreeMode::Dirty
+        );
+    }
+
+    #[test]
+    fn resolve_worktree_mode_toml_overrides_defaults() {
+        let cfg = run_config::WorkflowRunConfig {
+            version: 1,
+            goal: Some("test".into()),
+            graph: "w.dot".into(),
+            directory: None,
+            llm: None,
+            setup: None,
+            sandbox: Some(run_config::SandboxConfig {
+                provider: None,
+                preserve: None,
+                local: Some(run_config::LocalSandboxConfig {
+                    worktree_mode: run_config::WorktreeMode::Never,
+                }),
+                daytona: None,
+                exe: None,
+                env: None,
+            }),
+            vars: None,
+            hooks: Vec::new(),
+            checkpoint: Default::default(),
+            pull_request: None,
+            assets: None,
+        };
+        let defaults = RunDefaults {
+            sandbox: Some(run_config::SandboxConfig {
+                provider: None,
+                preserve: None,
+                local: Some(run_config::LocalSandboxConfig {
+                    worktree_mode: run_config::WorktreeMode::Dirty,
+                }),
+                daytona: None,
+                exe: None,
+                env: None,
+            }),
+            ..RunDefaults::default()
+        };
+        assert_eq!(
+            resolve_worktree_mode(Some(&cfg), &defaults),
+            run_config::WorktreeMode::Never
+        );
     }
 
     #[test]
