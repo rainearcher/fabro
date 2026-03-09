@@ -110,6 +110,10 @@ pub struct RunArgs {
     #[arg(long)]
     pub goal: Option<String>,
 
+    /// Read the workflow goal from a file
+    #[arg(long, conflicts_with = "goal")]
+    pub goal_file: Option<PathBuf>,
+
     /// Override default LLM model
     #[arg(long)]
     pub model: Option<String>,

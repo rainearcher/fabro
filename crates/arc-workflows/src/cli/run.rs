@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use arc_agent::{DockerSandbox, DockerSandboxConfig, LocalSandbox, Sandbox};
 use arc_util::terminal::Styles;
 use chrono::{Local, Utc};
@@ -36,8 +36,25 @@ use super::{
     RunArgs, SandboxProvider,
 };
 
+/// Resolve goal from `--goal` string or `--goal-file` path.
+fn resolve_cli_goal(
+    goal: &Option<String>,
+    goal_file: &Option<PathBuf>,
+) -> anyhow::Result<Option<String>> {
+    match (goal, goal_file) {
+        (Some(g), _) => Ok(Some(g.clone())),
+        (_, Some(path)) => {
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("failed to read goal file: {}", path.display()))?;
+            debug!(path = %path.display(), "Goal loaded from file");
+            Ok(Some(content))
+        }
+        _ => Ok(None),
+    }
+}
+
 /// Apply goal to the graph from TOML config or CLI flag.
-/// Precedence: CLI `--goal` > TOML `goal` > DOT `graph [goal="..."]`.
+/// Precedence: CLI `--goal` / `--goal-file` > TOML `goal` > DOT `graph [goal="..."]`.
 fn apply_goal_override(
     graph: &mut crate::graph::types::Graph,
     cli_goal: Option<&str>,
@@ -251,8 +268,9 @@ pub async fn run_command(
     let dot_dir = dot_path.parent().unwrap_or(std::path::Path::new("."));
     let (mut graph, diagnostics) =
         WorkflowBuilder::new().prepare_with_file_inlining(&source, dot_dir)?;
+    let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
     let toml_goal = run_cfg.as_ref().and_then(|c| c.goal.as_deref());
-    apply_goal_override(&mut graph, args.goal.as_deref(), toml_goal);
+    apply_goal_override(&mut graph, cli_goal.as_deref(), toml_goal);
 
     // Inline @file references in the (possibly overridden) goal
     if let Some(crate::graph::types::AttrValue::String(goal)) = graph.attrs.get("goal") {
@@ -1088,7 +1106,8 @@ async fn run_from_branch(
     } else {
         crate::workflow::WorkflowBuilder::new().prepare(&source)?
     };
-    apply_goal_override(&mut graph, args.goal.as_deref(), None);
+    let cli_goal = resolve_cli_goal(&args.goal, &args.goal_file)?;
+    apply_goal_override(&mut graph, cli_goal.as_deref(), None);
 
     eprintln!(
         "{} {} from branch {} ({})",
@@ -1701,6 +1720,27 @@ mod tests {
         );
         apply_goal_override(&mut graph, None, None);
         assert_eq!(graph.goal(), "original");
+    }
+
+    #[test]
+    fn resolve_cli_goal_from_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("goal.md");
+        std::fs::write(&path, "goal from file").unwrap();
+        let result = resolve_cli_goal(&None, &Some(path)).unwrap();
+        assert_eq!(result, Some("goal from file".to_string()));
+    }
+
+    #[test]
+    fn resolve_cli_goal_from_string() {
+        let result = resolve_cli_goal(&Some("inline goal".to_string()), &None).unwrap();
+        assert_eq!(result, Some("inline goal".to_string()));
+    }
+
+    #[test]
+    fn resolve_cli_goal_none() {
+        let result = resolve_cli_goal(&None, &None).unwrap();
+        assert_eq!(result, None);
     }
 
     #[test]
