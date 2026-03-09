@@ -1,0 +1,39 @@
+---
+title: "exe.dev git cloning, cancellation, and checkpointing"
+date: "2026-03-09"
+---
+
+## exe.dev sandbox maturation
+
+The exe.dev sandbox provider now supports the full workflow lifecycle. Previously, exe.dev VMs could run agent stages but lacked git integration, cancellation, and checkpointing — making them unusable for real multi-stage workflows. Now, Arc automatically clones the local git repo into exe.dev VMs, supports remote git checkpointing between stages, and wires up cancellation tokens so stopping a run cleanly tears down the VM.
+
+You can also specify a custom container image and connect via SSH:
+
+```toml title="run.toml"
+[execution]
+environment = "exe"
+
+[execution.exe]
+image = "my-custom-image:latest"
+```
+
+```bash
+arc run --ssh my-workflow.dot
+```
+
+## More
+
+<Accordion title="CLI">
+- Added `[pull_request]` config section in `cli.toml` so auto-PR works with `.dot` files without needing a `run.toml`
+- Workflow run output now shows local time instead of UTC
+- Shortened token and tool count labels in CLI progress output for brevity
+</Accordion>
+
+<Accordion title="Improvements">
+- Subagent status lines now indent deeper than tool calls in CLI progress for clearer hierarchy
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed pipe deadlock in local sandbox when child process output exceeds 64KB
+- Fixed shell-quoting of script-assembled arguments to prevent word-splitting issues
+</Accordion>

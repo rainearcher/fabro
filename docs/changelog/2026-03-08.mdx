@@ -44,6 +44,7 @@ To migrate, update any scripts or aliases:
 </Accordion>
 
 <Accordion title="CLI">
+- Added `--goal-file` flag to `arc run` for reading goal from a file instead of inline text
 - MCP servers can now be configured in TOML via `cli.toml` instead of JSON
 - `verbose = true` in `cli.toml` defaults to verbose output without needing `-v`
 - `goal` is now optional in run config TOML — precedence is CLI `--goal` > TOML `goal` > DOT graph attribute
@@ -52,6 +53,9 @@ To migrate, update any scripts or aliases:
 </Accordion>
 
 <Accordion title="Workflows">
+- Script nodes now execute inside the configured sandbox instead of on the host — fixes issues where agents edited files in the sandbox but lint/test commands ran on the host
+- Asset collection is now opt-in via `[assets]` config with custom include globs, eliminating ~30s file scans per stage when not needed
+- Workflow runs now fail immediately on git checkpoint commit failure instead of silently continuing
 - GitHub webhook listener via Tailscale funnel — auto-configures webhook URL on startup
 - `[sandbox.env]` support passes environment variables through to sandbox tool execution
 - `project_memory` attribute on prompt nodes for persistent context across stages
@@ -64,6 +68,9 @@ To migrate, update any scripts or aliases:
 </Accordion>
 
 <Accordion title="Improvements">
+- Daytona sandboxes now named `arc-{run_id}` for easy correlation with workflow runs
+- Logs directory naming changed from `arc-run-YYYYMMDD-HHMMSS` to `YYYYMMDD-{run_id}`
+- Truncated stage failure error display to show only the last line in `arc run` output
 - `apply_patch` error responses now include file contents for better debugging of failed edits
 - v4a patch parser/applier rewritten to match canonical OpenAI codex spec
 - Accept bare `@@` hunk headers in v4a `apply_patch` parser
@@ -71,6 +78,8 @@ To migrate, update any scripts or aliases:
 </Accordion>
 
 <Accordion title="Fixes">
+- Fixed SSE streaming format mismatch in `/completions` endpoint
+- Exempt `/tmp/` paths from sandbox read-before-write guard
 - Fixed sandbox file-write validation incorrectly blocking valid operations
 - Fixed stall watchdog killing agent during long LLM reasoning turns
 - Added 5-minute stream read timeout with 5-second retry backoff for sandbox connections
