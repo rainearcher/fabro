@@ -4,6 +4,7 @@ pub mod cp;
 pub mod parse;
 pub mod pr;
 pub mod progress;
+pub mod project_config;
 pub mod run;
 pub mod run_config;
 pub mod runs;
