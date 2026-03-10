@@ -81,6 +81,7 @@ enum Command {
     /// Interactive setup wizard for Arc
     Setup,
     /// List workflow runs
+    #[command(hide = true)]
     Ps(arc_workflows::cli::runs::RunsListArgs),
     /// Pull request operations
     Pr {
