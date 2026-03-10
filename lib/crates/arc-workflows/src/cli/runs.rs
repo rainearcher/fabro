@@ -11,12 +11,20 @@ use tracing::{debug, info, warn};
 use crate::outcome::StageStatus;
 
 /// Status of a run directory — either concluded with a `StageStatus`, actively running, or unknown.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunStatus {
     Concluded(StageStatus),
     Running,
     Unknown,
+}
+
+impl Serialize for RunStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
 }
 
 impl RunStatus {
@@ -147,9 +155,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 .ok()
                 .and_then(|m| m.modified().ok())
                 .map(|t| -> DateTime<Utc> { t.into() });
-            let mtime = mtime_dt
-                .map(|dt| dt.to_rfc3339())
-                .unwrap_or_default();
+            let mtime = mtime_dt.map(|dt| dt.to_rfc3339()).unwrap_or_default();
 
             runs.push(RunInfo {
                 run_id: dir_name.clone(),
@@ -173,7 +179,10 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
 
 fn read_status(run_dir: &Path) -> (RunStatus, Option<DateTime<Utc>>) {
     if let Ok(conclusion) = crate::conclusion::Conclusion::load(&run_dir.join("conclusion.json")) {
-        return (RunStatus::Concluded(conclusion.status), Some(conclusion.timestamp));
+        return (
+            RunStatus::Concluded(conclusion.status),
+            Some(conclusion.timestamp),
+        );
     }
     if run_dir.join("run.pid").exists() {
         return (RunStatus::Running, None);
@@ -503,7 +512,11 @@ pub fn df_from(args: &DfArgs, data_dir: &Path, logs_base: &Path) -> Result<()> {
             } else {
                 "-".to_string()
             };
-            let reclaimable_marker = if !detail.status.is_running() { " *" } else { "" };
+            let reclaimable_marker = if !detail.status.is_running() {
+                " *"
+            } else {
+                ""
+            };
             println!(
                 "{:<30} {:<18} {:<10} {:>5} {:>10}{}",
                 run_id_display,
@@ -533,12 +546,12 @@ fn parse_duration(s: &str) -> Result<chrono::Duration> {
         bail!("empty duration string");
     }
     let (num_str, unit) = s.split_at(s.len() - 1);
-    let num: i64 = num_str
+    let num: u64 = num_str
         .parse()
         .with_context(|| format!("invalid duration: {s}"))?;
     match unit {
-        "h" => Ok(chrono::Duration::hours(num)),
-        "d" => Ok(chrono::Duration::days(num)),
+        "h" => Ok(chrono::Duration::hours(num as i64)),
+        "d" => Ok(chrono::Duration::days(num as i64)),
         _ => bail!("invalid duration unit '{unit}' in '{s}' (expected 'h' or 'd')"),
     }
 }
@@ -555,10 +568,8 @@ pub fn prune_from(args: &RunsPruneArgs, base: &Path) -> Result<()> {
     );
 
     // Determine if the user passed any explicit filters
-    let has_explicit_filters = args.filter.before.is_some()
-        || args.filter.workflow.is_some()
-        || !args.filter.label.is_empty()
-        || args.filter.orphans;
+    let has_explicit_filters =
+        args.filter.before.is_some() || args.filter.workflow.is_some() || !label_filters.is_empty();
 
     // Apply staleness filter: default 24h when no explicit filters, or use --older-than
     let staleness_threshold = if let Some(dur) = args.older_than {
@@ -683,7 +694,10 @@ mod tests {
 
         let completed = runs.iter().find(|r| r.run_id == "abc123").unwrap();
         assert_eq!(completed.workflow_name, "my-pipeline");
-        assert_eq!(completed.status, RunStatus::Concluded(crate::outcome::StageStatus::Success));
+        assert_eq!(
+            completed.status,
+            RunStatus::Concluded(crate::outcome::StageStatus::Success)
+        );
         assert_eq!(completed.labels.get("env").unwrap(), "prod");
         assert!(!completed.is_orphan);
 
@@ -966,7 +980,7 @@ mod tests {
                 label: Vec::new(),
                 orphans: true,
             },
-            older_than: None,
+            older_than: Some(chrono::Duration::zero()),
             yes: true,
         };
 
@@ -1352,7 +1366,10 @@ mod tests {
         };
 
         prune_from(&args, base).unwrap();
-        assert!(!dir.exists(), "stale run (48h old) should be pruned by default");
+        assert!(
+            !dir.exists(),
+            "stale run (48h old) should be pruned by default"
+        );
     }
 
     #[test]
@@ -1420,6 +1437,27 @@ mod tests {
         assert!(parse_duration("abc").is_err());
     }
 
+    #[test]
+    fn parse_duration_rejects_negative() {
+        assert!(parse_duration("-1d").is_err());
+        assert!(parse_duration("-24h").is_err());
+    }
+
+    #[test]
+    fn run_status_serializes_as_flat_string() {
+        let concluded = RunStatus::Concluded(crate::outcome::StageStatus::Success);
+        assert_eq!(serde_json::to_string(&concluded).unwrap(), "\"success\"");
+
+        let running = RunStatus::Running;
+        assert_eq!(serde_json::to_string(&running).unwrap(), "\"running\"");
+
+        let unknown = RunStatus::Unknown;
+        assert_eq!(serde_json::to_string(&unknown).unwrap(), "\"unknown\"");
+
+        let fail = RunStatus::Concluded(crate::outcome::StageStatus::Fail);
+        assert_eq!(serde_json::to_string(&fail).unwrap(), "\"fail\"");
+    }
+
     // === Step 3: disk space reporting tests ===
 
     #[test]
@@ -1430,7 +1468,10 @@ mod tests {
         assert_eq!(format_size(1536), "1.5 KB");
         assert_eq!(format_size(1024 * 1024), "1.0 MB");
         assert_eq!(format_size(1024 * 1024 * 1024), "1.0 GB");
-        assert_eq!(format_size(1024 * 1024 * 1024 + 512 * 1024 * 1024), "1.5 GB");
+        assert_eq!(
+            format_size(1024 * 1024 * 1024 + 512 * 1024 * 1024),
+            "1.5 GB"
+        );
     }
 
     // === Step 4: custom threshold test ===
@@ -1516,8 +1557,17 @@ mod tests {
         };
 
         prune_from(&args, base).unwrap();
-        assert!(dir_old.exists(), "3-day-old run should survive 7d threshold");
-        assert!(dir_recent.exists(), "1-day-old run should survive 7d threshold");
-        assert!(!dir_very_old.exists(), "10-day-old run should be pruned with 7d threshold");
+        assert!(
+            dir_old.exists(),
+            "3-day-old run should survive 7d threshold"
+        );
+        assert!(
+            dir_recent.exists(),
+            "1-day-old run should survive 7d threshold"
+        );
+        assert!(
+            !dir_very_old.exists(),
+            "10-day-old run should be pruned with 7d threshold"
+        );
     }
 }
