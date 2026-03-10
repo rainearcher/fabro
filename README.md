@@ -182,22 +182,9 @@ Selectors follow CSS specificity: `*` (0) < `shape` (1) < `.class` (2) < `#id` (
 
 ## Supported Models
 
-| Model                        | Provider   | Aliases             |
-| ---------------------------- | ---------- | ------------------- |
-| `claude-opus-4-6`            | Anthropic  | `opus`              |
-| `claude-sonnet-4-5`          | Anthropic  | `sonnet`            |
-| `claude-haiku-4-5`           | Anthropic  | `haiku`             |
-| `gpt-5.2`                    | OpenAI     | `gpt5`              |
-| `gpt-5.3-codex`              | OpenAI     | `codex`             |
-| `gpt-5.4`                    | OpenAI     | `gpt54`             |
-| `gemini-3.1-pro-preview`     | Gemini     | `gemini-pro`        |
-| `gemini-3-flash-preview`     | Gemini     | `gemini-flash`      |
-| `kimi-k2.5`                  | Kimi       | `kimi`              |
-| `glm-4.7`                    | Zai        | `glm`               |
-| `minimax-m2.5`               | MiniMax    | `minimax`           |
-| `mercury-2`                  | Inception  | `mercury`           |
+Arc supports models from Anthropic, OpenAI, Gemini, Kimi, Zai, MiniMax, and Inception. Route tasks to the right model per node and configure provider fallback chains per-run.
 
-Run `arc model list` for the full catalog. Provider fallback chains are configurable per-run.
+Run `arc model list` locally or see the [Models documentation](https://arc.dev/core-concepts/models) for the full catalog.
 
 ---
 
