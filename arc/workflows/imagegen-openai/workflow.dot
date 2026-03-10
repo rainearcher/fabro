@@ -1,5 +1,4 @@
 digraph ImageGenOpenAI {
-    graph [goal="A cute robot painting a landscape"]
     rankdir=LR
 
     start [shape=Mdiamond, label="Start"]
