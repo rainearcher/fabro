@@ -108,10 +108,19 @@ Retro: smooth — Successfully implemented the feature
   Retro saved to ~/arc-logs/01JKXYZ.../retro.json
 ```
 
-To skip retro generation, pass `--no-retro`:
+To skip retro generation for a single run, pass `--no-retro`:
 
 ```bash
 arc run workflow.dot --no-retro
+```
+
+To disable retros project-wide, set `retro = false` in your `arc.toml`:
+
+```toml title="arc.toml"
+version = 1
+
+[arc]
+retro = false
 ```
 
 ### API

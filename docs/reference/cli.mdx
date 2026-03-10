@@ -235,17 +235,67 @@ If no LLM provider API keys are configured, the server automatically falls back 
 
 ---
 
+## `arc cp`
+
+Copy files between a run's sandbox and the local filesystem. The run must have a persisted sandbox record (Daytona, exe.dev, or a preserved local/Docker sandbox).
+
+```bash
+arc cp <run-id>:/path/in/sandbox ./local-dir     # download
+arc cp ./local-file <run-id>:/path/in/sandbox     # upload
+arc cp -r <run-id>:/output ./results              # recursive download
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<SRC>` | Source: `<run-id>:<path>` for sandbox, or a local path |
+| `<DST>` | Destination: `<run-id>:<path>` for sandbox, or a local path |
+| `-r, --recursive` | Recurse into directories |
+
+Run IDs support prefix matching — you can use the first few characters instead of the full ID.
+
+## `arc pr create`
+
+Create a GitHub pull request from a completed workflow run. Uses the run's persisted manifest, conclusion, and diff. Requires a [GitHub App](/integrations/github) to be configured.
+
+```bash
+arc pr create <run-id>
+arc pr create <run-id> --model claude-opus-4-6
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<RUN_ID>` | Run ID or prefix (required) |
+| `--model <MODEL>` | LLM model for generating the PR description |
+
+The run must have completed successfully (or with partial success) and have a `final.patch` with changes.
+
+---
+
+## `arc system df`
+
+Show disk usage of Arc's data directory, including run logs, worktrees, server logs, and databases.
+
+```bash
+arc system df
+arc system df -v
+```
+
+| Flag | Description |
+|---|---|
+| `-v, --verbose` | Show per-run breakdown |
+
 ## `arc validate`
 
-Validate a workflow file without executing it. Reports errors and warnings.
+Validate a workflow file without executing it. Reports errors and warnings. Accepts both `.dot` workflow files and `.toml` run configs.
 
 ```bash
 arc validate workflow.dot
+arc validate run.toml
 ```
 
 | Argument | Description |
 |---|---|
-| `<WORKFLOW>` | Path to the `.dot` workflow file (required) |
+| `<WORKFLOW>` | Path to a `.dot` workflow file or `.toml` run config (required) |
 
 ## `arc parse`
 

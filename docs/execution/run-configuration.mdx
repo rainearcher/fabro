@@ -186,6 +186,19 @@ dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update"
 | `snapshot.dockerfile` | Dockerfile content (inline string) or path (`{ path = "..." }`) for building the snapshot image. Paths are resolved relative to the TOML file's directory. |
 | `network` | Network access mode: `"allow_all"` (default), `"block"`, or `{ allow_list = ["..."] }`. See [Sandboxing](/administration/sandboxing#network-access-control). |
 
+#### `[sandbox.local]`
+
+Additional settings when using the local sandbox:
+
+```toml title="run.toml"
+[sandbox.local]
+worktree_mode = "always"
+```
+
+| Field | Description |
+|---|---|
+| `worktree_mode` | When to create a git worktree for the run: `always`, `clean` (default — only when the working tree is clean), `dirty` (also when dirty), or `never`. |
+
 #### `[sandbox.exe]`
 
 Additional settings when using the [exe.dev](/integrations/exe-dev) cloud sandbox:
@@ -285,7 +298,7 @@ draft = true
 | Field | Description |
 |---|---|
 | `enabled` | When `true`, Arc creates a PR from the agent's working branch after a successful run. Default: `false`. |
-| `draft` | When `true`, the PR is created as a draft pull request. Default: `false`. |
+| `draft` | When `true`, the PR is created as a draft pull request. Default: `true`. |
 
 ### `[[hooks]]`
 
