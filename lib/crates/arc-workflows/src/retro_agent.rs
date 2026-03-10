@@ -164,13 +164,13 @@ pub async fn run_retro_agent(
 
     let mut session = Session::new(llm_client.clone(), profile, Arc::clone(sandbox), config);
 
-    session.initialize().await;
-
-    // Set up event writer before processing
+    // Set up event writer before initialize (which emits SessionStarted)
     let retro_dir = logs_root.join("retro");
     std::fs::create_dir_all(&retro_dir)?;
     let rx = session.subscribe();
     let event_writer_handle = spawn_retro_event_writer(rx, retro_dir.join("retro_session.jsonl"));
+
+    session.initialize().await;
 
     let prompt = format!(
         "Analyze the workflow run data at `{retro_data_dir}/` and generate a retrospective. \
@@ -229,7 +229,8 @@ pub async fn run_retro_agent(
         failure_reason.as_deref(),
     );
 
-    // Wait for event writer to finish
+    // Drop session to close the broadcast channel, then wait for event writer
+    drop(session);
     let _ = event_writer_handle.await;
 
     narrative_result
