@@ -32,7 +32,7 @@ RUN printf '%s\n' \
   'echo "Generating image for: ${PROMPT}" >&2' \
   'echo "Model: ${MODEL}" >&2' \
   '' \
-  'RESPONSE=$(curl -s --fail-with-body -X POST "$API_URL" \' \
+  'RESPONSE=$(curl -s -X POST "$API_URL" \' \
   '  -H "Content-Type: application/json" \' \
   '  -d "$(jq -n --arg prompt "$PROMPT" '"'"'{' \
   '    contents: [{ parts: [{ text: $prompt }] }],' \
@@ -66,6 +66,4 @@ RUN printf '%s\n' \
   'echo "Saved to ${OUTPUT}" >&2' \
   > /usr/local/bin/imagegen && chmod +x /usr/local/bin/imagegen
 
-RUN useradd -m -s /bin/bash daytona
-USER daytona
-WORKDIR /home/daytona
+WORKDIR /root
