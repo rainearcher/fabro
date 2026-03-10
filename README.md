@@ -9,6 +9,10 @@ AI coding agents are powerful but unpredictable. You either babysit every step o
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE.md)
 [![docs](https://img.shields.io/badge/docs-arc.dev-357F9E)](https://arc.dev)
 
+```bash
+curl -fsSL https://fabro.sh/install.sh | bash
+```
+
 <img src="docs/images/runs-board.png" alt="Arc Runs board showing workflows across Working, Pending, Verify, and Merge stages" />
 
 ---
