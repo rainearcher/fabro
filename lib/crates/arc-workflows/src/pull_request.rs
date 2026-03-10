@@ -130,7 +130,8 @@ fn format_arc_details_section(retro: &Retro, dot_source: Option<&str>) -> String
     let total_cost_str = format_cost(retro.stats.total_cost);
     let stage_count = retro.stages.len();
     parts.push(format!(
-        "<details>\n<summary>Ran {stage_count} stages in {total_duration} for {total_cost_str}</summary>"
+        "<details>\n<summary>Ran {stage_count} {} in {total_duration} for {total_cost_str}</summary>",
+        if stage_count == 1 { "stage" } else { "stages" }
     ));
     parts.push(String::new());
 
@@ -161,7 +162,9 @@ fn format_arc_details_section(retro: &Retro, dot_source: Option<&str>) -> String
         let (graph_name, node_count, edge_count) = parse_dot_summary(dot);
 
         parts.push(format!(
-            "<details>\n<summary>Ran <code>{graph_name}</code> ({node_count} nodes and {edge_count} edges)</summary>"
+            "<details>\n<summary>Ran <code>{graph_name}</code> ({node_count} {} and {edge_count} {})</summary>",
+            if node_count == 1 { "node" } else { "nodes" },
+            if edge_count == 1 { "edge" } else { "edges" }
         ));
         parts.push(String::new());
         parts.push("```dot".to_string());
@@ -235,9 +238,9 @@ fn assemble_pr_body(
         parts.push("<details>".to_string());
         parts.push("<summary>Full plan</summary>".to_string());
         parts.push(String::new());
-        parts.push("```md".to_string());
+        parts.push("````md".to_string());
         parts.push(plan.to_string());
-        parts.push("```".to_string());
+        parts.push("````".to_string());
         parts.push(String::new());
         parts.push("</details>".to_string());
     }
@@ -554,7 +557,7 @@ mod tests {
         let section = format_arc_details_section(&retro, Some(dot));
 
         assert!(section.contains("<code>implement.dot</code>"));
-        assert!(section.contains("2 nodes and 1 edges"));
+        assert!(section.contains("2 nodes and 1 edge"));
         assert!(section.contains("```dot"));
         assert!(section.contains("digraph implement"));
     }
@@ -614,7 +617,7 @@ mod tests {
         assert!(body.contains("This is the narrative."));
         assert!(body.contains("### Plan Summary"));
         assert!(body.contains("<details>\n<summary>Full plan</summary>"));
-        assert!(body.contains("```md\nFull plan text here\n```"));
+        assert!(body.contains("````md\nFull plan text here\n````"));
         assert!(body.contains("### Retro"));
         assert!(body.contains("### Arc Details"));
     }
