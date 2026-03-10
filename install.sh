@@ -20,11 +20,11 @@ else
   RESET=''
 fi
 
-info()    { printf "  %s\n" "$1" >&2; }
-step()    { printf "  ${BOLD}%s${RESET}\n" "$1" >&2; }
-dim()     { printf "  ${DIM}%s${RESET}\n" "$1" >&2; }
-success() { printf "  ${GREEN}✔${RESET} %s\n" "$1" >&2; }
-error()   { printf "  ${RED}✗ %s${RESET}\n" "$1" >&2; exit 1; }
+info()    { printf "  %b\n" "$1" >&2; }
+step()    { printf "  ${BOLD}%b${RESET}\n" "$1" >&2; }
+dim()     { printf "  ${DIM}%b${RESET}\n" "$1" >&2; }
+success() { printf "  ${GREEN}✔${RESET} %b\n" "$1" >&2; }
+error()   { printf "  ${RED}✗ %b${RESET}\n" "$1" >&2; exit 1; }
 
 # --- Header ---
 printf "\n  ⚒️  ${BOLD}Fabro Install${RESET}\n\n" >&2
@@ -73,14 +73,9 @@ dim "Extracting..."
 tar xzf "${TMPDIR}/${ASSET}" -C "$TMPDIR"
 
 # --- Install binary ---
-INSTALL_DIR="${ARC_INSTALL_DIR:-/usr/local/bin}"
-
-if [ -w "$INSTALL_DIR" ]; then
-  mv "${TMPDIR}/arc-${TARGET}/arc" "${INSTALL_DIR}/arc"
-else
-  dim "Installing to ${INSTALL_DIR} (requires sudo)..."
-  sudo mv "${TMPDIR}/arc-${TARGET}/arc" "${INSTALL_DIR}/arc"
-fi
+INSTALL_DIR="${ARC_INSTALL_DIR:-$HOME/.arc/bin}"
+mkdir -p "$INSTALL_DIR"
+mv "${TMPDIR}/arc-${TARGET}/arc" "${INSTALL_DIR}/arc"
 
 chmod +x "${INSTALL_DIR}/arc"
 
@@ -90,7 +85,62 @@ if [ -z "$VERSION" ]; then
   error "Installation failed: could not run arc --version"
 fi
 
-success "Installed ${VERSION} to ${BOLD_CYAN}${INSTALL_DIR}/arc${RESET}"
+tildify() {
+  if [ "${1#"$HOME"/}" != "$1" ]; then
+    echo "~/${1#"$HOME"/}"
+  else
+    echo "$1"
+  fi
+}
+
+success "Installed ${VERSION} to ${BOLD_CYAN}$(tildify "${INSTALL_DIR}/arc")${RESET}"
+
+# --- Ensure install dir is on PATH ---
+if command -v arc >/dev/null 2>&1; then
+  dim "arc is already on \$PATH, skipping shell config"
+else
+  tilde_bin_dir=$(tildify "$INSTALL_DIR")
+  echo "" >&2
+
+  case $(basename "${SHELL:-sh}") in
+  zsh)
+    : "${ZDOTDIR:="$HOME"}"
+    shell_config="${ZDOTDIR%/}/.zshrc"
+    {
+      printf '\n# arc\n'
+      echo "export PATH=\"$INSTALL_DIR:\$PATH\""
+    } >>"$shell_config"
+    info "Added ${BOLD_CYAN}${tilde_bin_dir}${RESET} to \$PATH in ${BOLD_CYAN}$(tildify "$shell_config")${RESET}"
+    ;;
+  bash)
+    shell_config="$HOME/.bashrc"
+    if [ -f "$HOME/.bash_profile" ]; then
+      shell_config="$HOME/.bash_profile"
+    fi
+    {
+      printf '\n# arc\n'
+      echo "export PATH=\"$INSTALL_DIR:\$PATH\""
+    } >>"$shell_config"
+    info "Added ${BOLD_CYAN}${tilde_bin_dir}${RESET} to \$PATH in ${BOLD_CYAN}$(tildify "$shell_config")${RESET}"
+    ;;
+  fish)
+    fish_config="$HOME/.config/fish/config.fish"
+    mkdir -p "$(dirname "$fish_config")"
+    {
+      printf '\n# arc\n'
+      echo "fish_add_path $INSTALL_DIR"
+    } >>"$fish_config"
+    info "Added ${BOLD_CYAN}${tilde_bin_dir}${RESET} to \$PATH in ${BOLD_CYAN}$(tildify "$fish_config")${RESET}"
+    ;;
+  *)
+    info "Add ${BOLD_CYAN}${tilde_bin_dir}${RESET} to your PATH:"
+    echo "" >&2
+    info "  ${BOLD}export PATH=\"${INSTALL_DIR}:\$PATH\"${RESET}"
+    ;;
+  esac
+
+  export PATH="${INSTALL_DIR}:$PATH"
+fi
 echo "" >&2
 
 # --- Prompt to run setup wizard ---
