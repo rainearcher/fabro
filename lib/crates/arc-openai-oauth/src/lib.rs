@@ -401,10 +401,23 @@ pub async fn start_callback_server(
                     axum::response::Html(
                         r#"<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>Arc</title></head>
+<head>
+<meta charset="utf-8">
+<title>Arc</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f6f8fa; color: #1f2328; }
+  .card { text-align: center; background: #fff; border: 1px solid #d1d9e0; border-radius: 12px; padding: 48px; max-width: 420px; }
+  .check { font-size: 48px; margin-bottom: 16px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
+  p { font-size: 14px; color: #59636e; margin: 0; }
+</style>
+</head>
 <body>
-<h1>Authorization Successful</h1>
-<p>You can close this tab and return to your terminal.</p>
+<div class="card">
+  <div class="check">&#10003;</div>
+  <h1>Authorization Successful</h1>
+  <p>You can close this tab and return to your terminal.</p>
+</div>
 </body>
 </html>"#
                             .to_string(),
