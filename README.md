@@ -70,10 +70,8 @@ Arc ships with [comprehensive documentation](https://arc.dev) covering every fea
 - [**Getting Started**](https://arc.dev/getting-started/introduction) -- Installation, first workflow, and why Arc exists
 - [**Defining Workflows**](https://arc.dev/workflows/stages-and-nodes) -- Node types, transitions, variables, stylesheets, and human gates
 - [**Executing Workflows**](https://arc.dev/execution/run-configuration) -- Run configuration, sandboxes, checkpoints, retros, and failure handling
-- [**Agents**](https://arc.dev/agents/tools) -- Tools, prompts, skills, MCP integration, subagents, and permissions
 - [**Tutorials**](https://arc.dev/tutorials/hello-world) -- Step-by-step guides from hello world to parallel multi-model ensembles
 - [**API Reference**](https://arc.dev/api-reference/overview) -- Full OpenAPI spec with authentication, SSE events, and client SDKs
-- [**CLI Reference**](https://arc.dev/reference/cli) -- Every command and flag documented
 
 ---
 
@@ -81,50 +79,14 @@ Arc ships with [comprehensive documentation](https://arc.dev) covering every fea
 
 ### Install
 
-Download the latest release for your platform:
-
 ```bash
-# macOS (Apple Silicon)
-curl -fsSL https://github.com/brynary/arc/releases/latest/download/arc-aarch64-apple-darwin.tar.gz | tar xz
-sudo mv arc /usr/local/bin/
+curl -fsSL https://fabro.sh/install.sh | bash
 
-# Linux (x86_64)
-curl -fsSL https://github.com/brynary/arc/releases/latest/download/arc-x86_64-unknown-linux-gnu.tar.gz | tar xz
-sudo mv arc /usr/local/bin/
-```
-
-Or download directly from [GitHub Releases](https://github.com/brynary/arc/releases).
-
-<details>
-<summary>Build from source</summary>
-
-Requires [Rust](https://rustup.rs/) (latest stable):
-
-```bash
-git clone https://github.com/brynary/arc.git
-cd arc
-cargo build --release
-# Binary is at ./target/release/arc
-```
-
-</details>
-
-### Run the setup wizard
-
-```bash
-arc install
-```
-
-### Initialize your project
-
-```bash
+# Initialize your project
 cd my-repo/
 arc init
-```
 
-### Run your first workflow
-
-```bash
+# Run your first workflow
 arc run hello
 ```
 
@@ -135,12 +97,7 @@ arc run hello
 - [Bug reports](https://github.com/brynary/arc/issues) via GitHub Issues
 - [Feature requests](https://github.com/brynary/arc/issues) via GitHub Issues
 - Email [bryan@qlty.sh](mailto:bryan@qlty.sh) for questions
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions and development workflow.
+- See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions and development workflow
 
 ---
 
