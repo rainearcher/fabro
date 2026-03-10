@@ -1,7 +1,24 @@
 ---
-title: "exe.dev git cloning, cancellation, and checkpointing"
+title: "Project config, arc cp, and exe.dev maturation"
 date: "2026-03-09"
 ---
+
+## Project config (arc.toml)
+
+Arc now supports project-level configuration via `arc.toml`. Previously, you had to pass full file paths to `arc run` and configure each run individually. Now, you can define workflow aliases, pull request defaults, and retro settings at the project level. Arc discovers `arc.toml` by walking up from the current directory, similar to how Cargo or Node find their config files.
+
+```toml title="arc.toml"
+[workflows]
+implement = "arc/workflows/implement.toml"
+hello = "arc/workflows/hello.toml"
+
+[retro]
+enabled = false
+```
+
+```bash
+arc run implement  # resolves via arc.toml
+```
 
 ## exe.dev sandbox maturation
 
@@ -24,16 +41,29 @@ arc run --ssh my-workflow.dot
 ## More
 
 <Accordion title="CLI">
-- Added `[pull_request]` config section in `cli.toml` so auto-PR works with `.dot` files without needing a `run.toml`
+- Added `arc cp` command for copying files to/from run sandboxes
+- Added `arc pr create` command to create PRs from completed workflow runs
+- Added `arc system df` command to show disk usage of run logs and worktrees
+- PRs are now created as drafts by default; opt out with `draft = false` in `[pull_request]` config
+- Added `[sandbox.local] worktree_mode` config (`always`/`clean`/`dirty`/`never`) for controlling when git worktrees are created
+- Added `[pull_request]` config section in `cli.toml` so auto-PR works with `.dot` files
+- Added version info (semver, git SHA, build date) to `arc --version`
+- Run summary now shows Run ID, logs path, base commit, branch, and PR URL
 - Workflow run output now shows local time instead of UTC
-- Shortened token and tool count labels in CLI progress output for brevity
 </Accordion>
 
 <Accordion title="Improvements">
+- Fatal errors now display with colored output and suggest related workflows
+- Git push is skipped when the local branch is already in sync with origin
 - Subagent status lines now indent deeper than tool calls in CLI progress for clearer hierarchy
 </Accordion>
 
 <Accordion title="Fixes">
+- Fixed deadlock in retro agent session when event channel fills up
+- Fixed PR body rendering bugs in auto-generated pull requests
+- Fixed 4 safety bugs in `arc system prune` (symlink traversal, race conditions)
+- Fixed `@file` references failing when files aren't tracked by git
+- Fixed `arc validate` not supporting TOML workflow config files
 - Fixed pipe deadlock in local sandbox when child process output exceeds 64KB
-- Fixed shell-quoting of script-assembled arguments to prevent word-splitting issues
+- Fixed shell-quoting in sandbox cleanup commands
 </Accordion>
