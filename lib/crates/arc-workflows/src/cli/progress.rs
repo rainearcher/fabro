@@ -213,8 +213,10 @@ pub struct ProgressUI {
     /// renderer so that Plain (non-TTY) mode reports accurate stats.
     stage_counts: HashMap<String, (u32, u32)>,
     setup_command_count: usize,
+    devcontainer_command_count: usize,
     sandbox_bar: Option<ProgressBar>,
     setup_bar: Option<ProgressBar>,
+    devcontainer_bar: Option<ProgressBar>,
     cli_ensure_bar: Option<ProgressBar>,
     any_stage_started: bool,
     parallel_parent: Option<String>,
@@ -235,8 +237,10 @@ impl ProgressUI {
             active_stages: HashMap::new(),
             stage_counts: HashMap::new(),
             setup_command_count: 0,
+            devcontainer_command_count: 0,
             sandbox_bar: None,
             setup_bar: None,
+            devcontainer_bar: None,
             cli_ensure_bar: None,
             any_stage_started: false,
             parallel_parent: None,
@@ -465,6 +469,120 @@ impl ProgressUI {
             }
             WorkflowRunEvent::CliEnsureFailed { cli_name, .. } => {
                 self.on_cli_ensure_failed(cli_name);
+            }
+            WorkflowRunEvent::DevcontainerResolved {
+                dockerfile_lines,
+                environment_count,
+                lifecycle_command_count,
+                workspace_folder,
+            } => {
+                let detail = format!(
+                    "{dockerfile_lines} Dockerfile lines, {environment_count} env vars, \
+                     {lifecycle_command_count} lifecycle cmds, {workspace_folder}"
+                );
+                match &self.renderer {
+                    ProgressRenderer::Tty(tty) => {
+                        let bar = tty.multi.add(ProgressBar::new_spinner());
+                        bar.set_style(style_header_done());
+                        bar.finish_with_message("Devcontainer: resolved".to_string());
+                        let detail_bar = tty.multi.insert_after(&bar, ProgressBar::new_spinner());
+                        detail_bar.set_style(style_sandbox_detail());
+                        detail_bar.finish_with_message(detail);
+                    }
+                    ProgressRenderer::Plain => {
+                        eprintln!("    Devcontainer: resolved");
+                        eprintln!("             {detail}");
+                    }
+                }
+            }
+            WorkflowRunEvent::DevcontainerLifecycleStarted {
+                phase,
+                command_count,
+            } => {
+                self.devcontainer_command_count = *command_count;
+                match &self.renderer {
+                    ProgressRenderer::Tty(tty) => {
+                        let bar = tty.multi.add(ProgressBar::new_spinner());
+                        bar.set_style(style_header_running());
+                        bar.set_message(format!(
+                            "Running devcontainer {phase} ({command_count} commands)..."
+                        ));
+                        bar.enable_steady_tick(Duration::from_millis(100));
+                        self.devcontainer_bar = Some(bar);
+                    }
+                    ProgressRenderer::Plain => {
+                        eprintln!("    Running devcontainer {phase} ({command_count} commands)...");
+                    }
+                }
+            }
+            WorkflowRunEvent::DevcontainerLifecycleCompleted {
+                phase, duration_ms, ..
+            } => {
+                let dur = format_duration_ms(*duration_ms);
+                match &self.renderer {
+                    ProgressRenderer::Tty(_) => {
+                        if let Some(bar) = self.devcontainer_bar.take() {
+                            bar.set_style(style_header_done());
+                            bar.set_prefix(dur);
+                            bar.finish_with_message(format!("Devcontainer: {phase}"));
+                        }
+                    }
+                    ProgressRenderer::Plain => {
+                        eprintln!("    Devcontainer: {phase} ({dur})");
+                    }
+                }
+            }
+            WorkflowRunEvent::DevcontainerLifecycleFailed {
+                phase,
+                command,
+                exit_code,
+                stderr,
+                ..
+            } => {
+                if let Some(bar) = self.devcontainer_bar.take() {
+                    bar.abandon();
+                }
+                let red = console::Style::new().red();
+                let summary = if stderr.len() > 120 {
+                    &stderr[..120]
+                } else {
+                    stderr.as_str()
+                };
+                self.insert_info_line(&format!(
+                    "{} Devcontainer {phase} command failed (exit {exit_code}): {command}\n         {summary}",
+                    red.apply_to("Error:")
+                ));
+            }
+            WorkflowRunEvent::DevcontainerLifecycleCommandCompleted {
+                command,
+                index,
+                exit_code,
+                duration_ms,
+                ..
+            } if self.verbose => {
+                let total = self.devcontainer_command_count;
+                let dur = format_duration_ms(*duration_ms);
+                let glyph = if *exit_code == 0 {
+                    green_check()
+                } else {
+                    red_cross()
+                };
+                let msg = format!("{glyph} [{}/{total}] {}", index + 1, truncate(command, 60),);
+                match &self.renderer {
+                    ProgressRenderer::Tty(tty) => {
+                        let bar = if let Some(ref dc_bar) = self.devcontainer_bar {
+                            tty.multi.insert_before(dc_bar, ProgressBar::new_spinner())
+                        } else {
+                            tty.multi.add(ProgressBar::new_spinner())
+                        };
+                        bar.set_style(style_tool_done());
+                        bar.set_prefix(dur);
+                        bar.finish_with_message(msg);
+                    }
+                    ProgressRenderer::Plain => {
+                        eprintln!("      {msg}  {dur}");
+                    }
+                }
             }
             _ => {}
         }

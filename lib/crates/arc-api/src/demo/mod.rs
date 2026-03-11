@@ -1315,6 +1315,7 @@ mod runs {
             sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                 provider: Some("daytona".into()),
                 preserve: None,
+                devcontainer: None,
                 local: None,
                 daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                     auto_stop_interval: Some(60),
@@ -1472,6 +1473,7 @@ mod workflows {
                     sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                         provider: Some("daytona".into()),
                         preserve: None,
+                        devcontainer: None,
                         local: None,
                         daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                             auto_stop_interval: Some(60),
@@ -1541,6 +1543,7 @@ mod workflows {
                     sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                         provider: Some("daytona".into()),
                         preserve: None,
+                        devcontainer: None,
                         local: None,
                         daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                             auto_stop_interval: Some(120),
@@ -1622,6 +1625,7 @@ mod workflows {
                     sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                         provider: Some("daytona".into()),
                         preserve: None,
+                        devcontainer: None,
                         local: None,
                         daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                             auto_stop_interval: Some(120),
@@ -1694,6 +1698,7 @@ mod workflows {
                     sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                         provider: Some("daytona".into()),
                         preserve: None,
+                        devcontainer: None,
                         local: None,
                         daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                             auto_stop_interval: Some(180),
@@ -2676,7 +2681,7 @@ mod signoffs {
                 name: def.repo.into(),
             },
             commit_sha: def.commit_sha.into(),
-            status: def.status.clone(),
+            status: def.status,
             url: def.url.map(Into::into),
             description: def.description.map(Into::into),
             source: def.source.map(Into::into),
@@ -3265,6 +3270,7 @@ mod settings {
                 sandbox: Some(arc_workflows::cli::run_config::SandboxConfig {
                     provider: Some("daytona".into()),
                     preserve: None,
+                    devcontainer: None,
                     local: None,
                     daytona: Some(arc_workflows::daytona_sandbox::DaytonaConfig {
                         auto_stop_interval: Some(60),

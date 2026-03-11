@@ -227,6 +227,39 @@ pub enum WorkflowRunEvent {
     PullRequestFailed {
         error: String,
     },
+    DevcontainerResolved {
+        dockerfile_lines: usize,
+        environment_count: usize,
+        lifecycle_command_count: usize,
+        workspace_folder: String,
+    },
+    DevcontainerLifecycleStarted {
+        phase: String,
+        command_count: usize,
+    },
+    DevcontainerLifecycleCommandStarted {
+        phase: String,
+        command: String,
+        index: usize,
+    },
+    DevcontainerLifecycleCommandCompleted {
+        phase: String,
+        command: String,
+        index: usize,
+        exit_code: i32,
+        duration_ms: u64,
+    },
+    DevcontainerLifecycleCompleted {
+        phase: String,
+        duration_ms: u64,
+    },
+    DevcontainerLifecycleFailed {
+        phase: String,
+        command: String,
+        index: usize,
+        exit_code: i32,
+        stderr: String,
+    },
 }
 
 impl WorkflowRunEvent {
@@ -548,6 +581,67 @@ impl WorkflowRunEvent {
             Self::PullRequestFailed { error, .. } => {
                 error!(error = %error, "Pull request creation failed");
             }
+            Self::DevcontainerResolved {
+                dockerfile_lines,
+                environment_count,
+                lifecycle_command_count,
+                workspace_folder,
+            } => {
+                info!(
+                    dockerfile_lines,
+                    environment_count,
+                    lifecycle_command_count,
+                    workspace_folder,
+                    "Devcontainer resolved"
+                );
+            }
+            Self::DevcontainerLifecycleStarted {
+                phase,
+                command_count,
+            } => {
+                info!(phase, command_count, "Devcontainer lifecycle started");
+            }
+            Self::DevcontainerLifecycleCommandStarted {
+                phase,
+                command,
+                index,
+            } => {
+                debug!(
+                    phase,
+                    command, index, "Devcontainer lifecycle command started"
+                );
+            }
+            Self::DevcontainerLifecycleCommandCompleted {
+                phase,
+                command,
+                index,
+                exit_code,
+                duration_ms,
+            } => {
+                debug!(
+                    phase,
+                    command,
+                    index,
+                    exit_code,
+                    duration_ms,
+                    "Devcontainer lifecycle command completed"
+                );
+            }
+            Self::DevcontainerLifecycleCompleted { phase, duration_ms } => {
+                info!(phase, duration_ms, "Devcontainer lifecycle completed");
+            }
+            Self::DevcontainerLifecycleFailed {
+                phase,
+                command,
+                index,
+                exit_code,
+                ..
+            } => {
+                error!(
+                    phase,
+                    command, index, exit_code, "Devcontainer lifecycle command failed"
+                );
+            }
         }
     }
 }
@@ -802,6 +896,10 @@ fn rename_fields(event_name: &str, fields: &mut serde_json::Map<String, serde_js
         || event_name == "GitCheckpointFailed"
     {
         default_node_label(fields);
+    } else if event_name.starts_with("DevcontainerLifecycleCommand")
+        || event_name == "DevcontainerLifecycleFailed"
+    {
+        rename(fields, "index", "command_index");
     }
 }
 
@@ -1839,5 +1937,96 @@ mod tests {
         assert!(
             matches!(deserialized, WorkflowRunEvent::PullRequestFailed { error } if error == "auth failed")
         );
+    }
+
+    #[test]
+    fn devcontainer_resolved_serializes() {
+        let event = WorkflowRunEvent::DevcontainerResolved {
+            dockerfile_lines: 15,
+            environment_count: 3,
+            lifecycle_command_count: 5,
+            workspace_folder: "/workspaces/myrepo".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("DevcontainerResolved"));
+        assert!(json.contains("\"dockerfile_lines\":15"));
+        assert!(json.contains("\"workspace_folder\":\"/workspaces/myrepo\""));
+
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            deserialized,
+            WorkflowRunEvent::DevcontainerResolved {
+                dockerfile_lines: 15,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn devcontainer_lifecycle_events_serialization() {
+        let events = vec![
+            WorkflowRunEvent::DevcontainerLifecycleStarted {
+                phase: "on_create".into(),
+                command_count: 2,
+            },
+            WorkflowRunEvent::DevcontainerLifecycleCommandStarted {
+                phase: "on_create".into(),
+                command: "npm install".into(),
+                index: 0,
+            },
+            WorkflowRunEvent::DevcontainerLifecycleCommandCompleted {
+                phase: "on_create".into(),
+                command: "npm install".into(),
+                index: 0,
+                exit_code: 0,
+                duration_ms: 5000,
+            },
+            WorkflowRunEvent::DevcontainerLifecycleCompleted {
+                phase: "on_create".into(),
+                duration_ms: 8000,
+            },
+            WorkflowRunEvent::DevcontainerLifecycleFailed {
+                phase: "post_create".into(),
+                command: "npm test".into(),
+                index: 1,
+                exit_code: 1,
+                stderr: "test failed".into(),
+            },
+        ];
+
+        for event in &events {
+            let json = serde_json::to_string(event).unwrap();
+            let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+            let json2 = serde_json::to_string(&deserialized).unwrap();
+            assert_eq!(json, json2);
+        }
+    }
+
+    #[test]
+    fn flatten_devcontainer_lifecycle_command_renames_index() {
+        let event = WorkflowRunEvent::DevcontainerLifecycleCommandStarted {
+            phase: "on_create".into(),
+            command: "npm install".into(),
+            index: 2,
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "DevcontainerLifecycleCommandStarted");
+        assert_eq!(fields["command_index"], 2);
+        assert!(!fields.contains_key("index"));
+    }
+
+    #[test]
+    fn flatten_devcontainer_lifecycle_failed_renames_index() {
+        let event = WorkflowRunEvent::DevcontainerLifecycleFailed {
+            phase: "post_create".into(),
+            command: "npm test".into(),
+            index: 1,
+            exit_code: 1,
+            stderr: "fail".into(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "DevcontainerLifecycleFailed");
+        assert_eq!(fields["command_index"], 1);
+        assert!(!fields.contains_key("index"));
     }
 }

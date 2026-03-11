@@ -456,6 +456,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "arc-agent",
+ "arc-devcontainer",
  "arc-exe",
  "arc-git-storage",
  "arc-github",
@@ -475,6 +476,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "git2",
+ "hex",
  "indicatif",
  "mockito",
  "nom",
@@ -485,6 +487,7 @@ dependencies = [
  "scopeguard",
  "serde",
  "serde_json",
+ "sha2",
  "shlex",
  "strsim",
  "tempfile",

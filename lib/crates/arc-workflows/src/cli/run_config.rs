@@ -112,6 +112,8 @@ pub struct LocalSandboxConfig {
 pub struct SandboxConfig {
     pub provider: Option<String>,
     pub preserve: Option<bool>,
+    #[serde(default)]
+    pub devcontainer: Option<bool>,
     pub local: Option<LocalSandboxConfig>,
     pub daytona: Option<DaytonaConfig>,
     #[cfg(feature = "exedev")]
@@ -178,6 +180,9 @@ impl WorkflowRunConfig {
                 }
                 if task.preserve.is_none() {
                     task.preserve = default.preserve;
+                }
+                if task.devcontainer.is_none() {
+                    task.devcontainer = default.devcontainer;
                 }
                 if task.local.is_none() {
                     task.local = default.local.clone();
@@ -509,6 +514,37 @@ language = "python"
     fn expand_escaped_dollar_before_non_ident() {
         let vars = HashMap::new();
         assert_eq!(expand_vars("price is $$5", &vars).unwrap(), "price is $5");
+    }
+
+    #[test]
+    fn parse_toml_with_devcontainer_enabled() {
+        let toml = r#"
+version = 1
+goal = "Run tests"
+graph = "workflow.dot"
+
+[sandbox]
+provider = "daytona"
+devcontainer = true
+"#;
+        let config = parse_run_config(toml).unwrap();
+        let sandbox = config.sandbox.unwrap();
+        assert_eq!(sandbox.devcontainer, Some(true));
+    }
+
+    #[test]
+    fn parse_toml_without_devcontainer() {
+        let toml = r#"
+version = 1
+goal = "Run tests"
+graph = "workflow.dot"
+
+[sandbox]
+provider = "daytona"
+"#;
+        let config = parse_run_config(toml).unwrap();
+        let sandbox = config.sandbox.unwrap();
+        assert_eq!(sandbox.devcontainer, None);
     }
 
     #[test]
@@ -1066,6 +1102,7 @@ preserve = true
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: Some(false),
+                devcontainer: None,
                 local: None,
                 daytona: None,
                 #[cfg(feature = "exedev")]
@@ -1095,6 +1132,7 @@ provider = "docker"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: Some(true),
+                devcontainer: None,
                 local: None,
                 daytona: None,
                 #[cfg(feature = "exedev")]
@@ -1124,6 +1162,7 @@ provider = "daytona"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: None,
                 daytona: Some(DaytonaConfig {
                     auto_stop_interval: Some(30),
@@ -1162,6 +1201,7 @@ auto_stop_interval = 60
             sandbox: Some(SandboxConfig {
                 provider: Some("daytona".into()),
                 preserve: None,
+                devcontainer: None,
                 local: None,
                 daytona: Some(DaytonaConfig {
                     auto_stop_interval: Some(30),
@@ -1198,6 +1238,7 @@ env = "from_task"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: None,
                 daytona: Some(DaytonaConfig {
                     labels: Some(HashMap::from([
@@ -1237,6 +1278,7 @@ cpu = 2
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: None,
                 daytona: Some(DaytonaConfig {
                     snapshot: Some(DaytonaSnapshotConfig {
@@ -1278,6 +1320,7 @@ auto_stop_interval = 60
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: None,
                 daytona: Some(DaytonaConfig {
                     snapshot: Some(DaytonaSnapshotConfig {
@@ -1508,6 +1551,7 @@ network = "block"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: None,
                 daytona: Some(DaytonaConfig {
                     network: Some(crate::daytona_sandbox::DaytonaNetwork::AllowAll),
@@ -1543,6 +1587,7 @@ auto_stop_interval = 60
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: None,
                 daytona: Some(DaytonaConfig {
                     network: Some(crate::daytona_sandbox::DaytonaNetwork::AllowList(vec![
@@ -1757,6 +1802,7 @@ SHARED = "from_task"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: None,
                 daytona: None,
                 #[cfg(feature = "exedev")]
@@ -1792,6 +1838,7 @@ provider = "daytona"
             sandbox: Some(SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: None,
                 daytona: None,
                 #[cfg(feature = "exedev")]

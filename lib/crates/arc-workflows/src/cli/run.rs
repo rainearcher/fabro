@@ -29,6 +29,7 @@ use super::cli_backend::{AgentCliBackend, BackendRouter};
 use super::progress;
 use super::run_config;
 use super::run_config::{RunDefaults, WorkflowRunConfig};
+use crate::devcontainer_bridge;
 use indicatif::HumanDuration;
 use std::time::Duration;
 
@@ -625,9 +626,77 @@ pub async fn run_command(
     }
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let daytona_config = resolve_daytona_config(run_cfg.as_ref(), &run_defaults);
+    let mut daytona_config = resolve_daytona_config(run_cfg.as_ref(), &run_defaults);
     #[cfg(feature = "exedev")]
     let exe_config = resolve_exe_config(run_cfg.as_ref(), &run_defaults);
+
+    // Resolve devcontainer if enabled
+    let devcontainer_config = if run_cfg
+        .as_ref()
+        .and_then(|c| c.sandbox.as_ref())
+        .and_then(|s| s.devcontainer)
+        .unwrap_or(false)
+    {
+        match devcontainer_bridge::resolve_devcontainer(&cwd).await {
+            Ok(dc) => {
+                let lifecycle_command_count = dc.on_create_commands.len()
+                    + dc.post_create_commands.len()
+                    + dc.post_start_commands.len();
+                emitter.emit(&crate::event::WorkflowRunEvent::DevcontainerResolved {
+                    dockerfile_lines: dc.dockerfile.lines().count(),
+                    environment_count: dc.environment.len(),
+                    lifecycle_command_count,
+                    workspace_folder: dc.workspace_folder.clone(),
+                });
+
+                // Override daytona_config with devcontainer dockerfile
+                let snapshot = devcontainer_bridge::devcontainer_to_snapshot_config(&dc);
+                let mut cfg = daytona_config.unwrap_or_default();
+                cfg.snapshot = Some(snapshot);
+                daytona_config = Some(cfg);
+
+                // Run initialize_commands on host
+                let timeout = std::time::Duration::from_millis(300_000);
+                for cmd in &dc.initialize_commands {
+                    let shell_cmd = match cmd {
+                        arc_devcontainer::Command::Shell(s) => s.clone(),
+                        arc_devcontainer::Command::Args(args) => args.join(" "),
+                        arc_devcontainer::Command::Parallel(_) => continue,
+                    };
+                    let fut = tokio::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(&shell_cmd)
+                        .current_dir(&cwd)
+                        .output();
+                    let output = tokio::time::timeout(timeout, fut)
+                        .await
+                        .with_context(|| {
+                            format!("Devcontainer initializeCommand timed out: {shell_cmd}")
+                        })?
+                        .with_context(|| {
+                            format!("Failed to execute devcontainer initializeCommand: {shell_cmd}")
+                        })?;
+                    if !output.status.success() {
+                        let code = output
+                            .status
+                            .code()
+                            .map_or("unknown".to_string(), |c| c.to_string());
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        bail!(
+                            "Devcontainer initializeCommand failed (exit code {code}): {shell_cmd}\n{stderr}"
+                        );
+                    }
+                }
+
+                Some(dc)
+            }
+            Err(e) => {
+                bail!("Failed to resolve devcontainer: {e}");
+            }
+        }
+    } else {
+        None
+    };
 
     // Wrap emitter in Arc now so we can share it with exec env callbacks
     let emitter = Arc::new(emitter);
@@ -868,6 +937,34 @@ pub async fn run_command(
         });
     }
 
+    // Run devcontainer lifecycle hooks inside the sandbox
+    if let Some(ref dc) = devcontainer_config {
+        devcontainer_bridge::run_devcontainer_lifecycle(
+            sandbox.as_ref(),
+            &emitter,
+            "on_create",
+            &dc.on_create_commands,
+            300_000,
+        )
+        .await?;
+        devcontainer_bridge::run_devcontainer_lifecycle(
+            sandbox.as_ref(),
+            &emitter,
+            "post_create",
+            &dc.post_create_commands,
+            300_000,
+        )
+        .await?;
+        devcontainer_bridge::run_devcontainer_lifecycle(
+            sandbox.as_ref(),
+            &emitter,
+            "post_start",
+            &dc.post_start_commands,
+            300_000,
+        )
+        .await?;
+    }
+
     // 6. Resolve backend, model, and provider
     let (dry_run_mode, llm_client) = if args.dry_run {
         (true, None)
@@ -911,11 +1008,22 @@ pub async fn run_command(
     let fallback_chain = resolve_fallback_chain(provider_enum, &model, run_cfg.as_ref());
 
     // 7. Build engine
-    let sandbox_env: HashMap<String, String> = run_cfg
-        .as_ref()
-        .and_then(|c| c.sandbox.as_ref())
-        .and_then(|s| s.env.clone())
-        .unwrap_or_default();
+    // Devcontainer env is layered underneath TOML env (TOML wins on conflict)
+    let sandbox_env: HashMap<String, String> = {
+        let mut env = if let Some(ref dc) = devcontainer_config {
+            devcontainer_bridge::devcontainer_env(dc)
+        } else {
+            HashMap::new()
+        };
+        if let Some(toml_env) = run_cfg
+            .as_ref()
+            .and_then(|c| c.sandbox.as_ref())
+            .and_then(|s| s.env.clone())
+        {
+            env.extend(toml_env);
+        }
+        env
+    };
     let mcp_servers: Vec<arc_mcp::config::McpServerConfig> = run_cfg
         .as_ref()
         .map(|c| {
@@ -2337,6 +2445,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: Some(false),
+                devcontainer: None,
                 local: None,
                 daytona: None,
                 #[cfg(feature = "exedev")]
@@ -2366,6 +2475,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: Some(true),
+                devcontainer: None,
                 local: None,
                 daytona: None,
                 #[cfg(feature = "exedev")]
@@ -2383,6 +2493,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: Some(false),
+                devcontainer: None,
                 local: None,
                 daytona: None,
                 #[cfg(feature = "exedev")]
@@ -2400,6 +2511,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: Some(true),
+                devcontainer: None,
                 local: None,
                 daytona: None,
                 #[cfg(feature = "exedev")]
@@ -2438,6 +2550,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: Some(run_config::LocalSandboxConfig {
                     worktree_mode: run_config::WorktreeMode::Always,
                 }),
@@ -2466,6 +2579,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: Some(run_config::LocalSandboxConfig {
                     worktree_mode: run_config::WorktreeMode::Dirty,
                 }),
@@ -2494,6 +2608,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: Some(run_config::LocalSandboxConfig {
                     worktree_mode: run_config::WorktreeMode::Never,
                 }),
@@ -2513,6 +2628,7 @@ mod tests {
             sandbox: Some(run_config::SandboxConfig {
                 provider: None,
                 preserve: None,
+                devcontainer: None,
                 local: Some(run_config::LocalSandboxConfig {
                     worktree_mode: run_config::WorktreeMode::Dirty,
                 }),
