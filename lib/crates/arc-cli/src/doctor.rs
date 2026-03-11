@@ -921,6 +921,15 @@ async fn probe_url(http: &reqwest::Client, url: &str) -> Result<(), String> {
 pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
     let styles = Styles::detect_stdout();
 
+    let spinner = indicatif::ProgressBar::new_spinner();
+    spinner.set_style(
+        indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}")
+            .expect("valid template")
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]),
+    );
+    spinner.set_message("Running checks…");
+    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+
     // Gather state
     let cli_config = arc_config::cli::load_cli_config(None).unwrap_or_default();
 
@@ -1127,6 +1136,8 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
         title: "Arc Doctor".into(),
         checks,
     };
+
+    spinner.finish_and_clear();
 
     let term_width = console::Term::stderr().size().1;
     print!(

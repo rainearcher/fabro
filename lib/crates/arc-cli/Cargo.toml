@@ -26,6 +26,7 @@ arc-api = { path = "../arc-api", optional = true }
 arc-util = { path = "../arc-util" }
 clap.workspace = true
 console.workspace = true
+indicatif.workspace = true
 daytona-sdk.workspace = true
 anyhow.workspace = true
 dotenvy.workspace = true
