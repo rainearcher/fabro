@@ -162,7 +162,15 @@ pub(crate) fn build_github_app_credentials(
 
 #[tokio::main]
 async fn main() {
-    if let Err(err) = main_inner().await {
+    let start = std::time::Instant::now();
+    let raw_args: Vec<String> = std::env::args().collect();
+
+    let (command_name, result) = main_inner().await;
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    send_telemetry_event(&raw_args, &command_name, duration_ms, &result);
+
+    if let Err(err) = result {
         let style = console::Style::new().red().bold();
         for (i, cause) in err.chain().enumerate() {
             let text = cause.to_string();
@@ -184,7 +192,49 @@ async fn main() {
     }
 }
 
-async fn main_inner() -> Result<()> {
+fn send_telemetry_event(
+    raw_args: &[String],
+    command_name: &str,
+    duration_ms: u64,
+    result: &Result<()>,
+) {
+    let is_error = result.is_err();
+    let telemetry = match arc_util::telemetry::Telemetry::for_cli() {
+        Ok(t) => t,
+        Err(err) => {
+            debug!(%err, "Telemetry initialization failed");
+            return;
+        }
+    };
+    if !telemetry.should_track(is_error) {
+        return;
+    }
+
+    let event_name = if is_error {
+        "Command Error"
+    } else {
+        "Command Run"
+    };
+    let properties = serde_json::json!({
+        "subcommand": command_name,
+        "command": arc_util::telemetry::sanitize::sanitize_command(raw_args, command_name),
+        "durationMs": duration_ms,
+        "repository": arc_util::telemetry::git::repository_identifier(),
+        "ci": std::env::var("CI").is_ok(),
+        "success": !is_error,
+        "exitCode": if is_error { 1 } else { 0 },
+    });
+
+    let track = telemetry.build_track(event_name, properties);
+    arc_util::telemetry::sender::send(track);
+    debug!(
+        event = event_name,
+        subcommand = command_name,
+        "Telemetry event queued"
+    );
+}
+
+async fn main_inner() -> (String, Result<()>) {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let cli = Cli::parse();
@@ -196,7 +246,10 @@ async fn main_inner() -> Result<()> {
     }
 
     let command_name = match &cli.command {
-        Command::Llm { .. } => "llm",
+        Command::Llm { command } => match command {
+            LlmCommand::Prompt(_) => "llm prompt",
+            LlmCommand::Chat(_) => "llm chat",
+        },
         Command::Exec(_) => "exec",
         Command::Run(_) => "run",
         Command::Validate(_) => "validate",
@@ -205,31 +258,54 @@ async fn main_inner() -> Result<()> {
         Command::Preview(_) => "preview",
         Command::Ssh(_) => "ssh",
         Command::Diff(_) => "diff",
-        Command::Model { .. } => "model",
+        Command::Model { command } => match command {
+            Some(arc_llm::cli::ModelsCommand::List { .. }) => "model list",
+            Some(arc_llm::cli::ModelsCommand::Test { .. }) => "model test",
+            None => "model",
+        },
         #[cfg(feature = "server")]
         Command::Serve(_) => "serve",
         Command::Doctor { .. } => "doctor",
         Command::Init => "init",
         Command::Install => "install",
         Command::Ps(_) => "ps",
-        Command::Pr { .. } => "pr",
-        Command::System { .. } => "system",
+        Command::Pr { command } => match command {
+            PrCommand::Create(_) => "pr create",
+            PrCommand::List(_) => "pr list",
+            PrCommand::View(_) => "pr view",
+            PrCommand::Merge(_) => "pr merge",
+            PrCommand::Close(_) => "pr close",
+        },
+        Command::System { command } => match command {
+            SystemCommand::Prune(_) => "system prune",
+            SystemCommand::Df(_) => "system df",
+        },
         Command::SendAnalytics { .. } => "__send_analytics",
     };
+
+    let command_name = command_name.to_string();
 
     let config_log_level = {
         #[cfg(feature = "server")]
         {
             if let Command::Serve(ref args) = cli.command {
-                let server_config = arc_config::server::load_server_config(args.config.as_deref())?;
-                server_config.log.level
+                match arc_config::server::load_server_config(args.config.as_deref()) {
+                    Ok(server_config) => server_config.log.level,
+                    Err(err) => return (command_name, Err(err)),
+                }
             } else {
-                arc_config::cli::load_cli_config(None)?.log.level
+                match arc_config::cli::load_cli_config(None) {
+                    Ok(cli_config) => cli_config.log.level,
+                    Err(err) => return (command_name, Err(err)),
+                }
             }
         }
         #[cfg(not(feature = "server"))]
         {
-            arc_config::cli::load_cli_config(None)?.log.level
+            match arc_config::cli::load_cli_config(None) {
+                Ok(cli_config) => cli_config.log.level,
+                Err(err) => return (command_name, Err(err)),
+            }
         }
     };
 
@@ -244,257 +320,271 @@ async fn main_inner() -> Result<()> {
 
     debug!(command = %command_name, "CLI command started");
 
-    match cli.command {
-        Command::Llm { command } => {
-            let cli_config = cli_config::load_cli_config(None)?;
-            let llm_defaults = cli_config.run_defaults.llm.as_ref();
-            match command {
-                LlmCommand::Prompt(mut args) => {
-                    if args.model.is_none() {
-                        args.model = llm_defaults.and_then(|l| l.model.clone());
-                    }
-                    #[cfg(feature = "server")]
-                    {
-                        let resolved = cli_config::resolve_mode(
-                            cli.mode,
-                            cli.server_url.as_deref(),
-                            &cli_config,
-                        );
-                        match resolved.mode {
-                            cli_config::ExecutionMode::Server => {
-                                let client =
-                                    cli_config::build_server_client(resolved.tls.as_ref())?;
-                                let server = arc_llm::cli::ServerConnection {
-                                    client,
-                                    base_url: resolved.server_base_url,
-                                };
-                                arc_llm::cli::run_prompt_via_server(args, &server).await?
-                            }
-                            cli_config::ExecutionMode::Standalone => {
-                                arc_llm::cli::run_prompt(args).await?
+    let result = async {
+        match cli.command {
+            Command::Llm { command } => {
+                let cli_config = cli_config::load_cli_config(None)?;
+                let llm_defaults = cli_config.run_defaults.llm.as_ref();
+                match command {
+                    LlmCommand::Prompt(mut args) => {
+                        if args.model.is_none() {
+                            args.model = llm_defaults.and_then(|l| l.model.clone());
+                        }
+                        #[cfg(feature = "server")]
+                        {
+                            let resolved = cli_config::resolve_mode(
+                                cli.mode,
+                                cli.server_url.as_deref(),
+                                &cli_config,
+                            );
+                            match resolved.mode {
+                                cli_config::ExecutionMode::Server => {
+                                    let client =
+                                        cli_config::build_server_client(resolved.tls.as_ref())?;
+                                    let server = arc_llm::cli::ServerConnection {
+                                        client,
+                                        base_url: resolved.server_base_url,
+                                    };
+                                    arc_llm::cli::run_prompt_via_server(args, &server).await?
+                                }
+                                cli_config::ExecutionMode::Standalone => {
+                                    arc_llm::cli::run_prompt(args).await?
+                                }
                             }
                         }
-                    }
-                    #[cfg(not(feature = "server"))]
-                    {
-                        arc_llm::cli::run_prompt(args).await?
-                    }
-                }
-                LlmCommand::Chat(mut args) => {
-                    if args.model.is_none() {
-                        args.model = llm_defaults.and_then(|l| l.model.clone());
-                    }
-                    #[cfg(feature = "server")]
-                    {
-                        let resolved = cli_config::resolve_mode(
-                            cli.mode,
-                            cli.server_url.as_deref(),
-                            &cli_config,
-                        );
-                        match resolved.mode {
-                            cli_config::ExecutionMode::Server => {
-                                let client =
-                                    cli_config::build_server_client(resolved.tls.as_ref())?;
-                                let server = arc_llm::cli::ServerConnection {
-                                    client,
-                                    base_url: resolved.server_base_url,
-                                };
-                                arc_llm::cli::run_chat_via_server(args, &server).await?
-                            }
-                            cli_config::ExecutionMode::Standalone => {
-                                arc_llm::cli::run_chat(args).await?
-                            }
+                        #[cfg(not(feature = "server"))]
+                        {
+                            arc_llm::cli::run_prompt(args).await?
                         }
                     }
-                    #[cfg(not(feature = "server"))]
-                    {
-                        arc_llm::cli::run_chat(args).await?
+                    LlmCommand::Chat(mut args) => {
+                        if args.model.is_none() {
+                            args.model = llm_defaults.and_then(|l| l.model.clone());
+                        }
+                        #[cfg(feature = "server")]
+                        {
+                            let resolved = cli_config::resolve_mode(
+                                cli.mode,
+                                cli.server_url.as_deref(),
+                                &cli_config,
+                            );
+                            match resolved.mode {
+                                cli_config::ExecutionMode::Server => {
+                                    let client =
+                                        cli_config::build_server_client(resolved.tls.as_ref())?;
+                                    let server = arc_llm::cli::ServerConnection {
+                                        client,
+                                        base_url: resolved.server_base_url,
+                                    };
+                                    arc_llm::cli::run_chat_via_server(args, &server).await?
+                                }
+                                cli_config::ExecutionMode::Standalone => {
+                                    arc_llm::cli::run_chat(args).await?
+                                }
+                            }
+                        }
+                        #[cfg(not(feature = "server"))]
+                        {
+                            arc_llm::cli::run_chat(args).await?
+                        }
                     }
                 }
             }
-        }
-        Command::Exec(mut args) => {
-            let cli_config = cli_config::load_cli_config(None)?;
-            let exec_defaults = cli_config.exec.as_ref();
-            args.apply_cli_defaults(
-                exec_defaults.and_then(|a| a.provider.as_deref()),
-                exec_defaults.and_then(|a| a.model.as_deref()),
-                exec_defaults.and_then(|a| a.permissions),
-                exec_defaults.and_then(|a| a.output_format),
-            );
-            #[cfg(feature = "server")]
-            let resolved =
-                cli_config::resolve_mode(cli.mode, cli.server_url.as_deref(), &cli_config);
-            let mcp_servers: Vec<arc_mcp::config::McpServerConfig> = cli_config
-                .mcp_servers
-                .into_iter()
-                .map(|(name, entry)| entry.into_config(name))
-                .collect();
-            #[cfg(feature = "server")]
-            {
-                match resolved.mode {
-                    cli_config::ExecutionMode::Server => {
-                        tracing::info!(mode = "server", "Agent session starting");
-                        let http_client = cli_config::build_server_client(resolved.tls.as_ref())?;
-                        let provider_name = args
-                            .provider
-                            .clone()
-                            .unwrap_or_else(|| "anthropic".to_string());
-                        let adapter =
-                            std::sync::Arc::new(arc_llm::providers::ArcServerAdapter::new(
-                                http_client,
-                                &resolved.server_base_url,
-                                &provider_name,
-                            ));
-                        let mut client = arc_llm::client::Client::new(
-                            std::collections::HashMap::new(),
-                            None,
-                            vec![],
-                        );
-                        client.register_provider(adapter).await.map_err(|e| {
-                            anyhow::anyhow!("Failed to register arc server adapter: {e}")
-                        })?;
-                        arc_agent::cli::run_with_args_and_client(args, Some(client), mcp_servers)
-                            .await?
-                    }
-                    cli_config::ExecutionMode::Standalone => {
-                        tracing::info!(mode = "standalone", "Agent session starting");
-                        arc_agent::cli::run_with_args(args, mcp_servers).await?
-                    }
-                }
-            }
-            #[cfg(not(feature = "server"))]
-            {
-                tracing::info!(mode = "standalone", "Agent session starting");
-                arc_agent::cli::run_with_args(args, mcp_servers).await?
-            }
-        }
-        Command::Run(mut args) => {
-            let styles: &'static arc_util::terminal::Styles =
-                Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
-            let cli_config = cli_config::load_cli_config(None)?;
-            args.verbose = args.verbose || cli_config.verbose;
-            let github_app = build_github_app_credentials(cli_config.app_id());
-
-            let git_author = arc_workflows::git::GitAuthor::from_options(
-                cli_config.git_author().and_then(|a| a.name.clone()),
-                cli_config.git_author().and_then(|a| a.email.clone()),
-            );
-
-            arc_workflows::cli::run::run_command(
-                args,
-                cli_config.run_defaults,
-                styles,
-                github_app,
-                git_author,
-            )
-            .await?;
-        }
-        Command::Validate(args) => {
-            let styles = arc_util::terminal::Styles::detect_stderr();
-            arc_workflows::cli::validate::validate_command(&args, &styles)?;
-        }
-        Command::Parse(args) => {
-            arc_workflows::cli::parse::parse_command(&args)?;
-        }
-        Command::Cp(args) => {
-            arc_workflows::cli::cp::cp_command(args).await?;
-        }
-        Command::Preview(args) => {
-            arc_workflows::cli::preview::preview_command(args).await?;
-        }
-        Command::Ssh(args) => {
-            arc_workflows::cli::ssh::ssh_command(args).await?;
-        }
-        Command::Diff(args) => {
-            arc_workflows::cli::diff::diff_command(args).await?;
-        }
-        Command::Model { command } => {
-            let server = {
+            Command::Exec(mut args) => {
+                let cli_config = cli_config::load_cli_config(None)?;
+                let exec_defaults = cli_config.exec.as_ref();
+                args.apply_cli_defaults(
+                    exec_defaults.and_then(|a| a.provider.as_deref()),
+                    exec_defaults.and_then(|a| a.model.as_deref()),
+                    exec_defaults.and_then(|a| a.permissions),
+                    exec_defaults.and_then(|a| a.output_format),
+                );
+                #[cfg(feature = "server")]
+                let resolved =
+                    cli_config::resolve_mode(cli.mode, cli.server_url.as_deref(), &cli_config);
+                let mcp_servers: Vec<arc_mcp::config::McpServerConfig> = cli_config
+                    .mcp_servers
+                    .into_iter()
+                    .map(|(name, entry)| entry.into_config(name))
+                    .collect();
                 #[cfg(feature = "server")]
                 {
-                    let cli_config = cli_config::load_cli_config(None)?;
-                    let resolved =
-                        cli_config::resolve_mode(cli.mode, cli.server_url.as_deref(), &cli_config);
                     match resolved.mode {
                         cli_config::ExecutionMode::Server => {
-                            let client = cli_config::build_server_client(resolved.tls.as_ref())?;
-                            Some(arc_llm::cli::ServerConnection {
-                                client,
-                                base_url: resolved.server_base_url,
-                            })
+                            tracing::info!(mode = "server", "Agent session starting");
+                            let http_client =
+                                cli_config::build_server_client(resolved.tls.as_ref())?;
+                            let provider_name = args
+                                .provider
+                                .clone()
+                                .unwrap_or_else(|| "anthropic".to_string());
+                            let adapter =
+                                std::sync::Arc::new(arc_llm::providers::ArcServerAdapter::new(
+                                    http_client,
+                                    &resolved.server_base_url,
+                                    &provider_name,
+                                ));
+                            let mut client = arc_llm::client::Client::new(
+                                std::collections::HashMap::new(),
+                                None,
+                                vec![],
+                            );
+                            client.register_provider(adapter).await.map_err(|e| {
+                                anyhow::anyhow!("Failed to register arc server adapter: {e}")
+                            })?;
+                            arc_agent::cli::run_with_args_and_client(
+                                args,
+                                Some(client),
+                                mcp_servers,
+                            )
+                            .await?
                         }
-                        cli_config::ExecutionMode::Standalone => None,
+                        cli_config::ExecutionMode::Standalone => {
+                            tracing::info!(mode = "standalone", "Agent session starting");
+                            arc_agent::cli::run_with_args(args, mcp_servers).await?
+                        }
                     }
                 }
                 #[cfg(not(feature = "server"))]
                 {
-                    None
-                }
-            };
-            arc_llm::cli::run_models(command, server).await?
-        }
-        #[cfg(feature = "server")]
-        Command::Serve(args) => {
-            let styles: &'static arc_util::terminal::Styles =
-                Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
-            arc_api::serve::serve_command(args, styles).await?;
-        }
-        Command::Doctor { verbose, dry_run } => {
-            let cli_config = cli_config::load_cli_config(None)?;
-            let verbose = verbose || cli_config.verbose;
-            let exit_code = doctor::run_doctor(verbose, !dry_run).await;
-            std::process::exit(exit_code);
-        }
-        Command::Init => {
-            init::run_init().await?;
-        }
-        Command::Install => {
-            install::run_install().await?;
-        }
-        Command::Ps(args) => {
-            arc_workflows::cli::runs::list_command(&args)?;
-        }
-        Command::Pr { command } => {
-            let cli_config = cli_config::load_cli_config(None)?;
-            let github_app = build_github_app_credentials(cli_config.app_id());
-            match command {
-                PrCommand::Create(args) => {
-                    arc_workflows::cli::pr::pr_create_command(args, github_app).await?;
-                }
-                PrCommand::List(args) => {
-                    arc_workflows::cli::pr::pr_list_command(args, github_app).await?;
-                }
-                PrCommand::View(args) => {
-                    arc_workflows::cli::pr::pr_view_command(args, github_app).await?;
-                }
-                PrCommand::Merge(args) => {
-                    arc_workflows::cli::pr::pr_merge_command(args, github_app).await?;
-                }
-                PrCommand::Close(args) => {
-                    arc_workflows::cli::pr::pr_close_command(args, github_app).await?;
+                    tracing::info!(mode = "standalone", "Agent session starting");
+                    arc_agent::cli::run_with_args(args, mcp_servers).await?
                 }
             }
-        }
-        Command::System { command } => match command {
-            SystemCommand::Prune(args) => {
-                arc_workflows::cli::runs::prune_command(&args)?;
-            }
-            SystemCommand::Df(args) => {
-                arc_workflows::cli::runs::df_command(&args)?;
-            }
-        },
-        Command::SendAnalytics { path } => {
-            let result = async {
-                let json = std::fs::read(&path)?;
-                let track: arc_util::telemetry::event::Track = serde_json::from_slice(&json)?;
-                arc_util::telemetry::sender::send_to_segment(&track).await
-            }
-            .await;
-            let _ = std::fs::remove_file(&path);
-            result?;
-        }
-    }
+            Command::Run(mut args) => {
+                let styles: &'static arc_util::terminal::Styles =
+                    Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
+                let cli_config = cli_config::load_cli_config(None)?;
+                args.verbose = args.verbose || cli_config.verbose;
+                let github_app = build_github_app_credentials(cli_config.app_id());
 
-    Ok(())
+                let git_author = arc_workflows::git::GitAuthor::from_options(
+                    cli_config.git_author().and_then(|a| a.name.clone()),
+                    cli_config.git_author().and_then(|a| a.email.clone()),
+                );
+
+                arc_workflows::cli::run::run_command(
+                    args,
+                    cli_config.run_defaults,
+                    styles,
+                    github_app,
+                    git_author,
+                )
+                .await?;
+            }
+            Command::Validate(args) => {
+                let styles = arc_util::terminal::Styles::detect_stderr();
+                arc_workflows::cli::validate::validate_command(&args, &styles)?;
+            }
+            Command::Parse(args) => {
+                arc_workflows::cli::parse::parse_command(&args)?;
+            }
+            Command::Cp(args) => {
+                arc_workflows::cli::cp::cp_command(args).await?;
+            }
+            Command::Preview(args) => {
+                arc_workflows::cli::preview::preview_command(args).await?;
+            }
+            Command::Ssh(args) => {
+                arc_workflows::cli::ssh::ssh_command(args).await?;
+            }
+            Command::Diff(args) => {
+                arc_workflows::cli::diff::diff_command(args).await?;
+            }
+            Command::Model { command } => {
+                let server = {
+                    #[cfg(feature = "server")]
+                    {
+                        let cli_config = cli_config::load_cli_config(None)?;
+                        let resolved = cli_config::resolve_mode(
+                            cli.mode,
+                            cli.server_url.as_deref(),
+                            &cli_config,
+                        );
+                        match resolved.mode {
+                            cli_config::ExecutionMode::Server => {
+                                let client =
+                                    cli_config::build_server_client(resolved.tls.as_ref())?;
+                                Some(arc_llm::cli::ServerConnection {
+                                    client,
+                                    base_url: resolved.server_base_url,
+                                })
+                            }
+                            cli_config::ExecutionMode::Standalone => None,
+                        }
+                    }
+                    #[cfg(not(feature = "server"))]
+                    {
+                        None
+                    }
+                };
+                arc_llm::cli::run_models(command, server).await?
+            }
+            #[cfg(feature = "server")]
+            Command::Serve(args) => {
+                let styles: &'static arc_util::terminal::Styles =
+                    Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
+                arc_api::serve::serve_command(args, styles).await?;
+            }
+            Command::Doctor { verbose, dry_run } => {
+                let cli_config = cli_config::load_cli_config(None)?;
+                let verbose = verbose || cli_config.verbose;
+                let exit_code = doctor::run_doctor(verbose, !dry_run).await;
+                std::process::exit(exit_code);
+            }
+            Command::Init => {
+                init::run_init().await?;
+            }
+            Command::Install => {
+                install::run_install().await?;
+            }
+            Command::Ps(args) => {
+                arc_workflows::cli::runs::list_command(&args)?;
+            }
+            Command::Pr { command } => {
+                let cli_config = cli_config::load_cli_config(None)?;
+                let github_app = build_github_app_credentials(cli_config.app_id());
+                match command {
+                    PrCommand::Create(args) => {
+                        arc_workflows::cli::pr::pr_create_command(args, github_app).await?;
+                    }
+                    PrCommand::List(args) => {
+                        arc_workflows::cli::pr::pr_list_command(args, github_app).await?;
+                    }
+                    PrCommand::View(args) => {
+                        arc_workflows::cli::pr::pr_view_command(args, github_app).await?;
+                    }
+                    PrCommand::Merge(args) => {
+                        arc_workflows::cli::pr::pr_merge_command(args, github_app).await?;
+                    }
+                    PrCommand::Close(args) => {
+                        arc_workflows::cli::pr::pr_close_command(args, github_app).await?;
+                    }
+                }
+            }
+            Command::System { command } => match command {
+                SystemCommand::Prune(args) => {
+                    arc_workflows::cli::runs::prune_command(&args)?;
+                }
+                SystemCommand::Df(args) => {
+                    arc_workflows::cli::runs::df_command(&args)?;
+                }
+            },
+            Command::SendAnalytics { path } => {
+                let result = async {
+                    let json = std::fs::read(&path)?;
+                    let track: arc_util::telemetry::event::Track = serde_json::from_slice(&json)?;
+                    arc_util::telemetry::sender::send_to_segment(&track).await
+                }
+                .await;
+                let _ = std::fs::remove_file(&path);
+                result?;
+            }
+        }
+
+        Ok(())
+    }
+    .await;
+
+    (command_name, result)
 }

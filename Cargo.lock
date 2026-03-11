@@ -433,6 +433,7 @@ dependencies = [
  "chrono",
  "console 0.15.11",
  "dirs",
+ "git2",
  "insta",
  "mac_address",
  "md5",

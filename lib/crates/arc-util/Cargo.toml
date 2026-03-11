@@ -26,6 +26,7 @@ tracing-subscriber.workspace = true
 anyhow.workspace = true
 mac_address.workspace = true
 md5.workspace = true
+git2.workspace = true
 
 [build-dependencies]
 toml = "0.8"

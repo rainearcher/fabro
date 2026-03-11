@@ -1,6 +1,8 @@
 pub mod anonymous_id;
 pub mod context;
 pub mod event;
+pub mod git;
+pub mod sanitize;
 pub mod sender;
 
 use anyhow::Result;
