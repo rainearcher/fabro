@@ -17,6 +17,21 @@ curl -fsSL https://fabro.sh/install.sh | bash
 
 ---
 
+## Use Cases
+
+- **Extend disengagement time** — Stop babysitting an agent REPL. Define a workflow with verification gates and walk away — Arc keeps the process on track without you.
+- **Leverage ensemble intelligence** — Seamlessly combine models from different vendors. Use one model to implement, another to cross-critique, and a third to summarize — all in a single workflow.
+- **Share best practices across your team** — Collaborate on version-controlled workflows that encode your software processes as code. Review, iterate, and reuse them like any other source file.
+- **Reduce token bills** — Route cheap tasks to fast, inexpensive models and reserve frontier models for the steps that need them. CSS-like stylesheets make this a one-line change.
+- **Improve agent security** — Run agents in cloud sandboxes with full network and filesystem isolation. Keep untrusted code off your laptop and out of your production environment.
+- **Run agents 24/7** — Arc's API server queues and executes runs continuously. Close your laptop — workflows keep running and results are waiting when you return.
+- **Scale infinitely** — Move execution off your laptop and into cloud sandboxes. Run as many concurrent workflows as your infrastructure allows.
+- **Guarantee code quality** — Layer deterministic verifications — test suites, linters, type checkers, LLM-as-judge — into your workflow graph. Failures trigger fix loops automatically.
+- **Achieve compounding engineering** — Automatic retrospectives after every run feed a continuous improvement loop. Your workflows get better over time, not just your code.
+- **Specify in natural language** — Define requirements as natural-language specs and let Arc generate — and regenerate — implementations that conform to them.
+
+---
+
 ## Key Features
 
 |     | Feature                        | Description                                                                                           |
