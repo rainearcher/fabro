@@ -11,7 +11,7 @@ const services: Record<string, ServiceConfig> = {
   },
   web: {
     command: ["bun", "run", "dev", "--host", "0.0.0.0"],
-    cwd: "apps/arc-web",
+    cwd: "apps/fabro-web",
   },
   docs: {
     command: ["mintlify", "dev", "--port", "3333", "--host", "0.0.0.0"],

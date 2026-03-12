@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
       - run: bun install
-      - run: cd apps/arc-web && bun run typecheck
+      - run: cd apps/fabro-web && bun run typecheck
 
   test:
     name: Test
@@ -47,7 +47,7 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
       - run: bun install
-      - run: cd apps/arc-web && bun test
+      - run: cd apps/fabro-web && bun test
 
   build:
     name: Build
@@ -58,4 +58,4 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
       - run: bun install
-      - run: cd apps/arc-web && bun run build
+      - run: cd apps/fabro-web && bun run build

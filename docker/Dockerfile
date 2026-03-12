@@ -18,12 +18,12 @@ WORKDIR /app
 COPY --from=rust-builder /app/target/release/arc /usr/local/bin/arc
 
 COPY package.json bun.lock ./
-COPY apps/arc-web/package.json apps/arc-web/
-COPY lib/packages/arc-api-client/package.json lib/packages/arc-api-client/
+COPY apps/fabro-web/package.json apps/fabro-web/
+COPY lib/packages/fabro-api-client/package.json lib/packages/fabro-api-client/
 RUN bun install --frozen-lockfile
 
-COPY apps/arc-web apps/arc-web
-COPY lib/packages/arc-api-client lib/packages/arc-api-client
+COPY apps/fabro-web apps/fabro-web
+COPY lib/packages/fabro-api-client lib/packages/fabro-api-client
 COPY docs docs
 COPY docker/entrypoint.ts .
 

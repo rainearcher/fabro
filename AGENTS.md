@@ -12,15 +12,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cargo fmt --check --all` — check formatting
 - `cargo clippy --workspace -- -D warnings` — lint
 
-### TypeScript (arc-web)
-- `cd apps/arc-web && bun run dev` — start React dev server
-- `cd apps/arc-web && bun test` — run tests
-- `cd apps/arc-web && bun run typecheck` — type check
-- `cd apps/arc-web && bun run build` — production build
+### TypeScript (fabro-web)
+- `cd apps/fabro-web && bun run dev` — start React dev server
+- `cd apps/fabro-web && bun test` — run tests
+- `cd apps/fabro-web && bun run typecheck` — type check
+- `cd apps/fabro-web && bun run build` — production build
 
 ### Dev servers
 1. `arc serve` — starts the Rust API server (demo mode is per-request via `X-Arc-Demo: 1` header)
-2. `cd apps/arc-web && bun run dev` — starts the React dev server
+2. `cd apps/fabro-web && bun run dev` — starts the React dev server
 3. Mintlify docs dev server (requires Docker — `mintlify dev` needs Node LTS which may not match the host):
    ```
    docker run --rm -d -p 3333:3333 -v $(pwd)/docs:/docs -w /docs --name mintlify-dev node:22-slim \
@@ -36,7 +36,7 @@ The OpenAPI spec at `docs/api-reference/arc-api.yaml` is the source of truth for
 2. `cargo build -p arc-types` — build.rs regenerates Rust types via typify
 3. Write/update handler in `lib/crates/arc-api/src/server.rs`, add route to `build_router()`
 4. `cargo test -p arc-api` — conformance test catches spec/router drift
-5. `cd lib/packages/arc-api-client && bun run generate` — regenerates TypeScript Axios client
+5. `cd lib/packages/fabro-api-client && bun run generate` — regenerates TypeScript Axios client
 
 ## Architecture
 
@@ -60,8 +60,8 @@ Arc is an AI-powered workflow orchestration platform. Workflows are defined as D
 - **arc-util** — Shared utilities (redaction, telemetry, terminal formatting)
 
 ### TypeScript (`apps/` and `lib/packages/`)
-- **apps/arc-web** — React 19 + React Router + Vite + Tailwind CSS frontend
-- **lib/packages/arc-api-client** — Auto-generated TypeScript Axios client from OpenAPI spec
+- **apps/fabro-web** — React 19 + React Router + Vite + Tailwind CSS frontend
+- **lib/packages/fabro-api-client** — Auto-generated TypeScript Axios client from OpenAPI spec
 
 ### Key design patterns
 - **Sandbox trait** — Uniform interface for local, Docker, SSH (ExeSandbox), Sprites, and Daytona execution environments
