@@ -456,7 +456,7 @@ pub async fn run_command(
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
-    tokio::fs::write(run_dir.join("graph.dot"), &source).await?;
+    tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
     tokio::fs::write(run_dir.join("run.pid"), std::process::id().to_string()).await?;
     if workflow_path.extension().is_some_and(|ext| ext == "toml") {
         if let Ok(toml_contents) = tokio::fs::read(workflow_path).await {
@@ -1576,8 +1576,10 @@ async fn run_from_branch(
         })?;
 
     // Read graph DOT from metadata branch
-    let source = crate::git::MetadataStore::read_graph_dot(&original_cwd, &run_id)?
-        .ok_or_else(|| anyhow::anyhow!("no graph.dot found on metadata branch for run {run_id}"))?;
+    let source =
+        crate::git::MetadataStore::read_graph_dot(&original_cwd, &run_id)?.ok_or_else(|| {
+            anyhow::anyhow!("no graph.fabro found on metadata branch for run {run_id}")
+        })?;
 
     // If --pipeline was also provided, use it instead (allows overriding)
     let (mut graph, diagnostics) = if let Some(ref workflow_path) = args.workflow {
@@ -1619,7 +1621,7 @@ async fn run_from_branch(
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
-    tokio::fs::write(run_dir.join("graph.dot"), &source).await?;
+    tokio::fs::write(run_dir.join("graph.fabro"), &source).await?;
 
     let base_sha =
         crate::git::MetadataStore::read_manifest(&original_cwd, &run_id)?.and_then(|m| m.base_sha);

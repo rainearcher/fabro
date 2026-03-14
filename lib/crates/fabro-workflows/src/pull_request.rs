@@ -182,20 +182,25 @@ fn format_arc_details_section(conclusion: &Conclusion, dot_source: Option<&str>)
 fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
     match crate::parser::parse(dot) {
         Ok(graph) => (
-            format!("{}.dot", graph.name),
+            format!("{}.fabro", graph.name),
             graph.nodes.len(),
             graph.edges.len(),
         ),
-        Err(_) => ("workflow.dot".to_string(), 0, 0),
+        Err(_) => ("workflow.fabro".to_string(), 0, 0),
     }
 }
 
-/// Read the DOT graph source from `run_dir/graph.dot`.
+/// Read the workflow graph source from `run_dir/graph.fabro` (or `graph.dot` fallback).
 fn read_dot_source(run_dir: &Path) -> Option<String> {
-    let path = run_dir.join("graph.dot");
-    match std::fs::read_to_string(&path) {
+    let fabro_path = run_dir.join("graph.fabro");
+    if let Ok(content) = std::fs::read_to_string(&fabro_path) {
+        debug!(path = %fabro_path.display(), "Read workflow graph for PR body");
+        return Some(content);
+    }
+    let dot_path = run_dir.join("graph.dot");
+    match std::fs::read_to_string(&dot_path) {
         Ok(content) => {
-            debug!(path = %path.display(), "Read DOT graph for PR body");
+            debug!(path = %dot_path.display(), "Read workflow graph for PR body (dot fallback)");
             Some(content)
         }
         Err(_) => None,
@@ -767,9 +772,17 @@ mod tests {
     #[test]
     fn read_dot_source_found() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("graph.dot"), "digraph test {}").unwrap();
+        std::fs::write(tmp.path().join("graph.fabro"), "digraph test {}").unwrap();
         let result = read_dot_source(tmp.path());
         assert_eq!(result, Some("digraph test {}".to_string()));
+    }
+
+    #[test]
+    fn read_dot_source_dot_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("graph.dot"), "digraph old {}").unwrap();
+        let result = read_dot_source(tmp.path());
+        assert_eq!(result, Some("digraph old {}".to_string()));
     }
 
     #[test]

@@ -10865,8 +10865,8 @@ async fn git_checkpoint_host_writes_shadow_branch() {
 
     // 4. Set up engine with meta_branch
     let run_dir = tempfile::tempdir().unwrap();
-    // Write graph.dot so init_run can read it
-    std::fs::write(run_dir.path().join("graph.dot"), "digraph {}").unwrap();
+    // Write graph.fabro so init_run can read it
+    std::fs::write(run_dir.path().join("graph.fabro"), "digraph {}").unwrap();
     let emitter = EventEmitter::new();
 
     let env: Arc<dyn fabro_agent::Sandbox> =

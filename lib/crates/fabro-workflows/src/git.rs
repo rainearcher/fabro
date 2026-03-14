@@ -389,7 +389,7 @@ impl MetadataStore {
         bs.ensure_branch()
             .map_err(|e| git_error(format!("ensure_branch failed: {e}")))?;
         let mut entries: Vec<(&str, &[u8])> =
-            vec![("manifest.json", manifest_json), ("graph.dot", graph_dot)];
+            vec![("manifest.json", manifest_json), ("graph.fabro", graph_dot)];
         entries.extend_from_slice(extra_files);
         let msg = self.commit_message("init run");
         bs.write_entries(&entries, &msg)
@@ -475,8 +475,12 @@ impl MetadataStore {
         }
     }
 
-    /// Read the graph DOT source from the metadata branch. Returns `None` if not found.
+    /// Read the graph source from the metadata branch. Tries `graph.fabro` first,
+    /// then falls back to `graph.dot` for backward compatibility. Returns `None` if not found.
     pub fn read_graph_dot(repo_path: &Path, run_id: &str) -> Result<Option<String>> {
+        if let Some(bytes) = Self::read_file(repo_path, run_id, "graph.fabro")? {
+            return Ok(Some(String::from_utf8_lossy(&bytes).to_string()));
+        }
         match Self::read_file(repo_path, run_id, "graph.dot")? {
             Some(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).to_string())),
             None => Ok(None),

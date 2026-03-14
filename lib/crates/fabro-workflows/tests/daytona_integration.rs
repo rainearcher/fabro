@@ -1143,8 +1143,8 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     graph.edges.push(Edge::new("work", "exit"));
 
     let dir = tempfile::tempdir().unwrap();
-    // Write graph.dot so init_run can read it
-    std::fs::write(dir.path().join("graph.dot"), "digraph {}").unwrap();
+    // Write graph.fabro so init_run can read it
+    std::fs::write(dir.path().join("graph.fabro"), "digraph {}").unwrap();
 
     let mut registry = HandlerRegistry::new(Box::new(FileWriterHandler));
     registry.register("start", Box::new(StartHandler));

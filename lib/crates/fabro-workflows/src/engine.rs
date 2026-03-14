@@ -1211,7 +1211,9 @@ impl WorkflowRunEngine {
         if let (Some(_), Some(ref repo_path)) = (&config.meta_branch, &config.host_repo_path) {
             let store = crate::git::MetadataStore::new(repo_path, &config.git_author);
             let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap_or_default();
-            let dot_source = std::fs::read(config.run_dir.join("graph.dot")).unwrap_or_default();
+            let dot_source = std::fs::read(config.run_dir.join("graph.fabro"))
+                .or_else(|_| std::fs::read(config.run_dir.join("graph.dot")))
+                .unwrap_or_default();
             let sandbox_json = std::fs::read(config.run_dir.join("sandbox.json")).ok();
             let mut extra_files: Vec<(&str, &[u8])> = Vec::new();
             if let Some(ref data) = sandbox_json {

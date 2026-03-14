@@ -44,7 +44,9 @@ fn parse_duration_str(s: &str) -> Duration {
 }
 
 /// Parse a child workflow graph from node attributes: inline `stack.child_dot_source`
-/// (no file inlining) or file path `stack.child_dotfile` (with file inlining).
+/// (no file inlining), or file path `stack.child_workflow` / `stack.child_dotfile`
+/// (with file inlining). `stack.child_workflow` is preferred; `stack.child_dotfile`
+/// is kept for backward compatibility.
 fn parse_child_graph(node: &Node) -> Result<Graph, FabroError> {
     if let Some(dot) = node
         .attrs
@@ -55,14 +57,15 @@ fn parse_child_graph(node: &Node) -> Result<Graph, FabroError> {
     }
     if let Some(path) = node
         .attrs
-        .get("stack.child_dotfile")
+        .get("stack.child_workflow")
+        .or_else(|| node.attrs.get("stack.child_dotfile"))
         .and_then(|v| v.as_str())
     {
         let (graph, diagnostics) = prepare_from_file(std::path::Path::new(path))?;
         validation::raise_on_errors(&diagnostics)?;
         return Ok(graph);
     }
-    Err(FabroError::handler("No child DOT source".to_string()))
+    Err(FabroError::handler("No child workflow source".to_string()))
 }
 
 /// Compute the context diff: keys that changed or were added relative to `before`.
