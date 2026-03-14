@@ -283,6 +283,137 @@ impl WorkflowRunConfig {
     }
 }
 
+impl RunDefaults {
+    /// Merge an overlay on top of this base. The overlay takes precedence
+    /// for simple fields; compound fields (vars, hooks, mcp_servers) are
+    /// deep-merged with the overlay winning on collision.
+    ///
+    /// Uses the same deep-merge semantics as `WorkflowRunConfig::apply_defaults`.
+    pub fn merge_overlay(&mut self, overlay: RunDefaults) {
+        if overlay.work_dir.is_some() {
+            self.work_dir = overlay.work_dir;
+        }
+
+        match (&mut self.llm, overlay.llm) {
+            (Some(base), Some(over)) => {
+                if over.model.is_some() {
+                    base.model = over.model;
+                }
+                if over.provider.is_some() {
+                    base.provider = over.provider;
+                }
+                if over.fallbacks.is_some() {
+                    base.fallbacks = over.fallbacks;
+                }
+            }
+            (None, Some(over)) => self.llm = Some(over),
+            _ => {}
+        }
+
+        match (&mut self.setup, overlay.setup) {
+            (Some(base), Some(over)) => {
+                if over.timeout_ms.is_some() {
+                    base.timeout_ms = over.timeout_ms;
+                }
+            }
+            (None, Some(over)) => self.setup = Some(over),
+            _ => {}
+        }
+
+        match (&mut self.sandbox, overlay.sandbox) {
+            (Some(base), Some(over)) => {
+                if over.provider.is_some() {
+                    base.provider = over.provider;
+                }
+                if over.preserve.is_some() {
+                    base.preserve = over.preserve;
+                }
+                if over.devcontainer.is_some() {
+                    base.devcontainer = over.devcontainer;
+                }
+                if over.local.is_some() {
+                    base.local = over.local;
+                }
+                match (&mut base.daytona, over.daytona) {
+                    (Some(base_d), Some(over_d)) => {
+                        if over_d.auto_stop_interval.is_some() {
+                            base_d.auto_stop_interval = over_d.auto_stop_interval;
+                        }
+                        if over_d.snapshot.is_some() {
+                            base_d.snapshot = over_d.snapshot;
+                        }
+                        if let Some(over_labels) = over_d.labels {
+                            let mut merged = base_d.labels.take().unwrap_or_default();
+                            merged.extend(over_labels);
+                            base_d.labels = Some(merged);
+                        }
+                        if over_d.network.is_some() {
+                            base_d.network = over_d.network;
+                        }
+                    }
+                    (None, Some(over_d)) => base.daytona = Some(over_d),
+                    _ => {}
+                }
+                #[cfg(feature = "exedev")]
+                match (&mut base.exe, over.exe) {
+                    (Some(base_e), Some(over_e)) => {
+                        if over_e.image.is_some() {
+                            base_e.image = over_e.image;
+                        }
+                    }
+                    (None, Some(over_e)) => base.exe = Some(over_e),
+                    _ => {}
+                }
+                if let Some(over_env) = over.env {
+                    let mut merged = base.env.take().unwrap_or_default();
+                    merged.extend(over_env);
+                    base.env = Some(merged);
+                }
+            }
+            (None, Some(over)) => self.sandbox = Some(over),
+            _ => {}
+        }
+
+        if let Some(overlay_vars) = overlay.vars {
+            let mut merged = self.vars.take().unwrap_or_default();
+            merged.extend(overlay_vars);
+            self.vars = Some(merged);
+        }
+
+        if !overlay.checkpoint.exclude_globs.is_empty() {
+            self.checkpoint
+                .exclude_globs
+                .append(&mut overlay.checkpoint.exclude_globs.clone());
+            self.checkpoint.exclude_globs.sort();
+            self.checkpoint.exclude_globs.dedup();
+        }
+
+        if overlay.pull_request.is_some() {
+            self.pull_request = overlay.pull_request;
+        }
+
+        if overlay.assets.is_some() {
+            self.assets = overlay.assets;
+        }
+
+        if !overlay.hooks.is_empty() {
+            let base = crate::hook::HookConfig {
+                hooks: std::mem::take(&mut self.hooks),
+            };
+            let over = crate::hook::HookConfig {
+                hooks: overlay.hooks,
+            };
+            self.hooks = base.merge(over).hooks;
+        }
+
+        if !overlay.mcp_servers.is_empty() {
+            let mut merged = std::mem::take(&mut self.mcp_servers);
+            merged.extend(overlay.mcp_servers);
+            self.mcp_servers = merged;
+        }
+    }
+}
+
 /// Load and validate a run config from a TOML file.
 ///
 /// The `graph` path in the returned config is resolved relative to the

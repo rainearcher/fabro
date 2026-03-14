@@ -307,49 +307,11 @@ pub async fn run_command(
 
     // Apply project-level config overrides (fabro.toml) on top of CLI defaults.
     // Precedence: workflow.toml > fabro.toml > cli.toml/server.toml
-    //
-    // We create a temporary WorkflowRunConfig from cli defaults, apply the project
-    // defaults on top, then extract the merged RunDefaults. This reuses the same
-    // field-level merge logic that apply_defaults() already implements.
     if let Ok(Some((_config_path, project_config))) =
         super::project_config::discover_project_config(&std::env::current_dir().unwrap_or_default())
     {
         tracing::debug!("Applying run defaults from fabro.toml");
-        let project_defaults = project_config.into_run_defaults();
-        // Project overrides cli-level defaults. Build a merged RunDefaults
-        // by applying cli as base, then overriding with project values.
-        let mut merged = run_defaults.clone();
-        if project_defaults.work_dir.is_some() {
-            merged.work_dir = project_defaults.work_dir;
-        }
-        if project_defaults.llm.is_some() {
-            merged.llm = project_defaults.llm;
-        }
-        if project_defaults.setup.is_some() {
-            merged.setup = project_defaults.setup;
-        }
-        if project_defaults.sandbox.is_some() {
-            merged.sandbox = project_defaults.sandbox;
-        }
-        if project_defaults.vars.is_some() {
-            merged.vars = project_defaults.vars;
-        }
-        if !project_defaults.checkpoint.exclude_globs.is_empty() {
-            merged.checkpoint = project_defaults.checkpoint;
-        }
-        if project_defaults.pull_request.is_some() {
-            merged.pull_request = project_defaults.pull_request;
-        }
-        if project_defaults.assets.is_some() {
-            merged.assets = project_defaults.assets;
-        }
-        if !project_defaults.hooks.is_empty() {
-            merged.hooks = project_defaults.hooks;
-        }
-        if !project_defaults.mcp_servers.is_empty() {
-            merged.mcp_servers = project_defaults.mcp_servers;
-        }
-        run_defaults = merged;
+        run_defaults.merge_overlay(project_config.into_run_defaults());
     }
 
     // 0. Resolve workflow arg, load run config if TOML, resolve DOT path, apply defaults
