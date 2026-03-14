@@ -3,5 +3,7 @@ args = ["doctor", "--dry-run"]
 
 [env]
 inherit = false
+
+[env.add]
 HOME = "/tmp/fabro-trycmd-nonexistent"
 ANTHROPIC_API_KEY = "sk-test-dummy"
