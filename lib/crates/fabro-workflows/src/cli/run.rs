@@ -456,11 +456,15 @@ pub async fn run_command(
     // 3. Create logs directory
     let run_id = args.run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
     let run_dir = args.run_dir.unwrap_or_else(|| {
-        let base = dirs::home_dir()
-            .expect("could not determine home directory")
-            .join(".fabro")
-            .join("runs");
-        base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
+        if args.dry_run {
+            std::env::temp_dir().join("fabro-dry-run").join(&run_id)
+        } else {
+            let base = dirs::home_dir()
+                .expect("could not determine home directory")
+                .join(".fabro")
+                .join("runs");
+            base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
+        }
     });
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
@@ -1676,15 +1680,19 @@ async fn run_from_branch(
 
     // Set up logs directory
     let run_dir = args.run_dir.unwrap_or_else(|| {
-        let base = dirs::home_dir()
-            .expect("could not determine home directory")
-            .join(".fabro")
-            .join("runs");
-        base.join(format!(
-            "{}-{}",
-            chrono::Local::now().format("%Y%m%d"),
-            run_id
-        ))
+        if args.dry_run {
+            std::env::temp_dir().join("fabro-dry-run").join(&run_id)
+        } else {
+            let base = dirs::home_dir()
+                .expect("could not determine home directory")
+                .join(".fabro")
+                .join("runs");
+            base.join(format!(
+                "{}-{}",
+                chrono::Local::now().format("%Y%m%d"),
+                run_id
+            ))
+        }
     });
     tokio::fs::create_dir_all(&run_dir).await?;
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
