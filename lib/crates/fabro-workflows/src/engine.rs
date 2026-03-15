@@ -801,7 +801,7 @@ pub struct RunConfig {
     pub base_sha: Option<String>,
     /// Git branch name for the run (e.g. `fabro/run/{run_id}`).
     pub run_branch: Option<String>,
-    /// Metadata branch name for git-native checkpoint storage (e.g. `refs/fabro/{run_id}`).
+    /// Metadata branch name for git-native checkpoint storage (e.g. `fabro/meta/{run_id}`).
     pub meta_branch: Option<String>,
     /// User-defined key-value labels for this run.
     pub labels: HashMap<String, String>,
@@ -1987,15 +1987,7 @@ impl WorkflowRunEngine {
                             if let (Some(ref meta_branch), Some(ref repo_path)) =
                                 (&config.meta_branch, &config.host_repo_path)
                             {
-                                // The metadata branch is stored locally as a custom ref
-                                // (e.g. refs/fabro/{run_id}). Push it to a normal branch on
-                                // the remote since GitHub rejects branch names starting
-                                // with "refs/".
-                                let run_id_part = meta_branch
-                                    .strip_prefix("refs/fabro/")
-                                    .unwrap_or(meta_branch);
-                                let refspec =
-                                    format!("{meta_branch}:refs/heads/fabro/meta/{run_id_part}");
+                                let refspec = format!("refs/heads/{meta_branch}");
                                 let meta_push_ok = git_push_host(
                                     repo_path,
                                     &refspec,
@@ -2004,7 +1996,7 @@ impl WorkflowRunEngine {
                                 )
                                 .await;
                                 self.services.emitter.emit(&WorkflowRunEvent::GitPush {
-                                    branch: format!("fabro/meta/{run_id_part}"),
+                                    branch: meta_branch.clone(),
                                     success: meta_push_ok,
                                 });
                             }

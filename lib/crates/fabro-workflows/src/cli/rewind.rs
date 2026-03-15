@@ -394,7 +394,7 @@ pub fn execute_rewind(
             }
 
             // Force-push metadata branch
-            let meta_refspec = format!("+refs/heads/{meta_branch}:refs/heads/fabro/meta/{run_id}");
+            let meta_refspec = format!("+refs/heads/{meta_branch}:refs/heads/{meta_branch}");
             crate::git::push_branch(repo_path, "origin", &meta_refspec)
                 .map_err(|e| anyhow::anyhow!("failed to push metadata branch: {e}"))?;
 
@@ -408,7 +408,7 @@ pub fn execute_rewind(
 /// Find a run ID by exact match or unambiguous prefix.
 pub fn find_run_id_by_prefix(repo: &Repository, prefix: &str) -> Result<String> {
     let refs = repo.references()?;
-    let pattern = "refs/heads/refs/fabro/";
+    let pattern = "refs/heads/fabro/meta/";
     let mut matches = Vec::new();
 
     for reference in refs.flatten() {
@@ -950,5 +950,17 @@ mod tests {
         let result = find_run_id_by_prefix(store.repo(), "nonexistent");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("no run found"));
+    }
+
+    #[test]
+    fn rewind_push_refspec_uses_same_name_on_both_sides() {
+        // The meta branch name should work directly as a refspec
+        // without needing strip_prefix translation
+        let meta_branch = MetadataStore::branch_name("run-1");
+        let refspec = format!("+refs/heads/{meta_branch}:refs/heads/{meta_branch}");
+        assert_eq!(
+            refspec,
+            "+refs/heads/fabro/meta/run-1:refs/heads/fabro/meta/run-1"
+        );
     }
 }

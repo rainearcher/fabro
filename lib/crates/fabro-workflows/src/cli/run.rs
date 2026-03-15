@@ -1618,7 +1618,7 @@ async fn setup_remote_git(
 /// Resume a workflow run from a git run branch.
 ///
 /// Reads the checkpoint, manifest, and graph DOT from the metadata branch
-/// (`refs/fabro/{run_id}`), re-attaches a worktree to the existing run branch,
+/// (`fabro/meta/{run_id}`), re-attaches a worktree to the existing run branch,
 /// and resumes execution via `run_from_checkpoint()`.
 async fn run_from_branch(
     args: RunArgs,
@@ -2311,10 +2311,7 @@ async fn write_finalize_commit(config: &RunConfig, run_dir: &std::path::Path) {
     }
 
     // Push the finalize commit
-    let run_id_part = meta_branch
-        .strip_prefix("refs/fabro/")
-        .unwrap_or(meta_branch);
-    let refspec = format!("{meta_branch}:refs/heads/fabro/meta/{run_id_part}");
+    let refspec = format!("refs/heads/{meta_branch}");
     crate::engine::git_push_host(repo_path, &refspec, &config.github_app, "finalize metadata")
         .await;
 }
