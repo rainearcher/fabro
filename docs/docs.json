@@ -143,6 +143,7 @@
             "group": "Example Workflows",
             "icon": "flask",
             "pages": [
+              "examples/repl-handoff",
               "examples/solitaire",
               "examples/semantic-port",
               "examples/definition-of-done",
