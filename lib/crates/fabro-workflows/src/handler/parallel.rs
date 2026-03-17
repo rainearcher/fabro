@@ -8,6 +8,7 @@ use tokio::sync::Semaphore;
 
 use crate::context::keys;
 use crate::context::Context;
+use crate::engine::set_hook_node;
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
 use crate::millis_u64;
@@ -306,9 +307,7 @@ impl Handler for ParallelHandler {
                 context.run_id(),
                 graph.name.clone(),
             );
-            hook_ctx.node_id = Some(node.id.clone());
-            hook_ctx.node_label = Some(node.label().to_string());
-            hook_ctx.handler_type = node.handler_type().map(String::from);
+            set_hook_node(&mut hook_ctx, node);
             let _ = services.run_hooks(&hook_ctx).await;
         }
         let max_parallel = node
@@ -729,9 +728,7 @@ impl Handler for ParallelHandler {
                 context.run_id(),
                 graph.name.clone(),
             );
-            hook_ctx.node_id = Some(node.id.clone());
-            hook_ctx.node_label = Some(node.label().to_string());
-            hook_ctx.handler_type = node.handler_type().map(String::from);
+            set_hook_node(&mut hook_ctx, node);
             let _ = services.run_hooks(&hook_ctx).await;
         }
 

@@ -30,6 +30,13 @@ use fabro_graphviz::graph::{Edge, Graph, Node};
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_interview::Interviewer;
 
+/// Populate node-related fields on a `HookContext` from a graph `Node`.
+pub(crate) fn set_hook_node(ctx: &mut HookContext, node: &Node) {
+    ctx.node_id = Some(node.id.clone());
+    ctx.node_label = Some(node.label().to_string());
+    ctx.handler_type = node.handler_type().map(String::from);
+}
+
 /// Classify the failure mode of a completed outcome.
 ///
 /// Returns `None` for `Success`, `PartialSuccess`, and `Skipped` outcomes.
@@ -1857,9 +1864,7 @@ impl WorkflowRunEngine {
                 let mut hook_ctx =
                     HookContext::new(HookEvent::StageStart, run_id.clone(), graph.name.clone());
                 hook_ctx.cwd = hook_work_dir.as_ref().map(|p| p.display().to_string());
-                hook_ctx.node_id = Some(node.id.clone());
-                hook_ctx.node_label = Some(node.label().to_string());
-                hook_ctx.handler_type = node.handler_type().map(String::from);
+                set_hook_node(&mut hook_ctx, node);
                 hook_ctx.attempt = Some(1);
                 hook_ctx.max_attempts =
                     Some(usize::try_from(retry_policy.max_attempts).unwrap_or(usize::MAX));
@@ -1995,9 +2000,7 @@ impl WorkflowRunEngine {
                         run_id.clone(),
                         graph.name.clone(),
                     );
-                    hook_ctx.node_id = Some(node.id.clone());
-                    hook_ctx.node_label = Some(node.label().to_string());
-                    hook_ctx.handler_type = node.handler_type().map(String::from);
+                    set_hook_node(&mut hook_ctx, node);
                     hook_ctx.status = Some("fail".into());
                     hook_ctx.failure_reason = outcome.failure_reason().map(String::from);
                     let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
@@ -2029,9 +2032,7 @@ impl WorkflowRunEngine {
                         run_id.clone(),
                         graph.name.clone(),
                     );
-                    hook_ctx.node_id = Some(node.id.clone());
-                    hook_ctx.node_label = Some(node.label().to_string());
-                    hook_ctx.handler_type = node.handler_type().map(String::from);
+                    set_hook_node(&mut hook_ctx, node);
                     hook_ctx.status = Some(outcome.status.to_string());
                     let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
                 }
