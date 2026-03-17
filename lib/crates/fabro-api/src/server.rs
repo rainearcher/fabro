@@ -649,18 +649,14 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
 
     // Auto-derive retro and accumulate aggregate usage
     if let Some(ref cp) = checkpoint {
-        let (failed, failure_reason) = match &result {
-            Ok(_) => (false, None),
-            Err(e) => (true, Some(e.to_string())),
-        };
-        let stage_durations = fabro_workflows::retro::extract_stage_durations(&config.run_dir);
-        let retro = fabro_workflows::retro::derive_retro(
+        let failed = result.is_err();
+        let completed_stages = fabro_workflows::build_completed_stages(cp, failed);
+        let stage_durations = fabro_retro::retro::extract_stage_durations(&config.run_dir);
+        let retro = fabro_retro::retro::derive_retro(
             &run_id,
             "workflow",
             "",
-            cp,
-            failed,
-            failure_reason.as_deref(),
+            completed_stages,
             0,
             &stage_durations,
         );
@@ -1425,7 +1421,7 @@ async fn get_retro(
         return (StatusCode::OK, Json(serde_json::json!(null))).into_response();
     };
 
-    match fabro_workflows::retro::Retro::load(&run_dir) {
+    match fabro_retro::retro::Retro::load(&run_dir) {
         Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
         Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
     }

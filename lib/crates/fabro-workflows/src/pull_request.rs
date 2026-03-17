@@ -6,7 +6,7 @@ use tracing::{debug, info};
 use fabro_github::{self as github_app, ssh_url_to_https, GitHubAppCredentials};
 
 use crate::conclusion::Conclusion;
-use crate::retro::Retro;
+use fabro_retro::retro::Retro;
 
 /// Record of a pull request created for a workflow run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -428,10 +428,10 @@ pub async fn maybe_open_pull_request(
 mod tests {
     use super::*;
     use crate::conclusion::StageSummary;
-    use crate::retro::{
+    use chrono::Utc;
+    use fabro_retro::retro::{
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
-    use chrono::Utc;
 
     fn make_test_conclusion() -> Conclusion {
         Conclusion {

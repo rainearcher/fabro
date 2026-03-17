@@ -1242,7 +1242,7 @@ pub async fn run_command(
 
         // Load checkpoint and stage durations to populate per-stage data
         let checkpoint = Checkpoint::load(&run_dir.join("checkpoint.json")).ok();
-        let stage_durations = crate::retro::extract_stage_durations(&run_dir);
+        let stage_durations = fabro_retro::retro::extract_stage_durations(&run_dir);
 
         let (stages, total_cost, total_retries) = if let Some(ref cp) = checkpoint {
             let mut stages = Vec::new();
@@ -1293,12 +1293,9 @@ pub async fn run_command(
 
     // Auto-derive retro (always, cheap) and optionally run retro agent
     if !args.no_retro && super::project_config::is_retro_enabled() {
-        let (failed, failure_reason) = match &engine_result {
-            Ok(ref o) => (
-                o.status == StageStatus::Fail,
-                o.failure_reason().map(String::from),
-            ),
-            Err(e) => (true, Some(e.to_string())),
+        let failed = match &engine_result {
+            Ok(ref o) => o.status == StageStatus::Fail,
+            Err(_) => true,
         };
         generate_retro(
             &config.run_id,
@@ -1306,7 +1303,6 @@ pub async fn run_command(
             graph.goal(),
             &run_dir,
             failed,
-            failure_reason.as_deref(),
             run_duration_ms,
             dry_run_mode,
             llm_client.as_ref(),
@@ -1804,12 +1800,9 @@ async fn run_from_branch(
 
     // Auto-derive retro
     if !args.no_retro && super::project_config::is_retro_enabled() {
-        let (failed, failure_reason) = match &engine_result {
-            Ok(ref o) => (
-                o.status == StageStatus::Fail,
-                o.failure_reason().map(String::from),
-            ),
-            Err(e) => (true, Some(e.to_string())),
+        let failed = match &engine_result {
+            Ok(ref o) => o.status == StageStatus::Fail,
+            Err(_) => true,
         };
 
         let llm_client = if dry_run_mode {
@@ -1824,7 +1817,6 @@ async fn run_from_branch(
             graph.goal(),
             &run_dir,
             failed,
-            failure_reason.as_deref(),
             run_duration_ms,
             dry_run_mode,
             llm_client.as_ref(),
@@ -2308,7 +2300,6 @@ async fn generate_retro(
     goal: &str,
     run_dir: &std::path::Path,
     failed: bool,
-    failure_reason: Option<&str>,
     run_duration_ms: u64,
     dry_run_mode: bool,
     llm_client: Option<&fabro_llm::client::Client>,
@@ -2329,14 +2320,13 @@ async fn generate_retro(
         }
     };
 
-    let stage_durations = crate::retro::extract_stage_durations(run_dir);
-    let mut retro = crate::retro::derive_retro(
+    let completed_stages = crate::build_completed_stages(&cp, failed);
+    let stage_durations = fabro_retro::retro::extract_stage_durations(run_dir);
+    let mut retro = fabro_retro::retro::derive_retro(
         run_id,
         workflow_name,
         goal,
-        &cp,
-        failed,
-        failure_reason,
+        completed_stages,
         run_duration_ms,
         &stage_durations,
     );
@@ -2365,15 +2355,41 @@ async fn generate_retro(
     }
 
     let narrative_result = if dry_run_mode {
-        Ok(crate::retro_agent::dry_run_narrative())
+        Ok(fabro_retro::retro_agent::dry_run_narrative())
     } else if let Some(client) = llm_client {
-        crate::retro_agent::run_retro_agent(
+        let emitter_clone = emitter.clone();
+        let event_callback: Option<Arc<dyn Fn(fabro_agent::SessionEvent) + Send + Sync>> =
+            emitter_clone.map(
+                |em| -> Arc<dyn Fn(fabro_agent::SessionEvent) + Send + Sync> {
+                    Arc::new(move |event: fabro_agent::SessionEvent| {
+                        em.touch();
+
+                        if !matches!(
+                            &event.event,
+                            fabro_agent::AgentEvent::SessionStarted
+                                | fabro_agent::AgentEvent::SessionEnded
+                                | fabro_agent::AgentEvent::AssistantTextStart
+                                | fabro_agent::AgentEvent::AssistantOutputReplace { .. }
+                                | fabro_agent::AgentEvent::TextDelta { .. }
+                                | fabro_agent::AgentEvent::ReasoningDelta { .. }
+                                | fabro_agent::AgentEvent::ToolCallOutputDelta { .. }
+                                | fabro_agent::AgentEvent::SkillExpanded { .. }
+                        ) {
+                            em.emit(&crate::event::WorkflowRunEvent::Agent {
+                                stage: "retro".to_string(),
+                                event: event.event.clone(),
+                            });
+                        }
+                    })
+                },
+            );
+        fabro_retro::retro_agent::run_retro_agent(
             sandbox,
             run_dir,
             client,
             provider_enum,
             model,
-            emitter.clone(),
+            event_callback,
         )
         .await
     } else {

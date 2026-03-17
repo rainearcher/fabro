@@ -5,9 +5,21 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::checkpoint::Checkpoint;
-use crate::error::Result;
-use crate::outcome::StageStatus;
+/// Flat summary of a completed stage, built by callers from their own
+/// checkpoint/outcome types to decouple retro derivation from the workflow
+/// engine internals.
+#[derive(Debug, Clone)]
+pub struct CompletedStage {
+    pub node_id: String,
+    pub status: String,
+    pub succeeded: bool,
+    pub failed: bool,
+    pub retries: u32,
+    pub cost: Option<f64>,
+    pub notes: Option<String>,
+    pub failure_reason: Option<String>,
+    pub files_touched: Vec<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -169,13 +181,17 @@ impl Retro {
     }
 
     /// Save the retro as JSON to `run_dir/retro.json`.
-    pub fn save(&self, run_dir: &Path) -> Result<()> {
-        crate::save_json(self, &run_dir.join("retro.json"), "retro")
+    pub fn save(&self, run_dir: &Path) -> anyhow::Result<()> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| anyhow::anyhow!("retro serialize failed: {e}"))?;
+        std::fs::write(run_dir.join("retro.json"), json)?;
+        Ok(())
     }
 
     /// Load a retro from `run_dir/retro.json`.
-    pub fn load(run_dir: &Path) -> Result<Self> {
-        crate::load_json(&run_dir.join("retro.json"), "retro")
+    pub fn load(run_dir: &Path) -> anyhow::Result<Self> {
+        let data = std::fs::read_to_string(run_dir.join("retro.json"))?;
+        serde_json::from_str(&data).map_err(|e| anyhow::anyhow!("retro deserialize failed: {e}"))
     }
 }
 
@@ -204,17 +220,14 @@ pub fn extract_stage_durations(run_dir: &Path) -> HashMap<String, u64> {
     durations
 }
 
-/// Build a `Retro` from checkpoint data and run metadata. All qualitative
+/// Build a `Retro` from completed stage data and run metadata. All qualitative
 /// fields (`smoothness`, `intent`, `outcome`, etc.) are left as `None` for
 /// the retro agent to fill in.
-#[allow(clippy::too_many_arguments)]
 pub fn derive_retro(
     run_id: &str,
     workflow_name: &str,
     goal: &str,
-    checkpoint: &Checkpoint,
-    run_failed: bool,
-    _run_error: Option<&str>,
+    completed_stages: Vec<CompletedStage>,
     duration_ms: u64,
     stage_durations: &HashMap<String, u64>,
 ) -> Retro {
@@ -225,51 +238,35 @@ pub fn derive_retro(
     let mut stages_completed: usize = 0;
     let mut stages_failed: usize = 0;
 
-    for node_id in &checkpoint.completed_nodes {
-        let outcome = checkpoint.node_outcomes.get(node_id);
-        // node_retries stores attempts_used (1-indexed), convert to retry count
-        let retries = checkpoint
-            .node_retries
-            .get(node_id)
-            .copied()
-            .unwrap_or(1)
-            .saturating_sub(1);
-        total_retries += retries;
+    for cs in completed_stages {
+        total_retries += cs.retries;
 
-        let status = outcome
-            .map(|o| o.status.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-
-        match outcome.map(|o| &o.status) {
-            Some(StageStatus::Success | StageStatus::PartialSuccess) => stages_completed += 1,
-            Some(StageStatus::Fail) => stages_failed += 1,
-            _ => {}
+        if cs.succeeded {
+            stages_completed += 1;
+        }
+        if cs.failed {
+            stages_failed += 1;
         }
 
-        let cost = outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost);
-        if let Some(c) = cost {
+        if let Some(c) = cs.cost {
             *total_cost.get_or_insert(0.0) += c;
         }
 
-        let files = outcome.map(|o| o.files_touched.clone()).unwrap_or_default();
-        all_files.extend(files.iter().cloned());
+        let dur = stage_durations.get(&cs.node_id).copied().unwrap_or(0);
 
         stages.push(StageRetro {
-            stage_id: node_id.clone(),
-            stage_label: node_id.clone(),
-            status,
-            duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
-            retries,
-            cost,
-            notes: outcome.and_then(|o| o.notes.clone()),
-            failure_reason: outcome.and_then(|o| o.failure_reason().map(String::from)),
-            files_touched: files,
+            stage_label: cs.node_id.clone(),
+            duration_ms: dur,
+            retries: cs.retries,
+            cost: cs.cost,
+            stage_id: cs.node_id,
+            status: cs.status,
+            notes: cs.notes,
+            failure_reason: cs.failure_reason,
+            files_touched: cs.files_touched,
         });
-    }
 
-    // If run failed with an error not captured in stages, record it
-    if run_failed && stages_failed == 0 {
-        stages_failed = 1;
+        all_files.extend(stages.last().unwrap().files_touched.iter().cloned());
     }
 
     all_files.sort();
@@ -303,60 +300,37 @@ pub fn derive_retro(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::outcome::Outcome;
 
-    fn make_checkpoint_with_stages() -> Checkpoint {
-        let mut node_outcomes = HashMap::new();
-        let mut outcome_a = Outcome::success();
-        outcome_a.notes = Some("Planned the approach".to_string());
-        outcome_a.files_touched = vec!["src/main.rs".to_string()];
-        outcome_a.usage = Some(crate::outcome::StageUsage {
-            model: "claude-opus-4-6".to_string(),
-            input_tokens: 1000,
-            output_tokens: 500,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            reasoning_tokens: None,
-            cost: Some(0.05),
-        });
-        node_outcomes.insert("plan".to_string(), outcome_a);
-
-        let mut outcome_b = Outcome::success();
-        outcome_b.files_touched = vec!["src/main.rs".to_string(), "src/lib.rs".to_string()];
-        outcome_b.usage = Some(crate::outcome::StageUsage {
-            model: "claude-opus-4-6".to_string(),
-            input_tokens: 2000,
-            output_tokens: 1000,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            reasoning_tokens: None,
-            cost: Some(0.10),
-        });
-        node_outcomes.insert("code".to_string(), outcome_b);
-
-        let mut node_retries = HashMap::new();
-        // 2 attempts_used = 1 actual retry
-        node_retries.insert("code".to_string(), 2u32);
-
-        Checkpoint {
-            timestamp: Utc::now(),
-            current_node: "code".to_string(),
-            completed_nodes: vec!["plan".to_string(), "code".to_string()],
-            node_retries,
-            context_values: HashMap::new(),
-            logs: Vec::new(),
-            node_outcomes,
-            next_node_id: None,
-            git_commit_sha: None,
-            loop_failure_signatures: HashMap::new(),
-            restart_failure_signatures: HashMap::new(),
-            node_visits: HashMap::new(),
-        }
+    fn make_completed_stages() -> Vec<CompletedStage> {
+        vec![
+            CompletedStage {
+                node_id: "plan".to_string(),
+                status: "success".to_string(),
+                succeeded: true,
+                failed: false,
+                retries: 0,
+                cost: Some(0.05),
+                notes: Some("Planned the approach".to_string()),
+                failure_reason: None,
+                files_touched: vec!["src/main.rs".to_string()],
+            },
+            CompletedStage {
+                node_id: "code".to_string(),
+                status: "success".to_string(),
+                succeeded: true,
+                failed: false,
+                retries: 1,
+                cost: Some(0.10),
+                notes: None,
+                failure_reason: None,
+                files_touched: vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
+            },
+        ]
     }
 
     #[test]
-    fn derive_retro_builds_stages_from_checkpoint() {
-        let cp = make_checkpoint_with_stages();
+    fn derive_retro_builds_stages() {
+        let stages = make_completed_stages();
         let durations: HashMap<String, u64> =
             [("plan".to_string(), 5000), ("code".to_string(), 15000)]
                 .into_iter()
@@ -366,9 +340,7 @@ mod tests {
             "run-1",
             "my_pipeline",
             "Fix the bug",
-            &cp,
-            false,
-            None,
+            stages.clone(),
             20000,
             &durations,
         );
@@ -394,45 +366,36 @@ mod tests {
     }
 
     #[test]
-    fn derive_retro_handles_failed_run() {
-        let cp = Checkpoint {
-            timestamp: Utc::now(),
-            current_node: "start".to_string(),
-            completed_nodes: vec!["start".to_string()],
-            node_retries: HashMap::new(),
-            context_values: HashMap::new(),
-            logs: Vec::new(),
-            node_outcomes: {
-                let mut m = HashMap::new();
-                m.insert("start".to_string(), Outcome::success());
-                m
-            },
-            next_node_id: None,
-            git_commit_sha: None,
-            loop_failure_signatures: HashMap::new(),
-            restart_failure_signatures: HashMap::new(),
-            node_visits: HashMap::new(),
-        };
+    fn derive_retro_handles_failed_stage() {
+        let stages = vec![CompletedStage {
+            node_id: "start".to_string(),
+            status: "fail".to_string(),
+            succeeded: false,
+            failed: true,
+            retries: 0,
+            cost: None,
+            notes: None,
+            failure_reason: Some("boom".to_string()),
+            files_touched: vec![],
+        }];
 
         let retro = derive_retro(
             "run-2",
             "pipe",
             "goal",
-            &cp,
-            true,
-            Some("boom"),
+            stages.clone(),
             5000,
             &HashMap::new(),
         );
 
         assert_eq!(retro.stats.stages_failed, 1);
-        assert_eq!(retro.stats.stages_completed, 1);
+        assert_eq!(retro.stats.stages_completed, 0);
     }
 
     #[test]
     fn apply_narrative_merges_fields() {
-        let cp = make_checkpoint_with_stages();
-        let mut retro = derive_retro("r1", "p", "g", &cp, false, None, 1000, &HashMap::new());
+        let stages = make_completed_stages();
+        let mut retro = derive_retro("r1", "p", "g", stages.clone(), 1000, &HashMap::new());
 
         let narrative = RetroNarrative {
             smoothness: SmoothnessRating::Smooth,
@@ -465,17 +428,8 @@ mod tests {
     #[test]
     fn save_and_load_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
-        let cp = make_checkpoint_with_stages();
-        let mut retro = derive_retro(
-            "r1",
-            "pipe",
-            "goal",
-            &cp,
-            false,
-            None,
-            1000,
-            &HashMap::new(),
-        );
+        let stages = make_completed_stages();
+        let mut retro = derive_retro("r1", "pipe", "goal", stages.clone(), 1000, &HashMap::new());
         retro.smoothness = Some(SmoothnessRating::Bumpy);
         retro.intent = Some("Test intent".to_string());
 

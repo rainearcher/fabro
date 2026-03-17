@@ -30,6 +30,7 @@ fabro-github = { path = "../fabro-github" }
 fabro-util = { path = "../fabro-util" }
 fabro-git-storage = { path = "../fabro-git-storage" }
 fabro-llm = { path = "../fabro-llm" }
+fabro-retro = { path = "../fabro-retro" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

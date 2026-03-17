@@ -11,7 +11,6 @@ use fabro_llm::provider::Provider;
 use fabro_llm::types::ToolDefinition;
 use tokio::task::JoinHandle;
 
-use crate::event::EventEmitter;
 use crate::retro::RetroNarrative;
 
 const RETRO_SYSTEM_PROMPT: &str = r#"You are a workflow run retrospective analyst. Your job is to analyze a completed workflow run and generate a structured retrospective.
@@ -119,7 +118,7 @@ pub async fn run_retro_agent(
     llm_client: &Client,
     provider: Provider,
     model: &str,
-    emitter: Option<Arc<EventEmitter>>,
+    event_callback: Option<Arc<dyn Fn(SessionEvent) + Send + Sync>>,
 ) -> anyhow::Result<RetroNarrative> {
     // Upload data files into sandbox (needed for Daytona; no-op effect for local
     // since the agent can also read from the original paths via tools).
@@ -172,10 +171,8 @@ pub async fn run_retro_agent(
     let rx = session.subscribe();
     let event_writer_handle = spawn_retro_event_writer(rx, retro_dir.join("retro_session.jsonl"));
 
-    // Optionally forward agent events to the workflow emitter for progress display
-    let event_forwarder_handle = emitter
-        .as_ref()
-        .map(|em| spawn_retro_event_forwarder(&session, Arc::clone(em)));
+    // Optionally forward agent events via the callback
+    let event_forwarder_handle = event_callback.map(|cb| spawn_retro_event_forwarder(&session, cb));
 
     session.initialize().await;
 
@@ -313,34 +310,15 @@ fn spawn_retro_event_writer(
     })
 }
 
-/// Spawn a background task that forwards non-streaming session events to
-/// the workflow `EventEmitter`, enabling `ProgressUI` to show tool call
-/// spinners under the retro stage.
-fn spawn_retro_event_forwarder(session: &Session, emitter: Arc<EventEmitter>) -> JoinHandle<()> {
-    use crate::event::WorkflowRunEvent;
-    use fabro_agent::AgentEvent;
-
+/// Spawn a background task that forwards session events via the provided callback.
+fn spawn_retro_event_forwarder(
+    session: &Session,
+    callback: Arc<dyn Fn(SessionEvent) + Send + Sync>,
+) -> JoinHandle<()> {
     let mut rx = session.subscribe();
     tokio::spawn(async move {
         while let Ok(event) = rx.recv().await {
-            emitter.touch();
-
-            if !matches!(
-                &event.event,
-                AgentEvent::SessionStarted
-                    | AgentEvent::SessionEnded
-                    | AgentEvent::AssistantTextStart
-                    | AgentEvent::AssistantOutputReplace { .. }
-                    | AgentEvent::TextDelta { .. }
-                    | AgentEvent::ReasoningDelta { .. }
-                    | AgentEvent::ToolCallOutputDelta { .. }
-                    | AgentEvent::SkillExpanded { .. }
-            ) {
-                emitter.emit(&WorkflowRunEvent::Agent {
-                    stage: "retro".to_string(),
-                    event: event.event.clone(),
-                });
-            }
+            callback(event);
         }
     })
 }

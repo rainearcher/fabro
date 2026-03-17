@@ -1286,6 +1286,7 @@ dependencies = [
  "fabro-github",
  "fabro-graphviz",
  "fabro-llm",
+ "fabro-retro",
  "fabro-types",
  "fabro-util",
  "fabro-workflows",
@@ -1555,6 +1556,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-retro"
+version = "0.174.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "fabro-agent",
+ "fabro-llm",
+ "fabro-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "fabro-slack"
 version = "0.174.0"
 dependencies = [
@@ -1684,6 +1700,7 @@ dependencies = [
  "fabro-graphviz",
  "fabro-llm",
  "fabro-mcp",
+ "fabro-retro",
  "fabro-ssh",
  "fabro-util",
  "futures",

@@ -15,6 +15,7 @@ fabro-workflows = { path = "../fabro-workflows", features = ["exedev"] }
 fabro-github = { path = "../fabro-github" }
 fabro-agent = { path = "../fabro-agent" }
 fabro-llm = { path = "../fabro-llm" }
+fabro-retro = { path = "../fabro-retro" }
 fabro-util = { path = "../fabro-util" }
 fabro-db = { path = "../fabro-db" }
 fabro-types = { path = "../fabro-types" }
