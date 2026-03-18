@@ -1,0 +1,20 @@
+---
+title: "OpenAI Codex backend support"
+date: "2026-03-17"
+---
+
+## OpenAI Codex backend support
+
+Users who authenticate with OpenAI credentials are now routed through the ChatGPT Codex backend API. Your OpenAI OAuth login gives you access to models through OpenAI's Codex infrastructure, with streaming-only requests and provider-specific optimizations handled automatically. The account ID from OAuth tokens is persisted so subsequent requests are properly associated.
+
+## More
+
+<Accordion title="CLI">
+- Added `fabro docs` subcommand to open the documentation website in your browser
+- Added `fabro discord` subcommand to open the Discord community invite in your browser
+</Accordion>
+
+<Accordion title="Improvements">
+- Added `gpt-5.4-mini` to the model catalog
+- DOT workflow syntax is now highlighted in the documentation with color-coded keywords, strings, and attributes
+</Accordion>
