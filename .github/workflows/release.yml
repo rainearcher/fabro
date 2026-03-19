@@ -10,6 +10,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  SEGMENT_BASE_URL: ${{ vars.SEGMENT_BASE_URL }}
+  SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}
 
 jobs:
   compile:
