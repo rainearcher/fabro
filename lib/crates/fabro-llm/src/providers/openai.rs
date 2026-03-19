@@ -414,7 +414,7 @@ fn build_api_request(request: &Request, stream: bool, codex_mode: bool) -> ApiRe
         text,
         stop: request.stop_sequences.clone(),
         metadata: request.metadata.clone(),
-        store: false,
+        store: !codex_mode,
         stream,
     }
 }
