@@ -25,6 +25,13 @@ pub fn spawn_detached(args: &[&str], env: &[(&str, &str)]) {
 fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)]) {
     use fork::{fork, setsid, Fork};
 
+    // Flush stdout/stderr before forking so the child process doesn't inherit
+    // buffered data that would be flushed again on child exit, causing
+    // duplicate or corrupted output.
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+
     // First fork — parent returns immediately.
     match fork() {
         Ok(Fork::Parent(_)) => {}
