@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use fabro_devcontainer::DevcontainerConfig;
 
 use crate::event::{EventEmitter, WorkflowRunEvent};
-use fabro_daytona::{DaytonaSnapshotConfig, DockerfileSource};
+use fabro_sandbox::daytona::{DaytonaSnapshotConfig, DockerfileSource};
 
 /// Compute a deterministic snapshot name from Dockerfile content.
 pub fn snapshot_name_for_dockerfile(dockerfile: &str) -> String {

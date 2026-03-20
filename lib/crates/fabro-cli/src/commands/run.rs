@@ -281,7 +281,7 @@ fn resolve_worktree_mode(
 fn resolve_daytona_config(
     run_cfg: Option<&WorkflowRunConfig>,
     run_defaults: &RunDefaults,
-) -> Option<fabro_daytona::DaytonaConfig> {
+) -> Option<fabro_sandbox::daytona::DaytonaConfig> {
     run_cfg
         .and_then(|c| c.sandbox.as_ref())
         .and_then(|e| e.daytona.clone())
@@ -298,7 +298,7 @@ fn resolve_daytona_config(
 fn resolve_exe_config(
     run_cfg: Option<&WorkflowRunConfig>,
     run_defaults: &RunDefaults,
-) -> Option<fabro_exe::ExeConfig> {
+) -> Option<fabro_sandbox::exe::ExeConfig> {
     run_cfg
         .and_then(|c| c.sandbox.as_ref())
         .and_then(|e| e.exe.clone())
@@ -310,8 +310,8 @@ fn resolve_exe_config(
 ///
 /// Returns `None` if no git repo is detected. Credential resolution is
 /// handled by ExeSandbox itself via its `github_app` field.
-fn resolve_exe_clone_params(cwd: &std::path::Path) -> Option<fabro_exe::GitCloneParams> {
-    let (detected_url, branch) = match fabro_daytona::detect_repo_info(cwd) {
+fn resolve_exe_clone_params(cwd: &std::path::Path) -> Option<fabro_sandbox::exe::GitCloneParams> {
+    let (detected_url, branch) = match fabro_sandbox::daytona::detect_repo_info(cwd) {
         Ok(info) => info,
         Err(e) => {
             tracing::warn!("No git repo detected for exe.dev clone: {e}");
@@ -319,14 +319,14 @@ fn resolve_exe_clone_params(cwd: &std::path::Path) -> Option<fabro_exe::GitClone
         }
     };
     let url = fabro_github::ssh_url_to_https(&detected_url);
-    Some(fabro_exe::GitCloneParams { url, branch })
+    Some(fabro_sandbox::exe::GitCloneParams { url, branch })
 }
 
 /// Resolve SSH sandbox config: TOML config > run defaults.
 fn resolve_ssh_config(
     run_cfg: Option<&WorkflowRunConfig>,
     run_defaults: &RunDefaults,
-) -> Option<fabro_ssh::SshConfig> {
+) -> Option<fabro_sandbox::ssh::SshConfig> {
     run_cfg
         .and_then(|c| c.sandbox.as_ref())
         .and_then(|e| e.ssh.clone())
@@ -337,8 +337,8 @@ fn resolve_ssh_config(
 ///
 /// Returns `None` if no git repo is detected. Credential resolution is
 /// handled by SshSandbox itself via its `github_app` field.
-fn resolve_ssh_clone_params(cwd: &std::path::Path) -> Option<fabro_ssh::GitCloneParams> {
-    let (detected_url, branch) = match fabro_daytona::detect_repo_info(cwd) {
+fn resolve_ssh_clone_params(cwd: &std::path::Path) -> Option<fabro_sandbox::ssh::GitCloneParams> {
+    let (detected_url, branch) = match fabro_sandbox::daytona::detect_repo_info(cwd) {
         Ok(info) => info,
         Err(e) => {
             tracing::warn!("No git repo detected for SSH clone: {e}");
@@ -346,7 +346,7 @@ fn resolve_ssh_clone_params(cwd: &std::path::Path) -> Option<fabro_ssh::GitClone
         }
     };
     let url = fabro_github::ssh_url_to_https(&detected_url);
-    Some(fabro_ssh::GitCloneParams { url, branch })
+    Some(fabro_sandbox::ssh::GitCloneParams { url, branch })
 }
 
 /// Resolve the fallback chain from config.
@@ -564,9 +564,10 @@ pub async fn run_command(
     let preserve_sandbox =
         resolve_preserve_sandbox(args.preserve_sandbox, run_cfg.as_ref(), &run_defaults);
     let original_cwd = std::env::current_dir()?;
-    let (origin_url, detected_base_branch) = fabro_daytona::detect_repo_info(&original_cwd)
-        .map(|(url, branch)| (Some(url), branch))
-        .unwrap_or((None, None));
+    let (origin_url, detected_base_branch) =
+        fabro_sandbox::daytona::detect_repo_info(&original_cwd)
+            .map(|(url, branch)| (Some(url), branch))
+            .unwrap_or((None, None));
     let git_status =
         fabro_workflows::git::sync_status(&original_cwd, "origin", detected_base_branch.as_deref());
 
@@ -1061,7 +1062,7 @@ pub async fn run_command(
         }
         SandboxProvider::Daytona => {
             let config = daytona_config.clone().unwrap_or_default();
-            let mut env = fabro_daytona::DaytonaSandbox::new(
+            let mut env = fabro_sandbox::daytona::DaytonaSandbox::new(
                 config,
                 github_app.clone(),
                 Some(run_id.clone()),
@@ -1079,11 +1080,11 @@ pub async fn run_command(
         SandboxProvider::Exe => {
             let clone_params = resolve_exe_clone_params(&original_cwd);
 
-            let mgmt_ssh = fabro_exe::OpensshRunner::connect_raw("exe.dev")
+            let mgmt_ssh = fabro_sandbox::exe::OpensshRunner::connect_raw("exe.dev")
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to connect to exe.dev: {e}"))?;
             let config = exe_config.unwrap_or_default();
-            let mut env = fabro_exe::ExeSandbox::new(
+            let mut env = fabro_sandbox::exe::ExeSandbox::new(
                 Box::new(mgmt_ssh),
                 config,
                 clone_params,
@@ -1101,7 +1102,7 @@ pub async fn run_command(
                 .clone()
                 .ok_or_else(|| anyhow::anyhow!("--sandbox ssh requires [sandbox.ssh] config"))?;
             let clone_params = resolve_ssh_clone_params(&original_cwd);
-            let mut env = fabro_ssh::SshSandbox::new(
+            let mut env = fabro_sandbox::ssh::SshSandbox::new(
                 config,
                 clone_params,
                 Some(run_id.clone()),
@@ -1824,11 +1825,11 @@ async fn run_from_branch(
             SandboxProvider::Exe => {
                 let exe_config = resolve_exe_config(None, &run_defaults);
                 let clone_params = resolve_exe_clone_params(&original_cwd);
-                let mgmt_ssh = fabro_exe::OpensshRunner::connect_raw("exe.dev")
+                let mgmt_ssh = fabro_sandbox::exe::OpensshRunner::connect_raw("exe.dev")
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to connect to exe.dev: {e}"))?;
                 let config = exe_config.unwrap_or_default();
-                let mut env = fabro_exe::ExeSandbox::new(
+                let mut env = fabro_sandbox::exe::ExeSandbox::new(
                     Box::new(mgmt_ssh),
                     config,
                     clone_params,
@@ -1846,7 +1847,7 @@ async fn run_from_branch(
                     anyhow::anyhow!("--sandbox ssh requires [sandbox.ssh] config")
                 })?;
                 let clone_params = resolve_ssh_clone_params(&original_cwd);
-                let mut env = fabro_ssh::SshSandbox::new(
+                let mut env = fabro_sandbox::ssh::SshSandbox::new(
                     config,
                     clone_params,
                     Some(run_id.clone()),
@@ -2179,31 +2180,40 @@ async fn run_preflight(
         }
         SandboxProvider::Daytona => {
             let config = daytona_config.unwrap_or_default();
-            match fabro_daytona::DaytonaSandbox::new(config, github_app.clone(), None, None).await {
+            match fabro_sandbox::daytona::DaytonaSandbox::new(
+                config,
+                github_app.clone(),
+                None,
+                None,
+            )
+            .await
+            {
                 Ok(env) => Ok(Arc::new(env) as Arc<dyn Sandbox>),
                 Err(e) => Err(format!("Daytona sandbox creation failed: {e}")),
             }
         }
         #[cfg(feature = "exedev")]
-        SandboxProvider::Exe => match fabro_exe::OpensshRunner::connect_raw("exe.dev").await {
-            Ok(mgmt_ssh) => {
-                let config = exe_config.unwrap_or_default();
-                let clone_params = resolve_exe_clone_params(&original_cwd);
-                let env = fabro_exe::ExeSandbox::new(
-                    Box::new(mgmt_ssh),
-                    config,
-                    clone_params,
-                    None,
-                    None,
-                );
-                Ok(Arc::new(env) as Arc<dyn Sandbox>)
+        SandboxProvider::Exe => {
+            match fabro_sandbox::exe::OpensshRunner::connect_raw("exe.dev").await {
+                Ok(mgmt_ssh) => {
+                    let config = exe_config.unwrap_or_default();
+                    let clone_params = resolve_exe_clone_params(&original_cwd);
+                    let env = fabro_sandbox::exe::ExeSandbox::new(
+                        Box::new(mgmt_ssh),
+                        config,
+                        clone_params,
+                        None,
+                        None,
+                    );
+                    Ok(Arc::new(env) as Arc<dyn Sandbox>)
+                }
+                Err(e) => Err(format!("exe.dev SSH connection failed: {e}")),
             }
-            Err(e) => Err(format!("exe.dev SSH connection failed: {e}")),
-        },
+        }
         SandboxProvider::Ssh => match ssh_config {
             Some(config) => {
                 let clone_params = resolve_ssh_clone_params(&original_cwd);
-                let env = fabro_ssh::SshSandbox::new(config, clone_params, None, None);
+                let env = fabro_sandbox::ssh::SshSandbox::new(config, clone_params, None, None);
                 Ok(Arc::new(env) as Arc<dyn Sandbox>)
             }
             None => Err("SSH sandbox requires [sandbox.ssh] config".to_string()),

@@ -721,7 +721,7 @@ pub async fn git_push_host(
     github_app: &Option<fabro_github::GitHubAppCredentials>,
     label: &str,
 ) -> bool {
-    let (origin_url, _) = match fabro_daytona::detect_repo_info(repo_path) {
+    let (origin_url, _) = match fabro_sandbox::daytona::detect_repo_info(repo_path) {
         Ok(info) => info,
         Err(e) => {
             tracing::warn!(error = %e, label, "Cannot detect origin for push");

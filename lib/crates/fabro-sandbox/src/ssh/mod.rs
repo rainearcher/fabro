@@ -4,24 +4,18 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
-use async_trait::async_trait;
-use base64::Engine;
-use fabro_agent::sandbox::{
+use crate::shell_quote;
+use crate::{
     format_lines_numbered, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
     SandboxEventCallback,
 };
+use async_trait::async_trait;
+use base64::Engine;
 use tokio_util::sync::CancellationToken;
 
 pub use openssh_runner::OpensshRunner;
 
 const PROVIDER: &str = "ssh";
-
-pub(crate) fn shell_quote(s: &str) -> String {
-    shlex::try_quote(s).map_or_else(
-        |_| format!("'{}'", s.replace('\'', "'\\''")),
-        |q| q.to_string(),
-    )
-}
 
 /// Output from an SSH command execution.
 pub struct SshOutput {
@@ -59,7 +53,7 @@ pub struct GitCloneParams {
 
 /// Sandbox that runs all operations on a user-provided SSH host.
 ///
-/// Unlike ExeSandbox, there is no VM lifecycle management — the host
+/// Unlike ExeSandbox, there is no VM lifecycle management -- the host
 /// must already be running and accessible via SSH.
 pub struct SshSandbox {
     ssh: tokio::sync::OnceCell<Box<dyn SshRunner>>,
@@ -125,7 +119,7 @@ impl SshSandbox {
         self.ssh
             .get()
             .map(|b| b.as_ref())
-            .ok_or_else(|| "SSH sandbox not initialized — call initialize() first".to_string())
+            .ok_or_else(|| "SSH sandbox not initialized -- call initialize() first".to_string())
     }
 
     /// Return the SSH command to connect to this host.
@@ -1022,7 +1016,7 @@ mod tests {
         assert_eq!(result.exit_code, -1);
     }
 
-    /// SSH runner that never completes — blocks forever.
+    /// SSH runner that never completes -- blocks forever.
     struct HangingSshRunner;
 
     #[async_trait]

@@ -1241,7 +1241,6 @@ version = "0.176.2"
 dependencies = [
  "anyhow",
  "async-trait",
- "bollard",
  "chrono",
  "clap",
  "dirs",
@@ -1249,6 +1248,7 @@ dependencies = [
  "fabro-config",
  "fabro-llm",
  "fabro-mcp",
+ "fabro-sandbox",
  "fabro-util",
  "futures",
  "glob",
@@ -1260,7 +1260,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shell-escape",
- "tar",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1282,15 +1281,14 @@ dependencies = [
  "dirs",
  "fabro-agent",
  "fabro-config",
- "fabro-daytona",
  "fabro-db",
- "fabro-exe",
  "fabro-github",
  "fabro-graphviz",
  "fabro-hooks",
  "fabro-interview",
  "fabro-llm",
  "fabro-retro",
+ "fabro-sandbox",
  "fabro-types",
  "fabro-util",
  "fabro-workflows",
@@ -1354,9 +1352,7 @@ dependencies = [
  "fabro-api",
  "fabro-beastie",
  "fabro-config",
- "fabro-daytona",
  "fabro-devcontainer",
- "fabro-exe",
  "fabro-git-storage",
  "fabro-github",
  "fabro-graphviz",
@@ -1366,7 +1362,7 @@ dependencies = [
  "fabro-mcp",
  "fabro-openai-oauth",
  "fabro-retro",
- "fabro-ssh",
+ "fabro-sandbox",
  "fabro-telemetry",
  "fabro-util",
  "fabro-validate",
@@ -1421,29 +1417,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fabro-daytona"
-version = "0.176.2"
-dependencies = [
- "async-trait",
- "base64",
- "chrono",
- "daytona-api-client",
- "daytona-sdk",
- "fabro-agent",
- "fabro-config",
- "fabro-github",
- "git2",
- "rand 0.8.5",
- "serde",
- "shlex",
- "tempfile",
- "tokio",
- "tokio-util",
- "toml",
- "tracing",
-]
-
-[[package]]
 name = "fabro-db"
 version = "0.176.2"
 dependencies = [
@@ -1467,26 +1440,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
-]
-
-[[package]]
-name = "fabro-exe"
-version = "0.176.2"
-dependencies = [
- "async-trait",
- "base64",
- "fabro-agent",
- "fabro-config",
- "fabro-github",
- "openssh",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "shlex",
- "tempfile",
- "tokio",
- "tokio-util",
  "tracing",
 ]
 
@@ -1653,6 +1606,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-sandbox"
+version = "0.176.2"
+dependencies = [
+ "async-trait",
+ "base64",
+ "bollard",
+ "chrono",
+ "daytona-api-client",
+ "daytona-sdk",
+ "fabro-config",
+ "fabro-github",
+ "futures",
+ "git2",
+ "glob",
+ "libc",
+ "openssh",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "shlex",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "fabro-slack"
 version = "0.176.2"
 dependencies = [
@@ -1669,42 +1652,6 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "fabro-sprites"
-version = "0.176.2"
-dependencies = [
- "async-trait",
- "base64",
- "chrono",
- "fabro-agent",
- "rand 0.8.5",
- "serde",
- "shlex",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "fabro-ssh"
-version = "0.176.2"
-dependencies = [
- "async-trait",
- "base64",
- "fabro-agent",
- "fabro-config",
- "fabro-github",
- "openssh",
- "serde",
- "serde_json",
- "shlex",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
 ]
 
 [[package]]
@@ -1796,9 +1743,7 @@ dependencies = [
  "dotenvy",
  "fabro-agent",
  "fabro-config",
- "fabro-daytona",
  "fabro-devcontainer",
- "fabro-exe",
  "fabro-git-storage",
  "fabro-github",
  "fabro-graphviz",
@@ -1807,7 +1752,7 @@ dependencies = [
  "fabro-llm",
  "fabro-mcp",
  "fabro-retro",
- "fabro-ssh",
+ "fabro-sandbox",
  "fabro-util",
  "fabro-validate",
  "futures",

@@ -4,12 +4,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
-use async_trait::async_trait;
-use base64::Engine;
-use fabro_agent::sandbox::{
+use crate::shell_quote;
+use crate::{
     format_lines_numbered, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
     SandboxEventCallback,
 };
+use async_trait::async_trait;
+use base64::Engine;
 use tokio_util::sync::CancellationToken;
 
 pub use openssh_runner::OpensshRunner;
@@ -39,13 +40,6 @@ impl SshRunner for NoopSshRunner {
     async fn download_file(&self, _path: &str) -> Result<Vec<u8>, String> {
         Err("NoopSshRunner: management plane not available on reconnected sandbox".to_string())
     }
-}
-
-pub(crate) fn shell_quote(s: &str) -> String {
-    shlex::try_quote(s).map_or_else(
-        |_| format!("'{}'", s.replace('\'', "'\\''")),
-        |q| q.to_string(),
-    )
 }
 
 /// Factory function type for creating data-plane SSH runners.

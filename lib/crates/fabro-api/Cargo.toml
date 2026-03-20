@@ -9,12 +9,12 @@ description = "HTTP API server for Fabro pipelines"
 doctest = false
 
 [dependencies]
-fabro-config = { path = "../fabro-config" }
+fabro-config = { path = "../fabro-config", features = ["exedev"] }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-interview = { path = "../fabro-interview" }
 fabro-workflows = { path = "../fabro-workflows" }
-fabro-daytona = { path = "../fabro-daytona" }
+fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-github = { path = "../fabro-github" }
 fabro-agent = { path = "../fabro-agent" }
 fabro-llm = { path = "../fabro-llm" }
@@ -62,4 +62,4 @@ http-body-util = "0.1"
 tempfile = "3"
 openapiv3 = "2"
 serde_yaml = "0.9"
-fabro-exe = { path = "../fabro-exe" }
+fabro-sandbox = { path = "../fabro-sandbox", features = ["exe"] }

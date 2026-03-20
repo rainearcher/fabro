@@ -350,7 +350,7 @@ async fn create_from(
 
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let (origin_url, detected_branch) =
-        fabro_daytona::detect_repo_info(&cwd).map_err(|err| anyhow::anyhow!("{err}"))?;
+        fabro_sandbox::daytona::detect_repo_info(&cwd).map_err(|err| anyhow::anyhow!("{err}"))?;
 
     let base_branch = manifest
         .base_branch

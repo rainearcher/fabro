@@ -33,7 +33,7 @@ pub async fn run(args: SshArgs) -> Result<()> {
 
     info!(run_id = %args.run, ttl_minutes = args.ttl, "Creating SSH access");
 
-    let daytona = fabro_daytona::DaytonaSandbox::reconnect(name)
+    let daytona = fabro_sandbox::daytona::DaytonaSandbox::reconnect(name)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 

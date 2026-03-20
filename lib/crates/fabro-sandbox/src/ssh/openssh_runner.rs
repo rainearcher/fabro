@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use openssh::{KnownHosts, SessionBuilder};
 
-use crate::{shell_quote, SshOutput, SshRunner};
+use super::{SshOutput, SshRunner};
+use crate::shell_quote;
 
 /// Real SSH implementation using the `openssh` crate (multiplexed connections).
 pub struct OpensshRunner {

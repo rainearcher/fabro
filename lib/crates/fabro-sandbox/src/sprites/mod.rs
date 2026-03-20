@@ -4,25 +4,20 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
-use async_trait::async_trait;
-use fabro_agent::sandbox::{
+use crate::{
     format_lines_numbered, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
     SandboxEventCallback,
 };
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 pub use cli_runner::CliSpriteRunner;
 
+use crate::shell_quote;
+
 const WORKING_DIRECTORY: &str = "/home/sprite";
 const PROVIDER: &str = "sprites";
-
-fn shell_quote(s: &str) -> String {
-    shlex::try_quote(s).map_or_else(
-        |_| format!("'{}'", s.replace('\'', "'\\''")),
-        |q| q.to_string(),
-    )
-}
 
 /// Output from a sprite CLI command execution.
 pub struct SpriteOutput {

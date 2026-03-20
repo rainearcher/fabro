@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::{SpriteOutput, SpriteRunner};
+use super::{SpriteOutput, SpriteRunner};
 
 /// Real implementation that invokes the `sprite` CLI binary.
 #[derive(Default)]

@@ -8,9 +8,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fabro_agent::Sandbox;
-use fabro_daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
+use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_workflows::artifact::sync_artifacts_to_env;
 use fabro_workflows::checkpoint::Checkpoint;
 use fabro_workflows::context::Context;
@@ -230,7 +230,7 @@ async fn daytona_full_lifecycle() {
 #[tokio::test]
 #[ignore]
 async fn daytona_snapshot_sandbox() {
-    use fabro_daytona::DaytonaSnapshotConfig;
+    use fabro_sandbox::daytona::DaytonaSnapshotConfig;
 
     dotenvy::dotenv().ok();
 
@@ -241,7 +241,7 @@ async fn daytona_snapshot_sandbox() {
             cpu: Some(2),
             memory: Some(4),
             disk: Some(10),
-            dockerfile: Some(fabro_daytona::DockerfileSource::Inline(
+            dockerfile: Some(fabro_sandbox::daytona::DockerfileSource::Inline(
                 "FROM ubuntu:22.04\nRUN apt-get update && apt-get install -y ripgrep".to_string(),
             )),
         }),

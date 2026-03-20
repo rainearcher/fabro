@@ -12,7 +12,7 @@ path = "src/main.rs"
 [features]
 default = []
 server = ["dep:fabro-api"]
-exedev = ["dep:fabro-exe", "fabro-config/exedev", "fabro-workflows/exedev"]
+exedev = ["fabro-sandbox/exe", "fabro-config/exedev", "fabro-workflows/exedev"]
 sleep_inhibitor = ["dep:fabro-beastie"]
 
 [dependencies]
@@ -22,13 +22,11 @@ fabro-openai-oauth = { path = "../fabro-openai-oauth" }
 fabro-github = { path = "../fabro-github" }
 fabro-agent = { path = "../fabro-agent" }
 fabro-devcontainer = { path = "../fabro-devcontainer" }
-fabro-exe = { path = "../fabro-exe", optional = true }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-interview = { path = "../fabro-interview" }
 fabro-mcp = { path = "../fabro-mcp" }
-fabro-daytona = { path = "../fabro-daytona" }
 fabro-retro = { path = "../fabro-retro" }
-fabro-ssh = { path = "../fabro-ssh" }
+fabro-sandbox = { path = "../fabro-sandbox", features = ["ssh", "daytona"] }
 fabro-git-storage = { path = "../fabro-git-storage" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-validate = { path = "../fabro-validate" }

@@ -44,7 +44,7 @@ pub async fn run(args: PreviewArgs) -> Result<()> {
 
     info!(run_id = %args.run, provider = %record.provider, port = args.port, "Generating preview URL");
 
-    let daytona = fabro_daytona::DaytonaSandbox::reconnect(name)
+    let daytona = fabro_sandbox::daytona::DaytonaSandbox::reconnect(name)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 

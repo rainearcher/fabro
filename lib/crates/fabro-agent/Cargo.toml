@@ -11,7 +11,7 @@ categories = ["api-bindings"]
 
 [features]
 default = ["docker"]
-docker = ["bollard", "tar"]
+docker = ["fabro-sandbox/docker"]
 quarantine = []
 
 [lib]
@@ -24,6 +24,7 @@ dotenvy.workspace = true
 fabro-config = { path = "../fabro-config", features = ["clap"] }
 fabro-llm = { path = "../fabro-llm" }
 fabro-mcp = { path = "../fabro-mcp" }
+fabro-sandbox = { path = "../fabro-sandbox" }
 fabro-util = { path = "../fabro-util" }
 thiserror.workspace = true
 serde.workspace = true
@@ -41,8 +42,6 @@ dirs = "6"
 glob = "0.3"
 shell-escape = "0.1"
 htmd = "0.5"
-bollard = { workspace = true, optional = true }
-tar = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -52,3 +51,4 @@ tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = "3"
 dotenvy = { workspace = true }
 paste = "1"
+fabro-sandbox = { path = "../fabro-sandbox", features = ["test-support"] }

@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
-use async_trait::async_trait;
-use fabro_agent::sandbox::{
+use crate::shell_quote;
+use crate::{
     format_lines_numbered, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
     SandboxEventCallback,
 };
+use async_trait::async_trait;
 use fabro_github::GitHubAppCredentials;
 use rand::Rng;
 
@@ -1102,13 +1103,6 @@ impl Sandbox for DaytonaSandbox {
 ///
 /// Uses base64 encoding (matching the TypeScript/Python/Ruby Daytona SDKs)
 /// to avoid shell escaping issues with quotes and special characters.
-fn shell_quote(s: &str) -> String {
-    shlex::try_quote(s).map_or_else(
-        |_| format!("'{}'", s.replace('\'', "'\\''")),
-        |q| q.to_string(),
-    )
-}
-
 fn wrap_bash_command(command: &str) -> String {
     use base64::Engine;
     let encoded = base64::engine::general_purpose::STANDARD.encode(command);
