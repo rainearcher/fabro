@@ -347,15 +347,13 @@ impl Sandbox for LocalSandbox {
             .map(|p| p.to_string_lossy().into_owned())
             .collect();
 
-        // Sort by mtime (newest first)
-        results.sort_by(|a, b| {
-            let mtime_a = std::fs::metadata(a)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            let mtime_b = std::fs::metadata(b)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            mtime_b.cmp(&mtime_a)
+        // Sort by mtime (newest first), caching metadata to avoid O(n log n) syscalls
+        results.sort_by_cached_key(|path| {
+            std::cmp::Reverse(
+                std::fs::metadata(path)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+            )
         });
 
         Ok(results)

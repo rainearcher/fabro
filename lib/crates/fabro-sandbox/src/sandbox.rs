@@ -431,6 +431,22 @@ pub trait Sandbox: Send + Sync {
     fn mark_agent_read(&self, _path: &str) {}
 }
 
+/// Resolve a path: relative paths are prepended with the working directory.
+/// Used by feature-gated sandbox implementations (exe, ssh, sprites, daytona).
+#[cfg(any(
+    feature = "exe",
+    feature = "ssh",
+    feature = "sprites",
+    feature = "daytona"
+))]
+pub(crate) fn resolve_path(path: &str, working_dir: &str) -> String {
+    if std::path::Path::new(path).is_absolute() {
+        path.to_string()
+    } else {
+        format!("{working_dir}/{path}")
+    }
+}
+
 /// Shell-quote a string using `shlex::try_quote`, with a fallback for edge cases.
 pub fn shell_quote(s: &str) -> String {
     shlex::try_quote(s).map_or_else(

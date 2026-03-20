@@ -80,11 +80,7 @@ impl SpritesSandbox {
     }
 
     fn resolve_path(&self, path: &str) -> String {
-        if Path::new(path).is_absolute() {
-            path.to_string()
-        } else {
-            format!("{WORKING_DIRECTORY}/{path}")
-        }
+        crate::sandbox::resolve_path(path, WORKING_DIRECTORY)
     }
 
     fn sprite_name(&self) -> Result<&str, String> {

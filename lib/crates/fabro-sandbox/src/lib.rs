@@ -2,6 +2,9 @@ pub mod sandbox;
 
 pub mod read_guard;
 
+#[cfg(feature = "ssh")]
+pub(crate) mod ssh_common;
+
 #[cfg(feature = "local")]
 pub mod local;
 

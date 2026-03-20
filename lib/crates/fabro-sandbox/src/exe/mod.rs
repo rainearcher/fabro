@@ -5,15 +5,18 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::shell_quote;
+use crate::ssh_common;
 use crate::{
     format_lines_numbered, DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent,
     SandboxEventCallback,
 };
 use async_trait::async_trait;
-use base64::Engine;
 use tokio_util::sync::CancellationToken;
 
+pub use crate::ssh_common::{GitCloneParams, SshOutput, SshRunner};
 pub use openssh_runner::OpensshRunner;
+
+pub use fabro_config::sandbox::ExeConfig;
 
 const WORKING_DIRECTORY: &str = "/home/exedev";
 const PROVIDER: &str = "exe";
@@ -51,40 +54,6 @@ type DataSshFactory = Box<
         > + Send
         + Sync,
 >;
-
-/// Output from an SSH command execution.
-pub struct SshOutput {
-    pub stdout: Vec<u8>,
-    pub stderr: Vec<u8>,
-    pub exit_code: i32,
-}
-
-/// Trait abstracting SSH operations for testability.
-#[async_trait]
-pub trait SshRunner: Send + Sync {
-    async fn run_command(&self, command: &str) -> Result<SshOutput, String>;
-
-    async fn run_command_with_timeout(
-        &self,
-        command: &str,
-        timeout: std::time::Duration,
-    ) -> Result<SshOutput, String>;
-
-    async fn upload_file(&self, path: &str, content: &[u8]) -> Result<(), String>;
-
-    async fn download_file(&self, path: &str) -> Result<Vec<u8>, String>;
-}
-
-pub use fabro_config::sandbox::ExeConfig;
-
-/// Parameters for cloning a git repo into the sandbox during initialization.
-#[derive(Clone, Debug)]
-pub struct GitCloneParams {
-    /// Clean HTTPS URL (no embedded credentials).
-    pub url: String,
-    /// Branch to clone. If None, uses the remote's default.
-    pub branch: Option<String>,
-}
 
 /// Sandbox that runs all operations inside an exe.dev VM via SSH.
 ///
@@ -206,128 +175,22 @@ impl ExeSandbox {
         Ok(format!("ssh {host}"))
     }
 
-    /// Wrap a shell command in base64 encoding to avoid escaping issues.
-    fn wrap_bash_command(command: &str) -> String {
-        let encoded = base64::engine::general_purpose::STANDARD.encode(command);
-        format!("echo '{encoded}' | base64 -d | sh")
-    }
-
-    /// Resolve an authenticated clone URL from the clean URL and github_app credentials.
-    async fn resolve_clone_url(&self, url: &str) -> Result<String, String> {
-        match &self.github_app {
-            Some(creds) => fabro_github::resolve_authenticated_url(creds, url)
-                .await
-                .or_else(|_| Ok(url.to_string())),
-            None => Ok(url.to_string()),
-        }
-    }
-
     /// Clone a git repo into the sandbox working directory.
     async fn clone_repo(&self, params: &GitCloneParams) -> Result<(), String> {
         let ssh = self.data_ssh()?;
-
-        self.emit(SandboxEvent::GitCloneStarted {
-            url: params.url.clone(),
-            branch: params.branch.clone(),
-        });
-        let clone_start = Instant::now();
-
-        let clone_url = self.resolve_clone_url(&params.url).await?;
-
-        let branch_flag = params
-            .branch
-            .as_deref()
-            .map(|b| format!(" --branch {}", shell_quote(b)))
-            .unwrap_or_default();
-
-        let clone_script = format!(
-            "git clone{branch_flag} {} {WORKING_DIRECTORY}",
-            shell_quote(&clone_url)
-        );
-        let clone_cmd = Self::wrap_bash_command(&clone_script);
-        let clone_timeout = std::time::Duration::from_secs(300);
-        let clone_output = ssh
-            .run_command_with_timeout(&clone_cmd, clone_timeout)
-            .await
-            .map_err(|e| {
-                let err = format!("git clone failed: {e}");
-                self.emit(SandboxEvent::GitCloneFailed {
-                    url: params.url.clone(),
-                    error: err.clone(),
-                });
-                err
-            })?;
-
-        if clone_output.exit_code != 0 {
-            let stderr = String::from_utf8_lossy(&clone_output.stderr);
-
-            // Fall back to init + fetch + checkout if directory is not empty
-            if stderr.contains("not an empty directory")
-                || stderr.contains("already exists and is not an empty")
-            {
-                let branch = params.branch.as_deref().unwrap_or("main");
-                let fallback_script = format!(
-                    "cd {WORKING_DIRECTORY} && git init && git remote add origin {} && git fetch origin && git checkout {}",
-                    shell_quote(&clone_url),
-                    shell_quote(branch),
-                );
-                let fallback_cmd = Self::wrap_bash_command(&fallback_script);
-                let fallback_output = ssh
-                    .run_command_with_timeout(&fallback_cmd, clone_timeout)
-                    .await
-                    .map_err(|e| {
-                        let err = format!("git fallback clone failed: {e}");
-                        self.emit(SandboxEvent::GitCloneFailed {
-                            url: params.url.clone(),
-                            error: err.clone(),
-                        });
-                        err
-                    })?;
-
-                if fallback_output.exit_code != 0 {
-                    let fallback_stderr = String::from_utf8_lossy(&fallback_output.stderr);
-                    let err = format!(
-                        "git fallback clone failed (exit {}): {fallback_stderr}",
-                        fallback_output.exit_code,
-                    );
-                    self.emit(SandboxEvent::GitCloneFailed {
-                        url: params.url.clone(),
-                        error: err.clone(),
-                    });
-                    return Err(err);
-                }
-            } else {
-                let err = format!(
-                    "git clone failed (exit {}): {stderr}",
-                    clone_output.exit_code,
-                );
-                self.emit(SandboxEvent::GitCloneFailed {
-                    url: params.url.clone(),
-                    error: err.clone(),
-                });
-                return Err(err);
-            }
-        }
-
-        // Store the clean URL as origin_url for credential refresh
-        let _ = self.origin_url.set(params.url.clone());
-
-        let duration_ms = u64::try_from(clone_start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        self.emit(SandboxEvent::GitCloneCompleted {
-            url: params.url.clone(),
-            duration_ms,
-        });
-
-        Ok(())
+        ssh_common::clone_repo(
+            ssh,
+            WORKING_DIRECTORY,
+            params,
+            self.github_app.as_ref(),
+            &self.origin_url,
+            &|event| self.emit(event),
+        )
+        .await
     }
 
-    /// Resolve a path: relative paths are prepended with the working directory.
     fn resolve_path(&self, path: &str) -> String {
-        if Path::new(path).is_absolute() {
-            path.to_string()
-        } else {
-            format!("{WORKING_DIRECTORY}/{path}")
-        }
+        crate::sandbox::resolve_path(path, WORKING_DIRECTORY)
     }
 }
 
@@ -488,7 +351,7 @@ impl Sandbox for ExeSandbox {
         };
         script.push_str(&format!("cd {} && {command}", shell_quote(&dir)));
 
-        let full_cmd = Self::wrap_bash_command(&script);
+        let full_cmd = ssh_common::wrap_bash_command(&script);
 
         let timeout = std::time::Duration::from_millis(timeout_ms);
         let token = cancel_token.unwrap_or_default();
@@ -841,6 +704,7 @@ impl Sandbox for ExeSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
     use std::sync::{Arc, Mutex};
 
     /// A recorded command sent to the mock SSH runner.

@@ -140,13 +140,8 @@ impl DaytonaSandbox {
         }
     }
 
-    /// Resolve a path: relative paths are prepended with the working directory.
     fn resolve_path(&self, path: &str) -> String {
-        if Path::new(path).is_absolute() {
-            path.to_string()
-        } else {
-            format!("{WORKING_DIRECTORY}/{path}")
-        }
+        crate::sandbox::resolve_path(path, WORKING_DIRECTORY)
     }
 
     /// Get the sandbox, returning an error if not yet initialized.
