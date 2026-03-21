@@ -83,6 +83,7 @@ rankdir=LR
 | `default_thread` | String | Default thread ID for all nodes |
 | `max_node_visits` | Integer | Max visits per node across the run (0 = unlimited) |
 | `stall_timeout` | Duration | Timeout for stalled workflows (default: `1800s`, 0 = disabled) |
+| `loop_restart_signature_limit` | Integer | Max times the same failure signature can repeat before aborting (default: 3) |
 
 ### Node defaults
 
@@ -187,6 +188,7 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 | `max_retries` | Integer | Override default retry count |
 | `retry_policy` | String | Named preset: `none`, `standard`, `aggressive`, `linear`, `patient` |
 | `retry_target` | String | Node ID to jump to on retry |
+| `fallback_retry_target` | String | Fallback node ID if primary `retry_target` is unreachable |
 | `goal_gate` | Boolean | When `true`, workflow fails if this node didn't finish with `success` or `partial_success`. See [Node Outcomes](/execution/outcomes#goal-gate-interaction). |
 | `auto_status` | Boolean | When `true`, overrides any non-`success`/non-`skipped` status to `success` after the handler completes. See [Node Outcomes](/execution/outcomes#auto_status). |
 | `allow_partial` | Boolean | When `true` and retries are exhausted on a `retry` status, promotes the outcome to `partial_success` instead of `fail`. Default `false`. See [Node Outcomes](/execution/outcomes#allow_partial). |
@@ -227,6 +229,16 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 |---|---|---|
 | `duration` | Duration | How long to pause (required). E.g. `"30s"`, `"2m"` |
 
+### Manager loop (sub-workflow) nodes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `stack.child_workflow` | String | Path to child workflow `.fabro` file (required unless inline source given) |
+| `stack.child_dot_source` | String | Inline DOT source for the child workflow (alternative to file path) |
+| `manager.poll_interval` | Duration | How often the manager checks the child workflow (default: `45s`) |
+| `manager.max_cycles` | Integer | Maximum polling cycles before timeout (default: 1000) |
+| `manager.stop_condition` | String | Condition expression — when true, the child run is stopped early |
+
 ## Edge attributes
 
 | Attribute | Type | Description |
@@ -237,6 +249,7 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 | `fidelity` | String | Override fidelity level for this transition |
 | `thread_id` | String | Override thread ID for this transition |
 | `loop_restart` | Boolean | Mark this edge as a loop restart point |
+| `freeform` | Boolean | When `true` on a human-gate edge, accept free-text input instead of fixed choices |
 
 ## Condition expressions
 
