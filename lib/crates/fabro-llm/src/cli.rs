@@ -882,7 +882,10 @@ fn validate_deep_result(
 ) -> (cli_table::Color, String) {
     // Check tool use: need at least 2 steps (tool call + follow-up)
     if result.steps.len() < 2 {
-        return (Color::Red, "deep: fail (model did not call tool)".to_string());
+        return (
+            Color::Red,
+            "deep: fail (model did not call tool)".to_string(),
+        );
     }
 
     // Check that step 0 had tool results (tool was executed)
@@ -1042,11 +1045,8 @@ async fn test_one_model(info: &ModelInfo, deep: bool) -> (Color, String) {
         match build_deep_test_params(info) {
             None => (Color::Yellow, "deep: skipped (no tool support)".to_string()),
             Some(params) => {
-                let result = tokio::time::timeout(
-                    Duration::from_secs(90),
-                    generate::generate(params),
-                )
-                .await;
+                let result =
+                    tokio::time::timeout(Duration::from_secs(90), generate::generate(params)).await;
                 match result {
                     Ok(Ok(ref gen_result)) => validate_deep_result(gen_result, info),
                     Ok(Err(e)) => (Color::Red, format!("deep: error: {e}")),
@@ -1094,16 +1094,15 @@ async fn test_models(
     let test_kind = if deep { "Deep testing" } else { "Testing" };
     let pb = indicatif::ProgressBar::new(models_to_test.len() as u64);
     pb.set_style(
-        indicatif::ProgressStyle::with_template(
-            &format!("{{spinner:.green}} {test_kind} {{pos}}/{{len}} models {{wide_bar}} {{eta}}"),
-        )
+        indicatif::ProgressStyle::with_template(&format!(
+            "{{spinner:.green}} {test_kind} {{pos}}/{{len}} models {{wide_bar}} {{eta}}"
+        ))
         .unwrap(),
     );
     pb.enable_steady_tick(Duration::from_millis(100));
 
     // Build (original_index, model_info) pairs, then shuffle for provider spread
-    let mut indexed: Vec<(usize, &ModelInfo)> =
-        models_to_test.iter().enumerate().collect();
+    let mut indexed: Vec<(usize, &ModelInfo)> = models_to_test.iter().enumerate().collect();
     indexed.shuffle(&mut rand::thread_rng());
 
     // Run tests concurrently, 6 at a time
