@@ -1063,46 +1063,16 @@ async fn test_models(
     let mut rows: Vec<Vec<CellStruct>> = Vec::new();
     let mut failures = 0u32;
     for info in &models_to_test {
-        eprint!("Testing {}...", info.id);
-        let params = GenerateParams::new(&info.id)
-            .provider(&info.provider)
-            .prompt("Say OK")
-            .max_tokens(16);
-
-        let result =
-            tokio::time::timeout(Duration::from_secs(30), generate::generate(params)).await;
-        eprintln!(" done");
-
-        let (result_color, status) = match result {
-            Ok(Ok(_)) => (Color::Green, "ok".to_string()),
-            Ok(Err(e)) => {
-                failures += 1;
-                (Color::Red, format!("error: {e}"))
-            }
-            Err(_) => {
-                failures += 1;
-                (Color::Red, "error: timeout (30s)".to_string())
-            }
-        };
-
-        let mut row = model_row(info, use_color);
-        row.push(
-            status
-                .cell()
-                .foreground_color(color_if(use_color, result_color)),
-        );
-        rows.push(row);
-
         if deep {
             match build_deep_test_params(info) {
                 None => {
-                    let mut deep_row = model_row(info, use_color);
-                    deep_row.push(
+                    let mut row = model_row(info, use_color);
+                    row.push(
                         "deep: skipped (no tool support)"
                             .cell()
                             .foreground_color(color_if(use_color, Color::Yellow)),
                     );
-                    rows.push(deep_row);
+                    rows.push(row);
                 }
                 Some(params) => {
                     eprint!("Deep testing {}...", info.id);
@@ -1125,15 +1095,45 @@ async fn test_models(
                         }
                     };
 
-                    let mut deep_row = model_row(info, use_color);
-                    deep_row.push(
+                    let mut row = model_row(info, use_color);
+                    row.push(
                         deep_status
                             .cell()
                             .foreground_color(color_if(use_color, deep_color)),
                     );
-                    rows.push(deep_row);
+                    rows.push(row);
                 }
             }
+        } else {
+            eprint!("Testing {}...", info.id);
+            let params = GenerateParams::new(&info.id)
+                .provider(&info.provider)
+                .prompt("Say OK")
+                .max_tokens(16);
+
+            let result =
+                tokio::time::timeout(Duration::from_secs(30), generate::generate(params)).await;
+            eprintln!(" done");
+
+            let (result_color, status) = match result {
+                Ok(Ok(_)) => (Color::Green, "ok".to_string()),
+                Ok(Err(e)) => {
+                    failures += 1;
+                    (Color::Red, format!("error: {e}"))
+                }
+                Err(_) => {
+                    failures += 1;
+                    (Color::Red, "error: timeout (30s)".to_string())
+                }
+            };
+
+            let mut row = model_row(info, use_color);
+            row.push(
+                status
+                    .cell()
+                    .foreground_color(color_if(use_color, result_color)),
+            );
+            rows.push(row);
         }
     }
 
