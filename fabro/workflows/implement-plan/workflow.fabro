@@ -1,4 +1,4 @@
-digraph ImplementAndSimplify {
+digraph ImplementPlan {
     graph [
         goal="Implement and simplify",
         model_stylesheet="
