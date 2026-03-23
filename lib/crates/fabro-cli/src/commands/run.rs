@@ -25,6 +25,7 @@ use fabro_workflows::engine::{RunConfig, WorkflowRunEngine};
 use fabro_workflows::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use fabro_workflows::git::GitSyncStatus;
 use fabro_workflows::handler::default_registry;
+use fabro_workflows::manifest::Manifest;
 use fabro_workflows::outcome::{Outcome, StageStatus};
 use fabro_workflows::run_status::{RunStatus, StatusReason};
 use fabro_workflows::sandbox_provider::SandboxProvider;
@@ -200,6 +201,13 @@ pub(crate) fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned())
     }
+}
+
+fn is_cached_run_restart(workflow_path: &Path, run_dir: &Path) -> bool {
+    workflow_path.starts_with(run_dir)
+        && workflow_path.file_name().is_some_and(|f| {
+            f == std::ffi::OsStr::new(RUN_CONFIG_FILE) || f == std::ffi::OsStr::new(RUN_GRAPH_FILE)
+        })
 }
 
 /// Resolve model and provider through the full precedence chain:
@@ -700,11 +708,7 @@ pub async fn run_command(
         run_defaults,
     } = prepare_workflow(&args, run_defaults, styles, false)?;
 
-    // Extract workflow slug from the workflow path argument.
-    // If bare name (no extension, e.g. "smoke"), use it directly.
-    // Otherwise derive from the parent directory of the resolved .toml path.
     let workflow_path = args.workflow.as_ref().unwrap(); // safe: prepare_workflow validated
-    let workflow_slug = workflow_slug_from_path(workflow_path);
 
     // Collect setup commands — they'll be run inside the sandbox
     let setup_commands: Vec<String> = run_cfg
@@ -746,6 +750,16 @@ pub async fn run_command(
         .run_dir
         .unwrap_or_else(|| default_run_dir(&run_id, args.dry_run));
     tokio::fs::create_dir_all(&run_dir).await?;
+    let cached_run_restart = is_cached_run_restart(workflow_path, &run_dir);
+    let existing_manifest = if cached_run_restart {
+        Manifest::load(&run_dir.join("manifest.json")).ok()
+    } else {
+        None
+    };
+    let workflow_slug = existing_manifest
+        .as_ref()
+        .and_then(|manifest| manifest.workflow_slug.clone())
+        .or_else(|| workflow_slug_from_path(workflow_path));
     fabro_util::run_log::activate(&run_dir.join("cli.log"))
         .context("Failed to activate per-run log")?;
     tokio::fs::write(cached_graph_path(&run_dir), &source).await?;
@@ -1467,7 +1481,10 @@ pub async fn run_command(
         dry_run: dry_run_mode,
         run_id: run_id.clone(),
         git_checkpoint_enabled: worktree_path.is_some(),
-        host_repo_path: Some(original_cwd.clone()),
+        host_repo_path: existing_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.host_repo_path.as_deref().map(PathBuf::from))
+            .or_else(|| Some(original_cwd.clone())),
         base_sha: worktree_base_sha,
         run_branch: worktree_branch,
         meta_branch,
@@ -1480,7 +1497,10 @@ pub async fn run_command(
         checkpoint_exclude_globs,
         github_app: github_app.clone(),
         git_author,
-        base_branch: detected_base_branch,
+        base_branch: existing_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.base_branch.clone())
+            .or(detected_base_branch),
         pull_request: run_cfg
             .as_ref()
             .and_then(|c| c.pull_request.as_ref())

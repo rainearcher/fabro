@@ -568,7 +568,7 @@ async fn prepare_from_branch(
     } else if args.dry_run {
         default_run_dir(&run_id, true)
     } else {
-        find_existing_run_dir(&run_id).unwrap_or_else(|| default_run_dir(&run_id, false))
+        find_existing_run_dir(&run_id, false).unwrap_or_else(|| default_run_dir(&run_id, false))
     };
     tokio::fs::create_dir_all(&run_dir).await?;
     let run_dir = tokio::fs::canonicalize(&run_dir).await.unwrap_or(run_dir);
@@ -1503,18 +1503,33 @@ async fn run_resumed(
     }
 }
 
-/// Scan `~/.fabro/runs/` for an existing directory whose name ends with `-{run_id}`.
-fn find_existing_run_dir(run_id: &str) -> Option<PathBuf> {
-    let base = dirs::home_dir()?.join(".fabro").join("runs");
+/// Scan a runs directory for an existing directory matching the requested dry-run mode.
+fn find_existing_run_dir_in(
+    base: &std::path::Path,
+    run_id: &str,
+    dry_run: bool,
+) -> Option<PathBuf> {
     let suffix = format!("-{run_id}");
-    let entries = std::fs::read_dir(&base).ok()?;
+    let entries = std::fs::read_dir(base).ok()?;
     for entry in entries.flatten() {
         let name = entry.file_name();
-        if name.to_string_lossy().ends_with(&suffix) && entry.path().is_dir() {
+        let name = name.to_string_lossy();
+        if entry.path().is_dir() && run_dir_name_matches_mode(&name, &suffix, dry_run) {
             return Some(entry.path());
         }
     }
     None
+}
+
+/// Scan `~/.fabro/runs/` for an existing directory matching the requested dry-run mode.
+fn find_existing_run_dir(run_id: &str, dry_run: bool) -> Option<PathBuf> {
+    let base = dirs::home_dir()?.join(".fabro").join("runs");
+    find_existing_run_dir_in(&base, run_id, dry_run)
+}
+
+fn run_dir_name_matches_mode(name: &str, run_id_suffix: &str, dry_run: bool) -> bool {
+    name.strip_suffix(run_id_suffix)
+        .is_some_and(|prefix| prefix.ends_with("-dry-run") == dry_run)
 }
 
 #[cfg(test)]
@@ -1559,6 +1574,43 @@ mod tests {
 
         let selected = preferred_resume_repo_path(cwd.path(), Some(&manifest));
         assert_eq!(selected, cwd.path());
+    }
+
+    #[test]
+    fn find_existing_run_dir_in_respects_dry_run_mode() {
+        let runs = tempfile::tempdir().unwrap();
+        let non_dry = runs.path().join("20260323-run-1");
+        let dry = runs.path().join("20260323-dry-run-run-1");
+        std::fs::create_dir_all(&non_dry).unwrap();
+        std::fs::create_dir_all(&dry).unwrap();
+
+        assert_eq!(
+            find_existing_run_dir_in(runs.path(), "run-1", false),
+            Some(non_dry)
+        );
+        assert_eq!(
+            find_existing_run_dir_in(runs.path(), "run-1", true),
+            Some(dry)
+        );
+    }
+
+    #[test]
+    fn find_existing_run_dir_in_does_not_misclassify_run_ids_containing_dry_run() {
+        let runs = tempfile::tempdir().unwrap();
+        let run_id = "feature-dry-run-fix";
+        let non_dry = runs.path().join(format!("20260323-{run_id}"));
+        let dry = runs.path().join(format!("20260323-dry-run-{run_id}"));
+        std::fs::create_dir_all(&non_dry).unwrap();
+        std::fs::create_dir_all(&dry).unwrap();
+
+        assert_eq!(
+            find_existing_run_dir_in(runs.path(), run_id, false),
+            Some(non_dry)
+        );
+        assert_eq!(
+            find_existing_run_dir_in(runs.path(), run_id, true),
+            Some(dry)
+        );
     }
 
     #[test]

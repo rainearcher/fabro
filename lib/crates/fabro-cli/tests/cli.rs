@@ -624,6 +624,70 @@ fn find_run_dir(home: &std::path::Path, run_id: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn completed_run_preserves_workflow_slug_for_lookup() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let workflow_dir = project.path().join("workflows").join("sluggy");
+    std::fs::create_dir_all(&workflow_dir).unwrap();
+    let workflow_path = workflow_dir.join("workflow.fabro");
+    std::fs::write(
+        &workflow_path,
+        "\
+digraph BarBaz {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare, label=\"Exit\"]
+  start -> exit
+}
+",
+    )
+    .unwrap();
+
+    arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            "opaque-run-999",
+            workflow_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["start", "sluggy"])
+        .assert()
+        .success();
+
+    arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["attach", "opaque-run-999"])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+
+    arc()
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .args(["attach", "sluggy"])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+
+    let run_dir = find_run_dir(home.path(), "opaque-run-999");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("manifest.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["workflow_name"].as_str(), Some("BarBaz"));
+    assert_eq!(manifest["workflow_slug"].as_str(), Some("sluggy"));
+}
+
+#[test]
 fn dry_run_create_start_attach_works_with_default_run_lookup() {
     let home = tempfile::tempdir().unwrap();
     let run_id = "drysplit-test-123";
