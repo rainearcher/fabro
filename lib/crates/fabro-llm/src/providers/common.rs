@@ -170,23 +170,20 @@ pub async fn send_and_read_response(
     let http_resp = request.send().await.map_err(|e| {
         if e.is_timeout() {
             warn!(provider = %provider, error = %e, "Provider request timed out");
-            SdkError::RequestTimeout {
-                message: format!("{provider}: {e}"),
-            }
+            SdkError::request_timeout(format!("{provider}: {e}"), e)
         } else {
             warn!(provider = %provider, error = %e, "Provider network error");
-            SdkError::Network {
-                message: e.to_string(),
-            }
+            SdkError::network(e.to_string(), e)
         }
     })?;
 
     let status = http_resp.status();
     let retry_after = parse_retry_after(http_resp.headers());
     let headers = http_resp.headers().clone();
-    let body = http_resp.text().await.map_err(|e| SdkError::Network {
-        message: e.to_string(),
-    })?;
+    let body = http_resp
+        .text()
+        .await
+        .map_err(|e| SdkError::network(e.to_string(), e))?;
 
     if !status.is_success() {
         warn!(provider = %provider, status = status.as_u16(), "Provider returned error");
@@ -258,14 +255,13 @@ impl LineReader {
                     return Ok(Some(remaining));
                 }
                 Ok(Err(e)) => {
-                    return Err(SdkError::Stream {
-                        message: e.to_string(),
-                    });
+                    return Err(SdkError::stream_error(e.to_string(), e));
                 }
                 Err(_) => {
                     warn!("Stream read timed out waiting for next event");
                     return Err(SdkError::Stream {
                         message: "stream read timed out waiting for next event".to_string(),
+                        source: None,
                     });
                 }
             }

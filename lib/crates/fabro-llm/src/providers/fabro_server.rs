@@ -62,8 +62,8 @@ fn map_stop_reason(reason: &str) -> FinishReason {
 /// Build the JSON request body by serializing the `Request` and injecting
 /// the `stream` flag.
 fn build_body(request: &Request, stream: bool) -> Result<serde_json::Value, SdkError> {
-    let mut body = serde_json::to_value(request).map_err(|e| SdkError::Configuration {
-        message: format!("failed to serialize request: {e}"),
+    let mut body = serde_json::to_value(request).map_err(|e| {
+        SdkError::configuration_error(format!("failed to serialize request: {e}"), e)
     })?;
     body["stream"] = serde_json::Value::Bool(stream);
     Ok(body)
@@ -80,13 +80,9 @@ async fn send_request(
 ) -> Result<reqwest::Response, SdkError> {
     let http_resp = client.post(url).json(body).send().await.map_err(|e| {
         if e.is_timeout() {
-            SdkError::RequestTimeout {
-                message: e.to_string(),
-            }
+            SdkError::request_timeout(e.to_string(), e)
         } else {
-            SdkError::Network {
-                message: e.to_string(),
-            }
+            SdkError::network(e.to_string(), e)
         }
     })?;
 
@@ -127,13 +123,14 @@ impl ProviderAdapter for Adapter {
         let body = build_body(request, false)?;
         let http_resp = send_request(&self.client, &url, &body, &self.provider_name).await?;
 
-        let resp_body = http_resp.text().await.map_err(|e| SdkError::Network {
-            message: e.to_string(),
-        })?;
+        let resp_body = http_resp
+            .text()
+            .await
+            .map_err(|e| SdkError::network(e.to_string(), e))?;
 
         let server_resp: ServerCompletionResponse =
-            serde_json::from_str(&resp_body).map_err(|e| SdkError::Stream {
-                message: format!("failed to parse completion response: {e}"),
+            serde_json::from_str(&resp_body).map_err(|e| {
+                SdkError::stream_error(format!("failed to parse completion response: {e}"), e)
             })?;
 
         let finish_reason = map_stop_reason(&server_resp.stop_reason);
@@ -175,11 +172,10 @@ impl ProviderAdapter for Adapter {
                                         Ok(event) => return Some((Ok(event), reader)),
                                         Err(e) => {
                                             return Some((
-                                                Err(SdkError::Stream {
-                                                    message: format!(
-                                                        "failed to parse stream event: {e}"
-                                                    ),
-                                                }),
+                                                Err(SdkError::stream_error(
+                                                    format!("failed to parse stream event: {e}"),
+                                                    e,
+                                                )),
                                                 reader,
                                             ));
                                         }

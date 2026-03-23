@@ -49,10 +49,16 @@ pub struct ThinkingData {
 
 // --- 5.4 ToolCall / ToolResult ---
 
+fn default_tool_type() -> String {
+    "function".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
+    #[serde(rename = "type", default = "default_tool_type")]
+    pub tool_type: String,
     pub arguments: serde_json::Value,
     pub raw_arguments: Option<String>,
     /// Opaque provider-specific metadata (e.g. Gemini `thought_signature`).
@@ -71,6 +77,7 @@ impl ToolCall {
         Self {
             id: id.into(),
             name: name.into(),
+            tool_type: "function".to_string(),
             arguments,
             raw_arguments: None,
             provider_metadata: None,
@@ -1158,6 +1165,7 @@ mod tests {
     fn stream_event_error() {
         let event = StreamEvent::error(SdkError::Stream {
             message: "something went wrong".into(),
+            source: None,
         });
         match &event {
             StreamEvent::Error { error, .. } => {
@@ -1263,7 +1271,22 @@ mod tests {
         let tc = ToolCall::new("c1", "test", serde_json::json!({}));
         assert_eq!(tc.id, "c1");
         assert_eq!(tc.name, "test");
+        assert_eq!(tc.tool_type, "function");
         assert_eq!(tc.raw_arguments, None);
+    }
+
+    #[test]
+    fn tool_call_deserialize_without_type_defaults_to_function() {
+        let json = r#"{"id":"c1","name":"test","arguments":{}}"#;
+        let tc: ToolCall = serde_json::from_str(json).unwrap();
+        assert_eq!(tc.tool_type, "function");
+    }
+
+    #[test]
+    fn tool_call_serializes_type_field() {
+        let tc = ToolCall::new("c1", "test", serde_json::json!({}));
+        let json = serde_json::to_value(&tc).unwrap();
+        assert_eq!(json["type"], "function");
     }
 
     #[test]

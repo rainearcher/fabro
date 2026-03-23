@@ -75,6 +75,7 @@ impl Adapter {
 
         response.ok_or_else(|| SdkError::Stream {
             message: "complete_via_stream: stream ended without a Finish event".to_string(),
+            source: None,
         })
     }
 }
@@ -1230,8 +1231,11 @@ impl ProviderAdapter for Adapter {
         }
         let (body, headers) = send_and_read_response(req, &self.provider_name, "type").await?;
 
-        let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| SdkError::Network {
-            message: format!("failed to parse {} response: {e}", self.provider_name),
+        let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| {
+            SdkError::network(
+                format!("failed to parse {} response: {e}", self.provider_name),
+                e,
+            )
         })?;
 
         let content_parts: Vec<ContentPart> = api_resp
@@ -1290,16 +1294,18 @@ impl ProviderAdapter for Adapter {
         }
         let (_api_request, req_builder) = build_api_request(self, request, true);
 
-        let http_resp = req_builder.send().await.map_err(|e| SdkError::Network {
-            message: e.to_string(),
-        })?;
+        let http_resp = req_builder
+            .send()
+            .await
+            .map_err(|e| SdkError::network(e.to_string(), e))?;
 
         let status = http_resp.status();
         if !status.is_success() {
             let retry_after = parse_retry_after(http_resp.headers());
-            let body = http_resp.text().await.map_err(|e| SdkError::Network {
-                message: e.to_string(),
-            })?;
+            let body = http_resp
+                .text()
+                .await
+                .map_err(|e| SdkError::network(e.to_string(), e))?;
             let (msg, code, raw) = parse_error_body(&body, "type");
             return Err(crate::error::error_from_status_code(
                 status.as_u16(),
@@ -1336,9 +1342,10 @@ impl ProviderAdapter for Adapter {
                                 Ok(v) => v,
                                 Err(e) => {
                                     return Some((
-                                        Err(SdkError::Stream {
-                                            message: format!("failed to parse SSE data: {e}"),
-                                        }),
+                                        Err(SdkError::stream_error(
+                                            format!("failed to parse SSE data: {e}"),
+                                            e,
+                                        )),
                                         state,
                                     ));
                                 }

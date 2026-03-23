@@ -508,22 +508,19 @@ async fn send_gemini_response(
 ) -> Result<(String, reqwest::header::HeaderMap), SdkError> {
     let http_resp = request.send().await.map_err(|e| {
         if e.is_timeout() {
-            SdkError::RequestTimeout {
-                message: format!("gemini: {e}"),
-            }
+            SdkError::request_timeout(format!("gemini: {e}"), e)
         } else {
-            SdkError::Network {
-                message: e.to_string(),
-            }
+            SdkError::network(e.to_string(), e)
         }
     })?;
 
     let status = http_resp.status();
     let retry_after = parse_retry_after(http_resp.headers());
     let headers = http_resp.headers().clone();
-    let body = http_resp.text().await.map_err(|e| SdkError::Network {
-        message: e.to_string(),
-    })?;
+    let body = http_resp
+        .text()
+        .await
+        .map_err(|e| SdkError::network(e.to_string(), e))?;
 
     if !status.is_success() {
         let (msg, code, raw) = parse_error_body(&body, "status");
@@ -568,16 +565,18 @@ fn gemini_error(
 async fn send_streaming_request(
     request: reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, SdkError> {
-    let http_resp = request.send().await.map_err(|e| SdkError::Network {
-        message: e.to_string(),
-    })?;
+    let http_resp = request
+        .send()
+        .await
+        .map_err(|e| SdkError::network(e.to_string(), e))?;
 
     let status = http_resp.status();
     if !status.is_success() {
         let retry_after = parse_retry_after(http_resp.headers());
-        let body = http_resp.text().await.map_err(|e| SdkError::Network {
-            message: e.to_string(),
-        })?;
+        let body = http_resp
+            .text()
+            .await
+            .map_err(|e| SdkError::network(e.to_string(), e))?;
         let (msg, code, raw) = parse_error_body(&body, "status");
         return Err(gemini_error(status.as_u16(), msg, code, raw, retry_after));
     }
@@ -635,9 +634,10 @@ fn process_sse_stream(
                     Ok(v) => v,
                     Err(e) => {
                         return Some((
-                            Err(SdkError::Stream {
-                                message: format!("failed to parse Gemini SSE chunk: {e}"),
-                            }),
+                            Err(SdkError::stream_error(
+                                format!("failed to parse Gemini SSE chunk: {e}"),
+                                e,
+                            )),
                             state,
                         ));
                     }
@@ -903,9 +903,8 @@ impl ProviderAdapter for Adapter {
         }
         let (body, headers) = send_gemini_response(gemini_req).await?;
 
-        let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| SdkError::Network {
-            message: format!("failed to parse Gemini response: {e}"),
-        })?;
+        let api_resp: ApiResponse = serde_json::from_str(&body)
+            .map_err(|e| SdkError::network(format!("failed to parse Gemini response: {e}"), e))?;
 
         let candidate = api_resp
             .candidates

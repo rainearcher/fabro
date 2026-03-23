@@ -755,8 +755,8 @@ match result {
             println!("HTTP {code}");
         }
     }
-    Err(SdkError::RequestTimeout { message }) => println!("Timeout: {message}"),
-    Err(SdkError::Network { message }) => println!("Network: {message}"),
+    Err(SdkError::RequestTimeout { message, .. }) => println!("Timeout: {message}"),
+    Err(SdkError::Network { message, .. }) => println!("Network: {message}"),
     Err(SdkError::Abort { message }) => println!("Cancelled: {message}"),
     Err(e) => println!("Other: {e}"),
     Ok(_) => {}

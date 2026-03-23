@@ -51,6 +51,8 @@ impl ProviderErrorDetail {
     }
 }
 
+use std::sync::Arc;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, thiserror::Error)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SdkError {
@@ -61,16 +63,31 @@ pub enum SdkError {
     },
 
     #[error("Request timed out: {message}")]
-    RequestTimeout { message: String },
+    RequestTimeout {
+        message: String,
+        #[source]
+        #[serde(skip)]
+        source: Option<Arc<dyn std::error::Error + Send + Sync>>,
+    },
 
     #[error("Request aborted: {message}")]
     Abort { message: String },
 
     #[error("Network error: {message}")]
-    Network { message: String },
+    Network {
+        message: String,
+        #[source]
+        #[serde(skip)]
+        source: Option<Arc<dyn std::error::Error + Send + Sync>>,
+    },
 
     #[error("Stream error: {message}")]
-    Stream { message: String },
+    Stream {
+        message: String,
+        #[source]
+        #[serde(skip)]
+        source: Option<Arc<dyn std::error::Error + Send + Sync>>,
+    },
 
     #[error("Invalid tool call: {message}")]
     InvalidToolCall { message: String },
@@ -79,13 +96,58 @@ pub enum SdkError {
     NoObjectGenerated { message: String },
 
     #[error("Configuration error: {message}")]
-    Configuration { message: String },
+    Configuration {
+        message: String,
+        #[source]
+        #[serde(skip)]
+        source: Option<Arc<dyn std::error::Error + Send + Sync>>,
+    },
 
     #[error("Unsupported tool choice: {message}")]
     UnsupportedToolChoice { message: String },
 }
 
 impl SdkError {
+    pub fn network(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::Network {
+            message: message.into(),
+            source: Some(Arc::new(source)),
+        }
+    }
+
+    pub fn request_timeout(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::RequestTimeout {
+            message: message.into(),
+            source: Some(Arc::new(source)),
+        }
+    }
+
+    pub fn stream_error(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::Stream {
+            message: message.into(),
+            source: Some(Arc::new(source)),
+        }
+    }
+
+    pub fn configuration_error(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::Configuration {
+            message: message.into(),
+            source: Some(Arc::new(source)),
+        }
+    }
+
     #[must_use]
     pub const fn retryable(&self) -> bool {
         match self {
@@ -228,6 +290,7 @@ pub fn error_from_status_code(
         408 => {
             return SdkError::RequestTimeout {
                 message: detail.message,
+                source: None,
             }
         }
         413 => ProviderErrorKind::ContextLength,
@@ -285,6 +348,7 @@ pub fn error_from_grpc_status(
         "DEADLINE_EXCEEDED" => {
             return SdkError::RequestTimeout {
                 message: detail.message,
+                source: None,
             }
         }
         _ => ProviderErrorKind::Server,
@@ -299,6 +363,7 @@ pub fn error_from_grpc_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error as _;
 
     #[test]
     fn retryable_classification() {
@@ -333,16 +398,19 @@ mod tests {
 
         let timeout = SdkError::RequestTimeout {
             message: "timed out".into(),
+            source: None,
         };
         assert!(!timeout.retryable());
 
         let network = SdkError::Network {
             message: "connection refused".into(),
+            source: None,
         };
         assert!(network.retryable());
 
         let config = SdkError::Configuration {
             message: "missing provider".into(),
+            source: None,
         };
         assert!(!config.retryable());
     }
@@ -786,6 +854,7 @@ mod tests {
 
         let err = SdkError::Configuration {
             message: "no provider".into(),
+            source: None,
         };
         assert_eq!(err.to_string(), "Configuration error: no provider");
     }
@@ -803,6 +872,7 @@ mod tests {
 
         let err = SdkError::Network {
             message: "refused".into(),
+            source: None,
         };
         assert_eq!(err.status_code(), None);
     }
@@ -820,6 +890,7 @@ mod tests {
     fn provider_name_defaults_to_unknown() {
         let err = SdkError::Network {
             message: "refused".into(),
+            source: None,
         };
         assert_eq!(err.provider_name(), "unknown");
     }
@@ -850,17 +921,20 @@ mod tests {
     #[test]
     fn failover_eligible_transient_non_provider_errors() {
         assert!(SdkError::RequestTimeout {
-            message: "timed out".into()
+            message: "timed out".into(),
+            source: None,
         }
         .failover_eligible());
 
         assert!(SdkError::Network {
-            message: "refused".into()
+            message: "refused".into(),
+            source: None,
         }
         .failover_eligible());
 
         assert!(SdkError::Stream {
-            message: "broken".into()
+            message: "broken".into(),
+            source: None,
         }
         .failover_eligible());
     }
@@ -897,7 +971,8 @@ mod tests {
     #[test]
     fn failover_not_eligible_non_provider_errors() {
         assert!(!SdkError::Configuration {
-            message: "bad".into()
+            message: "bad".into(),
+            source: None,
         }
         .failover_eligible());
 
@@ -1013,21 +1088,24 @@ mod tests {
     fn failure_signature_hint_non_provider_variants() {
         assert_eq!(
             SdkError::RequestTimeout {
-                message: "timed out".into()
+                message: "timed out".into(),
+                source: None,
             }
             .failure_signature_hint(),
             "api_transient|unknown|timeout"
         );
         assert_eq!(
             SdkError::Network {
-                message: "refused".into()
+                message: "refused".into(),
+                source: None,
             }
             .failure_signature_hint(),
             "api_transient|unknown|network"
         );
         assert_eq!(
             SdkError::Stream {
-                message: "broken".into()
+                message: "broken".into(),
+                source: None,
             }
             .failure_signature_hint(),
             "api_transient|unknown|stream"
@@ -1041,7 +1119,8 @@ mod tests {
         );
         assert_eq!(
             SdkError::Configuration {
-                message: "bad".into()
+                message: "bad".into(),
+                source: None,
             }
             .failure_signature_hint(),
             "api_deterministic|unknown|configuration"
@@ -1067,5 +1146,32 @@ mod tests {
             .failure_signature_hint(),
             "api_deterministic|unknown|unsupported_tool_choice"
         );
+    }
+
+    #[test]
+    fn sdk_error_source_chaining() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+        let err = SdkError::network("connection failed", io_err);
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn sdk_error_source_chain_walkable() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+        let err = SdkError::network("connection failed", io_err);
+        // The source chain is walkable — the Arc wrapper preserves the inner error's display
+        let source = err.source().unwrap();
+        assert!(source.to_string().contains("refused"));
+    }
+
+    #[test]
+    fn sdk_error_serde_roundtrip_without_source() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "boom");
+        let err = SdkError::network("network failed", io_err);
+        let json = serde_json::to_string(&err).unwrap();
+        let deserialized: SdkError = serde_json::from_str(&json).unwrap();
+        // source is lost through serde, message is preserved
+        assert!(deserialized.source().is_none());
+        assert_eq!(deserialized.to_string(), "Network error: network failed");
     }
 }

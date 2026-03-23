@@ -43,6 +43,7 @@ fn build_initial_messages(params: &GenerateParams) -> Result<Vec<Message>, SdkEr
         if params.messages.is_some() {
             return Err(SdkError::Configuration {
                 message: "Cannot specify both 'prompt' and 'messages'".into(),
+                source: None,
             });
         }
         messages.push(Message::user(prompt));
@@ -68,7 +69,7 @@ fn build_request(
         top_p: params.top_p,
         max_tokens: params.max_tokens,
         stop_sequences: params.stop_sequences.clone(),
-        reasoning_effort: params.reasoning_effort.clone(),
+        reasoning_effort: params.reasoning_effort,
         speed: params.speed.clone(),
         metadata: params.metadata.clone(),
         provider_options: params.provider_options.clone(),
@@ -165,6 +166,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
                     warn!(timeout_secs = per_step, "Per-step timeout exceeded");
                     SdkError::RequestTimeout {
                         message: format!("Per-step timeout of {per_step}s exceeded"),
+                        source: None,
                     }
                 })?
             } else {
@@ -263,6 +265,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
                 warn!(timeout_secs = total, "Total generation timeout exceeded");
                 SdkError::RequestTimeout {
                     message: format!("Total timeout of {total}s exceeded"),
+                    source: None,
                 }
             })?
     } else {
@@ -699,6 +702,7 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
                             .unwrap_or_else(|_| {
                                 Err(SdkError::RequestTimeout {
                                     message: format!("Per-step timeout of {per_step}s exceeded"),
+                                    source: None,
                                 })
                             })
                     } else {
@@ -829,6 +833,7 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
                 let _ = tx
                     .send(Err(SdkError::RequestTimeout {
                         message: format!("Total timeout of {total}s exceeded"),
+                        source: None,
                     }))
                     .await;
             }
@@ -856,6 +861,7 @@ async fn stream_generate_raw(
             .await
             .map_err(|_| SdkError::RequestTimeout {
                 message: format!("Per-step timeout of {per_step}s exceeded"),
+                source: None,
             })??
     } else {
         client.stream(&request).await?
@@ -893,6 +899,7 @@ async fn stream_generate_raw(
                     Err(_) => Some((
                         Err(SdkError::RequestTimeout {
                             message: format!("Total timeout of {total_copy}s exceeded"),
+                            source: None,
                         }),
                         (stream, true),
                     )),
@@ -1081,6 +1088,7 @@ pub async fn stream_object(
                 Err(e) => {
                     events.push(Err(SdkError::Stream {
                         message: format!("{e}"),
+                        source: None,
                     }));
                 }
             }

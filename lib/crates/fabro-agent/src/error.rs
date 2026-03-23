@@ -45,6 +45,7 @@ mod tests {
     fn agent_error_from_sdk_error() {
         let sdk_err = SdkError::Network {
             message: "connection refused".into(),
+            source: None,
         };
         let agent_err = AgentError::from(sdk_err);
         assert!(matches!(agent_err, AgentError::Llm(_)));
@@ -87,6 +88,7 @@ mod tests {
     fn serde_roundtrip_llm_network() {
         let err = AgentError::Llm(SdkError::Network {
             message: "connection refused".into(),
+            source: None,
         });
         let json = serde_json::to_string(&err).unwrap();
         let deserialized: AgentError = serde_json::from_str(&json).unwrap();
@@ -150,6 +152,7 @@ mod tests {
         let errors: Vec<AgentError> = vec![
             AgentError::Llm(SdkError::Network {
                 message: "refused".into(),
+                source: None,
             }),
             AgentError::SessionClosed,
             AgentError::InvalidState("reason".into()),
@@ -167,6 +170,7 @@ mod tests {
     fn serde_tag_format_llm() {
         let err = AgentError::Llm(SdkError::Network {
             message: "refused".into(),
+            source: None,
         });
         let json = serde_json::to_string(&err).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();

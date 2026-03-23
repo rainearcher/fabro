@@ -1554,6 +1554,7 @@ mod tests {
                 delay_secs: 1.5,
                 error: fabro_llm::error::SdkError::Network {
                     message: "rate limited".to_string(),
+                    source: None,
                 },
             },
         };

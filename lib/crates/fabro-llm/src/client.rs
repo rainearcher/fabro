@@ -154,6 +154,7 @@ impl Client {
             .or(self.default_provider.as_deref())
             .ok_or_else(|| SdkError::Configuration {
                 message: "No provider specified and no default provider set".into(),
+                source: None,
             })?;
 
         self.providers
@@ -161,6 +162,7 @@ impl Client {
             .cloned()
             .ok_or_else(|| SdkError::Configuration {
                 message: format!("Provider '{provider_name}' not registered"),
+                source: None,
             })
     }
 

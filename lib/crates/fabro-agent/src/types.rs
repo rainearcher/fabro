@@ -671,6 +671,7 @@ mod tests {
         let event = AgentEvent::Error {
             error: crate::error::AgentError::Llm(fabro_llm::error::SdkError::Network {
                 message: "refused".into(),
+                source: None,
             }),
         };
         let json = serde_json::to_string(&event).unwrap();

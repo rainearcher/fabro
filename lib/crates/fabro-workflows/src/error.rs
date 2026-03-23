@@ -683,6 +683,7 @@ mod tests {
     fn llm_error_display() {
         let sdk_err = SdkError::Network {
             message: "connection refused".into(),
+            source: None,
         };
         let err = FabroError::Llm(sdk_err);
         assert_eq!(
@@ -695,11 +696,13 @@ mod tests {
     fn llm_error_retryable_delegates_to_sdk() {
         let retryable = FabroError::Llm(SdkError::Network {
             message: "timeout".into(),
+            source: None,
         });
         assert!(retryable.is_retryable());
 
         let non_retryable = FabroError::Llm(SdkError::Configuration {
             message: "bad config".into(),
+            source: None,
         });
         assert!(!non_retryable.is_retryable());
     }
@@ -708,6 +711,7 @@ mod tests {
     fn llm_error_from_sdk_error() {
         let sdk_err = SdkError::Stream {
             message: "broken pipe".into(),
+            source: None,
         };
         let err = FabroError::from(sdk_err);
         assert!(matches!(err, FabroError::Llm(_)));
@@ -794,6 +798,7 @@ mod tests {
     fn failure_class_llm_timeout() {
         let err = FabroError::Llm(SdkError::RequestTimeout {
             message: "timed out".into(),
+            source: None,
         });
         assert_eq!(err.failure_class(), FailureClass::TransientInfra);
     }
@@ -849,6 +854,7 @@ mod tests {
     fn classify_sdk_request_timeout() {
         let err = SdkError::RequestTimeout {
             message: "timed out".into(),
+            source: None,
         };
         assert_eq!(classify_sdk_error(&err), FailureClass::TransientInfra);
     }
@@ -1546,6 +1552,7 @@ mod tests {
     fn to_fail_outcome_includes_error_message_as_reason() {
         let err = FabroError::Llm(SdkError::Network {
             message: "connection refused".into(),
+            source: None,
         });
         let outcome = err.to_fail_outcome();
         assert!(outcome
@@ -1558,6 +1565,7 @@ mod tests {
     fn to_fail_outcome_no_context_updates() {
         let err = FabroError::Llm(SdkError::Network {
             message: "refused".into(),
+            source: None,
         });
         let outcome = err.to_fail_outcome();
         assert!(outcome.context_updates.is_empty());
@@ -1600,6 +1608,7 @@ mod tests {
             FabroError::handler("handler err"),
             FabroError::Llm(SdkError::Network {
                 message: "refused".into(),
+                source: None,
             }),
             FabroError::Checkpoint("cp err".into()),
             FabroError::Stylesheet("style err".into()),

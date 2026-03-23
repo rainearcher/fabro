@@ -770,6 +770,7 @@ impl Session {
                 None => {
                     return Err(self.emit_llm_error(SdkError::Stream {
                         message: "Stream ended without a Finish event (after retries)".into(),
+                        source: None,
                     }))
                 }
             };
@@ -955,7 +956,7 @@ impl Session {
                     .and_then(fabro_model::Model::max_output)
             }),
             stop_sequences: None,
-            reasoning_effort: self.config.reasoning_effort.clone(),
+            reasoning_effort: self.config.reasoning_effort,
             speed: self.config.speed.clone(),
             metadata: None,
             provider_options: None,
@@ -1038,6 +1039,7 @@ mod tests {
         async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
             Err(SdkError::Configuration {
                 message: "ScriptedStreamProvider does not implement complete()".into(),
+                source: None,
             })
         }
 
@@ -2032,6 +2034,7 @@ mod tests {
             partial_text: "partial".into(),
             error: SdkError::Stream {
                 message: "connection reset".into(),
+                source: None,
             },
         });
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
@@ -2293,6 +2296,7 @@ mod tests {
             async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
                 Err(SdkError::Stream {
                     message: "summarization failed".into(),
+                    source: None,
                 })
             }
 

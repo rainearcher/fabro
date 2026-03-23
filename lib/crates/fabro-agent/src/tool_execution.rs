@@ -389,6 +389,7 @@ mod tests {
         ToolCall {
             id: id.to_string(),
             name: name.to_string(),
+            tool_type: "function".to_string(),
             arguments: args,
             raw_arguments: None,
             provider_metadata: None,

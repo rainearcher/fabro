@@ -107,6 +107,7 @@ impl Adapter {
         }
         last_response.ok_or_else(|| SdkError::Network {
             message: "Stream ended without a finish event".into(),
+            source: None,
         })
     }
 }
@@ -954,9 +955,8 @@ impl ProviderAdapter for Adapter {
         }
         let (body, headers) = send_and_read_response(req, "openai", "type").await?;
 
-        let api_resp: ApiResponse = serde_json::from_str(&body).map_err(|e| SdkError::Network {
-            message: format!("failed to parse OpenAI response: {e}"),
-        })?;
+        let api_resp: ApiResponse = serde_json::from_str(&body)
+            .map_err(|e| SdkError::network(format!("failed to parse OpenAI response: {e}"), e))?;
 
         let (content_parts, has_tool_calls) = parse_output(&api_resp.output);
         let finish_reason = map_finish_reason(api_resp.status.as_deref(), has_tool_calls);
@@ -1009,16 +1009,15 @@ impl ProviderAdapter for Adapter {
             .json(&request_body)
             .send()
             .await
-            .map_err(|e| SdkError::Network {
-                message: e.to_string(),
-            })?;
+            .map_err(|e| SdkError::network(e.to_string(), e))?;
 
         let status = http_resp.status();
         if !status.is_success() {
             let retry_after = parse_retry_after(http_resp.headers());
-            let body = http_resp.text().await.map_err(|e| SdkError::Network {
-                message: e.to_string(),
-            })?;
+            let body = http_resp
+                .text()
+                .await
+                .map_err(|e| SdkError::network(e.to_string(), e))?;
             let (msg, code, raw) = parse_error_body(&body, "type");
             return Err(crate::error::error_from_status_code(
                 status.as_u16(),
