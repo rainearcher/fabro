@@ -27,7 +27,7 @@ Each node type has its own rules for which statuses it can return:
 |---|---|---|
 | **Command** | `success`, `fail` | `success` when exit code is 0; `fail` otherwise |
 | **Agent / Prompt** | `success`, `fail`, `partial_success`, `retry`, `skipped` | Defaults to `success`. The LLM can set any status via a [routing directive](/agents/outputs#routing-directives) JSON object in its response. Backend errors produce `retry` (if retryable) or `fail`. |
-| **Parallel** | `success`, `partial_success`, `fail` | Depends on the `join_policy`. `wait_all`: `success` if no failures, `partial_success` if some branches failed. `first_success` / `k_of_n` / `quorum`: `success` if threshold met, else `fail`. |
+| **Parallel** | `success`, `partial_success`, `fail` | Depends on the `join_policy`. `wait_all`: `success` if no failures, `partial_success` if some branches failed. `first_success`: `success` if threshold met, else `fail`. |
 | **Human** | `success` | Always succeeds — the user's selection becomes a routing signal via `preferred_label` |
 | **Conditional** | `success` | Always succeeds — routing is handled by the engine's edge selection |
 | **Start / Exit / Wait** | `success` | Always succeed |

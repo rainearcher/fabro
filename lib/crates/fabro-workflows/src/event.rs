@@ -96,7 +96,6 @@ pub enum WorkflowRunEvent {
     ParallelStarted {
         branch_count: usize,
         join_policy: String,
-        error_policy: String,
     },
     ParallelBranchStarted {
         branch: String,
@@ -195,11 +194,6 @@ pub enum WorkflowRunEvent {
     Agent {
         stage: String,
         event: AgentEvent,
-    },
-    ParallelEarlyTermination {
-        reason: String,
-        completed_count: usize,
-        pending_count: usize,
     },
     SubgraphStarted {
         node_id: String,
@@ -457,12 +451,8 @@ impl WorkflowRunEvent {
             Self::ParallelStarted {
                 branch_count,
                 join_policy,
-                error_policy,
             } => {
-                debug!(
-                    branch_count,
-                    join_policy, error_policy, "Parallel execution started"
-                );
+                debug!(branch_count, join_policy, "Parallel execution started");
             }
             Self::ParallelBranchStarted { branch, index } => {
                 debug!(branch, index, "Parallel branch started");
@@ -570,16 +560,6 @@ impl WorkflowRunEvent {
                 working_directory, ..
             } => {
                 info!(working_directory, "Sandbox initialized");
-            }
-            Self::ParallelEarlyTermination {
-                reason,
-                completed_count,
-                pending_count,
-            } => {
-                warn!(
-                    reason,
-                    completed_count, pending_count, "Parallel early termination"
-                );
             }
             Self::SubgraphStarted {
                 node_id,
@@ -1421,15 +1401,13 @@ mod tests {
         let event = WorkflowRunEvent::ParallelStarted {
             branch_count: 3,
             join_policy: "wait_all".to_string(),
-            error_policy: "continue".to_string(),
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"join_policy\":\"wait_all\""));
-        assert!(json.contains("\"error_policy\":\"continue\""));
 
         let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
         assert!(
-            matches!(deserialized, WorkflowRunEvent::ParallelStarted { join_policy, error_policy, .. } if join_policy == "wait_all" && error_policy == "continue")
+            matches!(deserialized, WorkflowRunEvent::ParallelStarted { join_policy, .. } if join_policy == "wait_all")
         );
     }
 
@@ -1586,28 +1564,6 @@ mod tests {
 
         let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
         assert!(matches!(deserialized, WorkflowRunEvent::Agent { stage, .. } if stage == "code"));
-    }
-
-    #[test]
-    fn parallel_early_termination_event_serialization() {
-        let event = WorkflowRunEvent::ParallelEarlyTermination {
-            reason: "fail_fast_branch_failed".to_string(),
-            completed_count: 2,
-            pending_count: 3,
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("ParallelEarlyTermination"));
-        assert!(json.contains("\"completed_count\":2"));
-        assert!(json.contains("\"pending_count\":3"));
-
-        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
-        assert!(matches!(
-            deserialized,
-            WorkflowRunEvent::ParallelEarlyTermination {
-                completed_count: 2,
-                ..
-            }
-        ));
     }
 
     #[test]

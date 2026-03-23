@@ -172,11 +172,10 @@ WorkflowRunEvent::MyNewEvent { node_id, duration_ms, .. } => {
 
 | Event | JSONL fields |
 |---|---|
-| `ParallelStarted` | `branch_count`, `join_policy`, `error_policy` |
+| `ParallelStarted` | `branch_count`, `join_policy` |
 | `ParallelBranchStarted` | `node_id`, `node_label`, `branch_index` |
 | `ParallelBranchCompleted` | `node_id`, `node_label`, `branch_index`, `duration_ms`, `status` |
 | `ParallelCompleted` | `duration_ms`, `success_count`, `failure_count` |
-| `ParallelEarlyTermination` | `reason`, `completed_count`, `pending_count` |
 
 ### Graph navigation
 

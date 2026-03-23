@@ -75,7 +75,7 @@ Events fall into several categories:
 
 | Event | Key fields | Description |
 |---|---|---|
-| `ParallelStarted` | `branch_count`, `join_policy`, `error_policy` | Fan-out begins |
+| `ParallelStarted` | `branch_count`, `join_policy` | Fan-out begins |
 | `ParallelBranchStarted` | `branch`, `index` | Individual branch begins |
 | `ParallelBranchCompleted` | `branch`, `duration_ms`, `status` | Branch finishes |
 | `ParallelCompleted` | `duration_ms`, `success_count`, `failure_count` | All branches done |

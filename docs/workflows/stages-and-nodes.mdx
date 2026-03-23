@@ -158,7 +158,7 @@ Conditions support `=`, `!=`, `&&`, and context variable lookups (e.g. `context.
 Fans out to execute multiple branches concurrently. Each branch gets its own isolated context.
 
 ```dot
-fork [label="Fan Out", shape=component, join_policy="wait_all", error_policy="continue"]
+fork [label="Fan Out", shape=component, join_policy="wait_all"]
 
 fork -> security
 fork -> architecture
@@ -168,7 +168,6 @@ fork -> quality
 | Attribute | Description |
 |---|---|
 | `join_policy` | When the merge can proceed (see table below) |
-| `error_policy` | How branch failures are handled (see table below) |
 | `max_parallel` | Maximum concurrent branches (default: 4) |
 
 **Join policies:**
@@ -177,16 +176,6 @@ fork -> quality
 |---|---|
 | `wait_all` | Wait for every branch to finish (default) |
 | `first_success` | Proceed as soon as one branch succeeds |
-| `k_of_n(N)` | Proceed after N branches succeed (e.g. `k_of_n(2)`) |
-| `quorum(F)` | Proceed after a fraction of branches succeed (e.g. `quorum(0.5)`) |
-
-**Error policies:**
-
-| Policy | Behavior |
-|---|---|
-| `continue` | Run all branches even if some fail, then evaluate the join policy (default) |
-| `fail_fast` | Cancel remaining branches as soon as one fails |
-| `ignore` | Treat all branch failures as successes |
 
 ### Merge (fan-in)
 

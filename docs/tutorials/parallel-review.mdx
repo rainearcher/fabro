@@ -19,7 +19,7 @@ digraph Parallel {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    fork [label="Fork Analysis", shape=component, join_policy="wait_all", error_policy="continue"]
+    fork [label="Fork Analysis", shape=component, join_policy="wait_all"]
 
     security     [label="Security Audit", prompt="Examine the codebase for security concerns: hardcoded secrets, injection risks, unsafe dependencies. List findings as bullet points.", shape=tab, reasoning_effort="low"]
     architecture [label="Architecture Review", prompt="Assess the codebase architecture: separation of concerns, dependency structure, modularity. List findings as bullet points.", shape=tab, reasoning_effort="low"]
@@ -48,7 +48,7 @@ fabro run files-internal/demo/06-parallel.fabro
 The `fork` node has `shape=component`, making it a **parallel fan-out node**. Every outgoing edge becomes a concurrent branch:
 
 ```dot
-fork [label="Fork Analysis", shape=component, join_policy="wait_all", error_policy="continue"]
+fork [label="Fork Analysis", shape=component, join_policy="wait_all"]
 
 fork -> security
 fork -> architecture
@@ -65,20 +65,6 @@ The `join_policy` controls when execution can proceed past the merge:
 |---|---|
 | `wait_all` | Wait for every branch to finish (default) |
 | `first_success` | Proceed as soon as one branch succeeds |
-| `k_of_n(N)` | Proceed after N branches succeed |
-| `quorum(0.5)` | Proceed after a fraction of branches succeed |
-
-### Error policies
-
-The `error_policy` controls what happens when a branch fails:
-
-| Policy | Behavior |
-|---|---|
-| `continue` | Run all branches even if some fail (default) |
-| `fail_fast` | Cancel remaining branches as soon as one fails |
-| `ignore` | Treat all branch failures as successes |
-
-This workflow uses `error_policy="continue"` so that a failure in one review perspective doesn't cancel the others.
 
 ## Fan-in with the merge node
 
@@ -109,7 +95,6 @@ This is useful when branches are resource-intensive (e.g., each running a full a
 - **Fan-out nodes** (`shape=component`) spawn concurrent branches
 - **Merge nodes** (`shape=tripleoctagon`) collect branch results
 - **Join policies** control when execution can proceed past the merge
-- **Error policies** control how branch failures are handled
 - Each branch gets an isolated copy of the context
 
 ## Next

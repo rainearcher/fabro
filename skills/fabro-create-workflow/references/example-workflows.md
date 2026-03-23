@@ -122,7 +122,7 @@ digraph Parallel {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    fork [label="Fork Analysis", shape=component, join_policy="wait_all", error_policy="continue"]
+    fork [label="Fork Analysis", shape=component, join_policy="wait_all"]
 
     security     [label="Security Audit", prompt="Examine the codebase for security concerns: hardcoded secrets, injection risks, unsafe dependencies. List findings as bullet points.", shape=tab, reasoning_effort="low"]
     architecture [label="Architecture Review", prompt="Assess the codebase architecture: separation of concerns, dependency structure, modularity. List findings as bullet points.", shape=tab, reasoning_effort="low"]
@@ -190,7 +190,7 @@ digraph Ensemble {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    fork [label="Fan Out", shape=component, join_policy="wait_all", error_policy="continue"]
+    fork [label="Fan Out", shape=component, join_policy="wait_all"]
 
     opus   [label="Opus",   prompt="Analyze the goal. Provide your independent assessment and recommendations. Be thorough.", shape=tab]
     gemini [label="Gemini", prompt="Analyze the goal. Provide your independent assessment and recommendations. Be thorough.", shape=tab]

@@ -96,7 +96,7 @@ Route execution based on conditions. Must have multiple outgoing edges with `con
 
 ### Parallel Fan-Out (component)
 
-Attributes: `join_policy` (wait_all, first_success, k_of_n(N), quorum(F)), `error_policy` (continue, fail_fast, ignore), `max_parallel` (default: 4).
+Attributes: `join_policy` (wait_all, first_success), `max_parallel` (default: 4).
 
 ### Fan-In / Merge (tripleoctagon)
 

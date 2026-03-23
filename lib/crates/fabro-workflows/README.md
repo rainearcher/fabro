@@ -154,7 +154,7 @@ Nodes with `shape=hexagon` or `type="human"` pause execution for human input. Ou
 
 ### Parallel Execution
 
-Nodes with `shape=component` fan out to branches concurrently. Configurable join policies: `wait_all` (default), `first_success`, `k_of_n(N)`, `quorum(0.5)`. Error policies: `continue`, `fail_fast`, `ignore`.
+Nodes with `shape=component` fan out to branches concurrently. Configurable join policies: `wait_all` (default), `first_success`.
 
 ### Checkpoints and Resume
 

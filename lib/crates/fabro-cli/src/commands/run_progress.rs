@@ -1767,7 +1767,6 @@ mod tests {
         ui.handle_event(&WorkflowRunEvent::ParallelStarted {
             branch_count: 2,
             join_policy: "wait_all".into(),
-            error_policy: "continue".into(),
         });
         assert_eq!(ui.parallel_parent.as_deref(), Some("fork1"));
 
@@ -1828,7 +1827,6 @@ mod tests {
         ui.handle_event(&WorkflowRunEvent::ParallelStarted {
             branch_count: 1,
             join_policy: "wait_all".into(),
-            error_policy: "continue".into(),
         });
         ui.handle_event(&WorkflowRunEvent::ParallelBranchStarted {
             branch: "security".into(),
@@ -1852,7 +1850,6 @@ mod tests {
         ui.handle_event(&WorkflowRunEvent::ParallelStarted {
             branch_count: 1,
             join_policy: "wait_all".into(),
-            error_policy: "continue".into(),
         });
         ui.handle_event(&WorkflowRunEvent::ParallelBranchStarted {
             branch: "risky".into(),
@@ -1947,7 +1944,6 @@ mod tests {
         ui.handle_event(&WorkflowRunEvent::ParallelStarted {
             branch_count: 2,
             join_policy: "wait_all".into(),
-            error_policy: "continue".into(),
         });
         // In Plain mode, active_stages is empty so parallel_parent is a sentinel
         assert!(ui.parallel_parent.is_some());
@@ -2081,7 +2077,7 @@ mod tests {
         // Set up a parent stage and start parallel
         let parent = r#"{"ts":"2026-01-01T12:00:00Z","event":"StageStarted","node_id":"fork","node_label":"Fork","stage_index":0,"attempt":1,"max_attempts":1}"#;
         ui.handle_json_line(parent);
-        let par = r#"{"ts":"2026-01-01T12:00:01Z","event":"ParallelStarted","branch_count":2,"join_policy":"wait_all","error_policy":"continue"}"#;
+        let par = r#"{"ts":"2026-01-01T12:00:01Z","event":"ParallelStarted","branch_count":2,"join_policy":"wait_all"}"#;
         ui.handle_json_line(par);
         assert!(ui.parallel_parent.is_some());
 

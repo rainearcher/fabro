@@ -27,8 +27,6 @@ pub struct ParallelHandler;
 enum JoinPolicy {
     WaitAll,
     FirstSuccess,
-    KOfN(usize),
-    Quorum(f64),
 }
 
 impl std::fmt::Display for JoinPolicy {
@@ -36,8 +34,6 @@ impl std::fmt::Display for JoinPolicy {
         match self {
             Self::WaitAll => write!(f, "wait_all"),
             Self::FirstSuccess => write!(f, "first_success"),
-            Self::KOfN(k) => write!(f, "k_of_n({k})"),
-            Self::Quorum(frac) => write!(f, "quorum({frac})"),
         }
     }
 }
@@ -46,49 +42,7 @@ fn parse_join_policy(raw: &str) -> JoinPolicy {
     if raw == "first_success" {
         return JoinPolicy::FirstSuccess;
     }
-    if let Some(inner) = raw
-        .strip_prefix("k_of_n(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
-        if let Ok(k) = inner.trim().parse::<usize>() {
-            return JoinPolicy::KOfN(k);
-        }
-    }
-    if let Some(inner) = raw
-        .strip_prefix("quorum(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
-        if let Ok(frac) = inner.trim().parse::<f64>() {
-            return JoinPolicy::Quorum(frac);
-        }
-    }
     JoinPolicy::WaitAll
-}
-
-/// Parse error policy from node attributes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ErrorPolicy {
-    Continue,
-    FailFast,
-    Ignore,
-}
-
-impl std::fmt::Display for ErrorPolicy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Continue => write!(f, "continue"),
-            Self::FailFast => write!(f, "fail_fast"),
-            Self::Ignore => write!(f, "ignore"),
-        }
-    }
-}
-
-fn parse_error_policy(raw: &str) -> ErrorPolicy {
-    match raw {
-        "fail_fast" => ErrorPolicy::FailFast,
-        "ignore" => ErrorPolicy::Ignore,
-        _ => ErrorPolicy::Continue,
-    }
 }
 
 struct BranchResult {
@@ -182,17 +136,10 @@ impl Handler for ParallelHandler {
                 .and_then(|v| v.as_str())
                 .unwrap_or("wait_all"),
         );
-        let error_policy = parse_error_policy(
-            node.attrs
-                .get("error_policy")
-                .and_then(|v| v.as_str())
-                .unwrap_or("continue"),
-        );
 
         services.emitter.emit(&WorkflowRunEvent::ParallelStarted {
             branch_count: branches.len(),
             join_policy: join_policy.to_string(),
-            error_policy: error_policy.to_string(),
         });
         {
             let mut hook_ctx = HookContext::new(
@@ -436,65 +383,27 @@ impl Handler for ParallelHandler {
         }
 
         // Collect results
-        let total_branches = handles.len();
         let mut results: Vec<BranchResult> = Vec::new();
-        for (handle_index, handle) in handles.into_iter().enumerate() {
+        for handle in handles {
             match handle.await {
                 Ok(Ok(result)) => {
-                    if error_policy == ErrorPolicy::FailFast
-                        && result.outcome.status == StageStatus::Fail
-                    {
-                        results.push(result);
-                        services
-                            .emitter
-                            .emit(&WorkflowRunEvent::ParallelEarlyTermination {
-                                reason: "fail_fast_branch_failed".to_string(),
-                                completed_count: results.len(),
-                                pending_count: total_branches - handle_index - 1,
-                            });
-                        break;
-                    }
                     results.push(result);
                 }
                 Ok(Err(e)) => {
-                    let result = BranchResult {
+                    results.push(BranchResult {
                         id: String::new(),
                         outcome: e.to_fail_outcome(),
                         head_sha: None,
                         worktree_path: None,
-                    };
-                    if error_policy == ErrorPolicy::FailFast {
-                        results.push(result);
-                        services
-                            .emitter
-                            .emit(&WorkflowRunEvent::ParallelEarlyTermination {
-                                reason: "fail_fast_handler_error".to_string(),
-                                completed_count: results.len(),
-                                pending_count: total_branches - handle_index - 1,
-                            });
-                        break;
-                    }
-                    results.push(result);
+                    });
                 }
                 Err(join_err) => {
-                    let result = BranchResult {
+                    results.push(BranchResult {
                         id: String::new(),
                         outcome: Outcome::fail_classify(format!("task join error: {join_err}")),
                         head_sha: None,
                         worktree_path: None,
-                    };
-                    if error_policy == ErrorPolicy::FailFast {
-                        results.push(result);
-                        services
-                            .emitter
-                            .emit(&WorkflowRunEvent::ParallelEarlyTermination {
-                                reason: "fail_fast_join_error".to_string(),
-                                completed_count: results.len(),
-                                pending_count: total_branches - handle_index - 1,
-                            });
-                        break;
-                    }
-                    results.push(result);
+                    });
                 }
             }
         }
@@ -579,7 +488,7 @@ impl Handler for ParallelHandler {
         // Evaluate join policy
         let status = match join_policy {
             JoinPolicy::WaitAll => {
-                if fail_count == 0 || error_policy == ErrorPolicy::Ignore {
+                if fail_count == 0 {
                     StageStatus::Success
                 } else {
                     StageStatus::PartialSuccess
@@ -587,23 +496,6 @@ impl Handler for ParallelHandler {
             }
             JoinPolicy::FirstSuccess => {
                 if success_count > 0 {
-                    StageStatus::Success
-                } else {
-                    StageStatus::Fail
-                }
-            }
-            JoinPolicy::KOfN(k) => {
-                if success_count >= k {
-                    StageStatus::Success
-                } else {
-                    StageStatus::Fail
-                }
-            }
-            JoinPolicy::Quorum(fraction) => {
-                let total_f64 = total as f64;
-                let threshold_f64 = (fraction * total_f64).ceil();
-                let threshold = threshold_f64 as usize;
-                if success_count >= threshold {
                     StageStatus::Success
                 } else {
                     StageStatus::Fail
@@ -773,53 +665,10 @@ mod tests {
         assert_eq!(outcome.status, StageStatus::Success);
     }
 
-    #[tokio::test]
-    async fn parallel_handler_k_of_n_policy() {
-        let services = make_services();
-        let mut node = Node::new("par");
-        node.attrs.insert(
-            "join_policy".to_string(),
-            AttrValue::String("k_of_n(2)".to_string()),
-        );
-        let context = Context::new();
-        let mut graph = Graph::new("test");
-        graph.nodes.insert("par".to_string(), node.clone());
-        graph
-            .nodes
-            .insert("branch_a".to_string(), Node::new("branch_a"));
-        graph
-            .nodes
-            .insert("branch_b".to_string(), Node::new("branch_b"));
-        graph
-            .nodes
-            .insert("branch_c".to_string(), Node::new("branch_c"));
-        graph.edges.push(Edge::new("par", "branch_a"));
-        graph.edges.push(Edge::new("par", "branch_b"));
-        graph.edges.push(Edge::new("par", "branch_c"));
-
-        let run_dir = Path::new("/tmp/test");
-        let outcome = ParallelHandler
-            .execute(&node, &context, &graph, run_dir, &services)
-            .await
-            .unwrap();
-
-        // All 3 succeed (default StartHandler returns success), need 2
-        assert_eq!(outcome.status, StageStatus::Success);
-    }
-
     #[test]
     fn join_policy_display() {
         assert_eq!(JoinPolicy::WaitAll.to_string(), "wait_all");
         assert_eq!(JoinPolicy::FirstSuccess.to_string(), "first_success");
-        assert_eq!(JoinPolicy::KOfN(3).to_string(), "k_of_n(3)");
-        assert_eq!(JoinPolicy::Quorum(0.5).to_string(), "quorum(0.5)");
-    }
-
-    #[test]
-    fn error_policy_display() {
-        assert_eq!(ErrorPolicy::Continue.to_string(), "continue");
-        assert_eq!(ErrorPolicy::FailFast.to_string(), "fail_fast");
-        assert_eq!(ErrorPolicy::Ignore.to_string(), "ignore");
     }
 
     #[test]
@@ -829,24 +678,8 @@ mod tests {
             parse_join_policy("first_success"),
             JoinPolicy::FirstSuccess
         ));
-        assert!(matches!(
-            parse_join_policy("k_of_n(3)"),
-            JoinPolicy::KOfN(3)
-        ));
-        assert!(matches!(
-            parse_join_policy("quorum(0.5)"),
-            JoinPolicy::Quorum(_)
-        ));
         // Invalid falls back to WaitAll
         assert!(matches!(parse_join_policy("invalid"), JoinPolicy::WaitAll));
-    }
-
-    #[test]
-    fn parse_error_policy_variants() {
-        assert_eq!(parse_error_policy("continue"), ErrorPolicy::Continue);
-        assert_eq!(parse_error_policy("fail_fast"), ErrorPolicy::FailFast);
-        assert_eq!(parse_error_policy("ignore"), ErrorPolicy::Ignore);
-        assert_eq!(parse_error_policy("unknown"), ErrorPolicy::Continue);
     }
 
     #[tokio::test]
