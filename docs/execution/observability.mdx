@@ -45,7 +45,7 @@ Events fall into several categories:
 | `Agent.Error` | `stage`, `error` | Agent-level error |
 | `Agent.LoopDetected` | `stage` | Repeated tool call pattern detected |
 | `Agent.SteeringInjected` | `stage`, `text` | Human steering message injected |
-| `Agent.ContextWindowWarning` | `stage`, `estimated_tokens`, `context_window_size`, `usage_percent` | Token usage exceeds context window threshold |
+| `Agent.Warning` | `stage`, `kind`, `message`, `details` | Non-fatal warning (e.g. context window usage) |
 | `Agent.CompactionStarted` | `stage`, `estimated_tokens`, `context_window_size` | Context compaction triggered |
 | `Agent.CompactionCompleted` | `stage`, `original_turn_count`, `preserved_turn_count`, `summary_token_estimate`, `tracked_file_count` | Context compaction finished |
 | `Agent.LlmRetry` | `stage`, `provider`, `model`, `attempt`, `delay_secs` | LLM API call retried |

@@ -1608,13 +1608,9 @@ mod tests {
 
         let mut found_warning = false;
         while let Ok(event) = rx.try_recv() {
-            if let AgentEvent::ContextWindowWarning {
-                context_window_size,
-                ..
-            } = &event.event
-            {
+            if let AgentEvent::Warning { details, .. } = &event.event {
                 found_warning = true;
-                assert_eq!(*context_window_size, 100);
+                assert_eq!(details["context_window_size"], 100);
             }
         }
         assert!(found_warning);
@@ -1660,7 +1656,7 @@ mod tests {
 
         let mut found_warning = false;
         while let Ok(event) = rx.try_recv() {
-            if matches!(event.event, AgentEvent::ContextWindowWarning { .. }) {
+            if matches!(event.event, AgentEvent::Warning { .. }) {
                 found_warning = true;
             }
         }

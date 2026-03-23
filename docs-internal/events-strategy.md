@@ -253,7 +253,7 @@ All agent events include `node_id` and `node_label`.
 | `Agent.ToolCallOutputDelta` | `delta` |
 | `Agent.ToolCallCompleted` | `tool_name`, `tool_call_id`, `output`, `is_error` |
 | `Agent.Error` | `error` |
-| `Agent.ContextWindowWarning` | `estimated_tokens`, `context_window_size`, `usage_percent` |
+| `Agent.Warning` | `kind`, `message`, `details` |
 | `Agent.LoopDetected` | _(none)_ |
 | `Agent.TurnLimitReached` | `max_turns` |
 | `Agent.SkillExpanded` | `skill_name` |

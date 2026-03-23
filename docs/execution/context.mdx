@@ -240,6 +240,6 @@ Compaction emits three events to the [event stream](/execution/observability#eve
 
 | Event | When | Key fields |
 |---|---|---|
-| `Agent.ContextWindowWarning` | Token estimate exceeds 80% of context window | `estimated_tokens`, `context_window_size`, `usage_percent` |
+| `Agent.Warning` (kind: `context_window`) | Token estimate exceeds 80% of context window | `kind`, `message`, `details` (contains `estimated_tokens`, `context_window_size`, `usage_percent`) |
 | `Agent.CompactionStarted` | Compaction begins | `estimated_tokens`, `context_window_size` |
 | `Agent.CompactionCompleted` | Summary generated and history replaced | `original_turn_count`, `preserved_turn_count`, `summary_token_estimate`, `tracked_file_count` |

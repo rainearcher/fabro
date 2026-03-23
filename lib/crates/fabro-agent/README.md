@@ -227,7 +227,7 @@ profile.register_subagent_tools(manager, factory, 0);
 ## Safety Features
 
 - **Loop detection** -- Detects repeating tool call patterns (period 1, 2, or 3) and injects a steering warning
-- **Context window monitoring** -- Emits `ContextWindowWarning` events when estimated usage exceeds 80%
+- **Context window monitoring** -- Emits `Warning` events (kind `"context_window"`) when estimated usage exceeds 80%
 - **Tool argument validation** -- Validates arguments against JSON Schema before execution
 - **Tool output truncation** -- Per-tool character and line limits with head/tail or tail-only truncation modes
 - **Environment variable filtering** -- `LocalSandbox` strips secrets (`*_API_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`, `*_CREDENTIAL`) from subprocess environments

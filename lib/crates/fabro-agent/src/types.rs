@@ -130,10 +130,10 @@ pub enum AgentEvent {
     Error {
         error: crate::error::AgentError,
     },
-    ContextWindowWarning {
-        estimated_tokens: usize,
-        context_window_size: usize,
-        usage_percent: usize,
+    Warning {
+        kind: String,
+        message: String,
+        details: serde_json::Value,
     },
     LoopDetected,
     TurnLimitReached {
@@ -264,17 +264,12 @@ impl AgentEvent {
             Self::Error { error } => {
                 error!(session_id, error = %error, "Agent error");
             }
-            Self::ContextWindowWarning {
-                estimated_tokens,
-                context_window_size,
-                usage_percent,
-            } => {
+            Self::Warning { kind, message, .. } => {
                 warn!(
                     session_id,
-                    estimated_tokens,
-                    context_window_size,
-                    usage_percent,
-                    "Context window usage high"
+                    kind = kind.as_str(),
+                    message = message.as_str(),
+                    "Warning"
                 );
             }
             Self::LoopDetected => {

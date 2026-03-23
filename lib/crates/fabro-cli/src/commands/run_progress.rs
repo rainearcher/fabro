@@ -1380,7 +1380,13 @@ impl ProgressUI {
                 }
                 self.on_tool_call_completed(stage_node_id, tool_call_id, *is_error);
             }
-            AgentEvent::ContextWindowWarning { usage_percent, .. } if self.verbose => {
+            AgentEvent::Warning { kind, details, .. }
+                if kind == "context_window" && self.verbose =>
+            {
+                let usage_percent = details
+                    .get("usage_percent")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 let yellow = Style::new().yellow();
                 self.insert_info_line_for_stage(
                     stage_node_id,
