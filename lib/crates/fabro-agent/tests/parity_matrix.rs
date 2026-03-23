@@ -95,6 +95,7 @@ async fn make_session(provider: Provider, model: &str, cwd: &Path) -> Session {
             sub_profile,
             sub_env,
             SessionConfig::default(),
+            None,
         )
     });
     profile.register_subagent_tools(manager, factory, 0);
@@ -104,7 +105,7 @@ async fn make_session(provider: Provider, model: &str, cwd: &Path) -> Session {
         max_turns: 20,
         ..SessionConfig::default()
     };
-    Session::new(client, profile, env, config)
+    Session::new(client, profile, env, config, None)
 }
 
 async fn make_session_with_config(
@@ -117,7 +118,7 @@ async fn make_session_with_config(
     let client = Client::from_env().await.expect("Client::from_env failed");
     let profile: Arc<dyn AgentProfile> = Arc::from(build_profile(provider, model, &client));
     let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
-    Session::new(client, profile, env, config)
+    Session::new(client, profile, env, config, None)
 }
 
 macro_rules! provider_test {

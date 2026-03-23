@@ -163,7 +163,13 @@ pub async fn run_retro_agent(
         ..SessionConfig::default()
     };
 
-    let mut session = Session::new(llm_client.clone(), profile, Arc::clone(sandbox), config);
+    let mut session = Session::new(
+        llm_client.clone(),
+        profile,
+        Arc::clone(sandbox),
+        config,
+        None,
+    );
 
     // Set up event writer before initialize (which emits SessionStarted)
     let retro_dir = run_dir.join("retro");

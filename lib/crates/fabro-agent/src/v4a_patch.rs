@@ -1452,7 +1452,8 @@ def farewell(name):
         let provider = Arc::new(MockLlmProvider::new(responses));
         let client = make_client(provider).await;
         let profile = Arc::new(TestProfile::with_tools(registry));
-        let mut session = Session::new(client, profile, env.clone(), SessionConfig::default());
+        let mut session =
+            Session::new(client, profile, env.clone(), SessionConfig::default(), None);
         session.initialize().await;
         session
             .process_input("Update the greeting functions")

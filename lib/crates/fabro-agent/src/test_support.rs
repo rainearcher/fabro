@@ -196,7 +196,7 @@ pub async fn make_session(responses: Vec<Response>) -> Session {
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::new());
     let env = Arc::new(MockSandbox::default());
-    Session::new(client, profile, env, SessionConfig::default())
+    Session::new(client, profile, env, SessionConfig::default(), None)
 }
 
 pub async fn make_session_with_tools(responses: Vec<Response>, registry: ToolRegistry) -> Session {
@@ -204,7 +204,7 @@ pub async fn make_session_with_tools(responses: Vec<Response>, registry: ToolReg
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::with_tools(registry));
     let env = Arc::new(MockSandbox::default());
-    Session::new(client, profile, env, SessionConfig::default())
+    Session::new(client, profile, env, SessionConfig::default(), None)
 }
 
 pub async fn make_session_with_config(responses: Vec<Response>, config: SessionConfig) -> Session {
@@ -212,7 +212,7 @@ pub async fn make_session_with_config(responses: Vec<Response>, config: SessionC
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::new());
     let env = Arc::new(MockSandbox::default());
-    Session::new(client, profile, env, config)
+    Session::new(client, profile, env, config, None)
 }
 
 pub async fn make_session_with_tools_and_config(
@@ -224,7 +224,7 @@ pub async fn make_session_with_tools_and_config(
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::with_tools(registry));
     let env = Arc::new(MockSandbox::default());
-    Session::new(client, profile, env, config)
+    Session::new(client, profile, env, config, None)
 }
 
 pub fn tool_call_response(

@@ -139,7 +139,7 @@ let config = SessionConfig {
 };
 
 // 5. Create and initialize the session
-let mut session = Session::new(client, profile, env, config);
+let mut session = Session::new(client, profile, env, config, None);
 session.initialize().await;
 
 // 6. Subscribe to events (for UI rendering)

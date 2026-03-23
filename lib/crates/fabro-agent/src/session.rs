@@ -54,6 +54,7 @@ impl Session {
         provider_profile: Arc<dyn AgentProfile>,
         sandbox: Arc<dyn Sandbox>,
         config: SessionConfig,
+        subagent_manager: Option<Arc<tokio::sync::Mutex<crate::subagent::SubAgentManager>>>,
     ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
@@ -74,19 +75,12 @@ impl Session {
             system_prompt: String::new(),
             file_tracker: FileTracker::default(),
             tool_env: None,
-            subagent_manager: None,
+            subagent_manager,
         }
     }
 
     pub fn set_tool_env(&mut self, env: std::collections::HashMap<String, String>) {
         self.tool_env = Some(env);
-    }
-
-    pub fn set_subagent_manager(
-        &mut self,
-        manager: Arc<tokio::sync::Mutex<crate::subagent::SubAgentManager>>,
-    ) {
-        self.subagent_manager = Some(manager);
     }
 
     /// Initialize session by discovering project docs and capturing environment context.
@@ -1032,10 +1026,23 @@ mod tests {
     }
 
     async fn make_session_with_provider(provider: Arc<dyn ProviderAdapter>) -> Session {
+        make_session_with_provider_and_manager(provider, None).await
+    }
+
+    async fn make_session_with_provider_and_manager(
+        provider: Arc<dyn ProviderAdapter>,
+        subagent_manager: Option<Arc<tokio::sync::Mutex<crate::subagent::SubAgentManager>>>,
+    ) -> Session {
         let client = make_client(provider).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        Session::new(client, profile, env, SessionConfig::default())
+        Session::new(
+            client,
+            profile,
+            env,
+            SessionConfig::default(),
+            subagent_manager,
+        )
     }
 
     // --- Tests ---
@@ -1399,7 +1406,7 @@ mod tests {
             enable_loop_detection: false,
             ..Default::default()
         };
-        let mut session = Session::new(client, profile, env, config);
+        let mut session = Session::new(client, profile, env, config, None);
 
         // Wire the session's cancel_token to our shared one
         session.cancel_token = cancel_token;
@@ -1430,7 +1437,7 @@ mod tests {
         let client = make_client(error_provider).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default());
+        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
 
         let result = session.process_input("Hello").await;
         assert!(result.is_err());
@@ -1509,7 +1516,7 @@ mod tests {
         let client = make_client(provider).await;
         let profile = Arc::new(TestProfile::with_tools(registry));
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default());
+        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
         let mut rx = session.subscribe();
 
         session.process_input("Use echo three times").await.unwrap();
@@ -1560,7 +1567,7 @@ mod tests {
         let registry = ToolRegistry::new();
         let profile = Arc::new(TestProfile::with_context_window(registry, 100));
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default());
+        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
         let mut rx = session.subscribe();
 
         session.process_input(&large_input).await.unwrap();
@@ -1586,7 +1593,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default());
+        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
 
         // Default reasoning_effort is None
         session.set_reasoning_effort(Some(fabro_llm::types::ReasoningEffort::High));
@@ -1612,7 +1619,7 @@ mod tests {
         // Large context window so short input stays well under 80%
         let profile = Arc::new(TestProfile::with_context_window(registry, 200_000));
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default());
+        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
         let mut rx = session.subscribe();
 
         session.process_input("Hi").await.unwrap();
@@ -1745,7 +1752,7 @@ mod tests {
             user_instructions: Some("Always use TDD".into()),
             ..Default::default()
         };
-        let mut session = Session::new(client, profile, env, config);
+        let mut session = Session::new(client, profile, env, config, None);
         session.initialize().await;
         session.process_input("test").await.unwrap();
 
@@ -1769,7 +1776,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default());
+        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
 
         // Intentionally skip initialize(): system prompt remains empty.
         session.process_input("test").await.unwrap();
@@ -2000,7 +2007,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default());
+        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
 
         let result = session.process_input("Hello").await;
         assert!(matches!(
@@ -2178,7 +2185,7 @@ mod tests {
             compaction_preserve_turns: 1,
             ..Default::default()
         };
-        let mut session = Session::new(client, profile, env, config);
+        let mut session = Session::new(client, profile, env, config, None);
         let mut rx = session.subscribe();
 
         session.process_input(&large_input).await.unwrap();
@@ -2220,7 +2227,7 @@ mod tests {
             enable_context_compaction: false,
             ..Default::default()
         };
-        let mut session = Session::new(client, profile, env, config);
+        let mut session = Session::new(client, profile, env, config, None);
         let mut rx = session.subscribe();
 
         session.process_input(&large_input).await.unwrap();
@@ -2304,7 +2311,7 @@ mod tests {
             compaction_preserve_turns: 1,
             ..Default::default()
         };
-        let mut session = Session::new(client, profile, env, config);
+        let mut session = Session::new(client, profile, env, config, None);
         let mut rx = session.subscribe();
 
         // Should not return an error even though compaction fails
@@ -2409,7 +2416,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut session = Session::new(client, profile, env, config);
+        let mut session = Session::new(client, profile, env, config, None);
         let mut rx = session.subscribe();
 
         // First call: tool call executes, files get tracked, no compaction yet
@@ -2502,7 +2509,7 @@ mod tests {
         let client = make_client(provider).await;
         let profile: Arc<dyn crate::agent_profile::AgentProfile> = Arc::new(TestProfile::new());
         let env: Arc<dyn crate::sandbox::Sandbox> = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, config);
+        let mut session = Session::new(client, profile, env, config, None);
 
         // Subscribe to events before initialize
         let mut rx = session.subscribe();
@@ -2650,8 +2657,13 @@ mod tests {
     async fn close_cleans_up_subagents_before_emitting_session_ended() {
         use crate::subagent::SubAgentManager;
 
-        let mut session = make_session(vec![text_response("done")]).await;
         let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
+
+        let provider = Arc::new(ScriptedStreamProvider::new(vec![
+            ScriptedStreamCall::Response(text_response("done")),
+        ]));
+        let mut session =
+            make_session_with_provider_and_manager(provider, Some(manager.clone())).await;
 
         // Wire the manager's event callback to the session's emitter
         manager
@@ -2662,8 +2674,6 @@ mod tests {
         // Spawn a subagent
         let child = make_session(vec![text_response("child done")]).await;
         let agent_id = manager.lock().await.spawn(child, "task".into(), 0).unwrap();
-
-        session.set_subagent_manager(manager.clone());
 
         // Collect events
         let mut rx = session.subscribe();

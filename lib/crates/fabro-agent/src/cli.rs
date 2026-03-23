@@ -466,13 +466,19 @@ pub async fn run_with_args_and_client(
                 tool_hooks: factory_hooks.clone(),
                 ..SessionConfig::default()
             },
+            None,
         )
     });
     profile.register_subagent_tools(manager, factory, 0);
     let profile: Arc<dyn AgentProfile> = Arc::from(profile);
 
-    let mut session = Session::new(client, profile, env, config);
-    session.set_subagent_manager(manager_for_callback.clone());
+    let mut session = Session::new(
+        client,
+        profile,
+        env,
+        config,
+        Some(manager_for_callback.clone()),
+    );
 
     // Wire subagent event callback to parent session's emitter
     manager_for_callback

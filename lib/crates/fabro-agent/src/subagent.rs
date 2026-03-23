@@ -414,7 +414,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let session = Session::new(client, profile, env, SessionConfig::default());
+        let session = Session::new(client, profile, env, SessionConfig::default(), None);
 
         let agent_id = manager.spawn(session, "Do something".into(), 0).unwrap();
         let _ = manager.wait(&agent_id).await.unwrap();
