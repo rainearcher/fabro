@@ -128,22 +128,22 @@ mod tests {
 
     #[test]
     fn inherent_methods_return_correct_values() {
-        let info = Catalog::builtin().get("claude-opus-4-6").unwrap();
-        assert_eq!(info.id(), "claude-opus-4-6");
+        let info = Catalog::builtin().get("claude-opus-4-7").unwrap();
+        assert_eq!(info.id(), "claude-opus-4-7");
         assert_eq!(info.provider(), Provider::Anthropic);
         assert_eq!(info.family(), "claude-4");
-        assert_eq!(info.display_name(), "Claude Opus 4.6");
+        assert_eq!(info.display_name(), "Claude Opus 4.7");
         assert_eq!(info.context_window(), 1_000_000);
         assert_eq!(info.max_output(), Some(128_000));
         assert!(info.supports_tools());
         assert!(info.supports_vision());
         assert!(info.supports_reasoning());
         assert!(info.supports_effort());
-        assert_eq!(info.training(), Some("2025-08-01"));
-        assert_eq!(info.knowledge_cutoff(), Some("May 2025"));
-        assert_eq!(info.input_cost_per_mtok(), Some(15.0));
-        assert_eq!(info.output_cost_per_mtok(), Some(75.0));
-        assert_eq!(info.cache_input_cost_per_mtok(), Some(1.5));
+        assert_eq!(info.training(), Some("2026-01-01"));
+        assert_eq!(info.knowledge_cutoff(), Some("January 2026"));
+        assert_eq!(info.input_cost_per_mtok(), Some(5.0));
+        assert_eq!(info.output_cost_per_mtok(), Some(25.0));
+        assert_eq!(info.cache_input_cost_per_mtok(), Some(0.5));
         assert_eq!(info.estimated_output_tps(), Some(25.0));
         assert!(!info.aliases().is_empty());
         assert!(!info.is_default());
