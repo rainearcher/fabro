@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn builtin_get_by_alias() {
         let m = Catalog::builtin().get("opus").unwrap();
-        assert_eq!(m.id, "claude-opus-4-6");
+        assert_eq!(m.id, "claude-opus-4-7");
     }
 
     #[test]
@@ -472,10 +472,7 @@ mod tests {
             estimated_output_tps: Some(
                 25.0,
             ),
-            aliases: [
-                "opus",
-                "claude-opus",
-            ],
+            aliases: [],
             default: false,
         }
         "#);
@@ -485,13 +482,25 @@ mod tests {
     fn get_model_info_by_alias() {
         assert_eq!(
             Catalog::builtin().get("opus").unwrap().id,
-            "claude-opus-4-6"
+            "claude-opus-4-7"
         );
         assert_eq!(
             Catalog::builtin().get("sonnet").unwrap().id,
             "claude-sonnet-4-6"
         );
         assert_eq!(Catalog::builtin().get("codex").unwrap().id, "gpt-5.3-codex");
+    }
+
+    #[test]
+    fn opus_alias_resolves_to_4_7() {
+        assert_eq!(
+            Catalog::builtin().get("opus").unwrap().id,
+            "claude-opus-4-7"
+        );
+        assert_eq!(
+            Catalog::builtin().get("claude-opus").unwrap().id,
+            "claude-opus-4-7"
+        );
     }
 
     #[test]
@@ -716,6 +725,56 @@ mod tests {
                 "gpt-54",
             ],
             default: true,
+        }
+        "#);
+    }
+
+    #[test]
+    fn claude_opus_4_7_in_catalog() {
+        let m = Catalog::builtin().get("claude-opus-4-7").unwrap();
+        insta::assert_debug_snapshot!(m, @r#"
+        Model {
+            id: "claude-opus-4-7",
+            provider: Anthropic,
+            family: "claude-4",
+            display_name: "Claude Opus 4.7",
+            limits: ModelLimits {
+                context_window: 1000000,
+                max_output: Some(
+                    128000,
+                ),
+            },
+            training: Some(
+                "2026-01-01",
+            ),
+            knowledge_cutoff: Some(
+                "January 2026",
+            ),
+            features: ModelFeatures {
+                tools: true,
+                vision: true,
+                reasoning: true,
+                effort: true,
+            },
+            costs: ModelCosts {
+                input_cost_per_mtok: Some(
+                    5.0,
+                ),
+                output_cost_per_mtok: Some(
+                    25.0,
+                ),
+                cache_input_cost_per_mtok: Some(
+                    0.5,
+                ),
+            },
+            estimated_output_tps: Some(
+                25.0,
+            ),
+            aliases: [
+                "opus",
+                "claude-opus",
+            ],
+            default: false,
         }
         "#);
     }
